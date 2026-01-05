@@ -1,0 +1,11 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+# Specify Node.js version
+[build.environment]
+  NODE_VERSION = "20"
+
+# Use Netlify's Next.js runtime for SSR
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
