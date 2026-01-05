@@ -22,16 +22,18 @@ export function FormProgress({ currentStep, isSamePerson }: FormProgressProps) {
       ];
 
   const getStepStatus = (stepId: string) => {
+    const step = currentStep as string; // Avoid TypeScript narrowing issues
+
     if (isSamePerson) {
-      if (currentStep === 'complete') return 'complete';
+      if (step === 'complete') return 'complete';
       if (stepId === 'complete') return 'upcoming';
       return 'current';
     }
 
-    if (currentStep === 'complete') return 'complete';
-    if (stepId === currentStep) return 'current';
-    if (stepId === 'employer' && currentStep !== 'employer') return 'complete';
-    if (stepId === 'employee' && currentStep === 'complete') return 'complete';
+    if (step === 'complete') return 'complete';
+    if (stepId === step) return 'current';
+    if (stepId === 'employer' && step !== 'employer') return 'complete';
+    if (stepId === 'employee' && step === 'complete') return 'complete';
     return 'upcoming';
   };
 
