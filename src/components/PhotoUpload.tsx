@@ -51,14 +51,45 @@ export function PhotoUpload({ value, onUpload, onValidated, error }: PhotoUpload
     try {
       const result = await onUpload(file);
       if (result) {
-        // TODO: Phase 8 - Call AI validation API
+        // Call AI validation API
         setIsValidating(true);
-        // Simulated validation delay - will be replaced with actual API call
-        setTimeout(() => {
-          setIsValidating(false);
-          // For now, mark as validated (Phase 8 will add real validation)
-          onValidated?.(true, []);
-        }, 1000);
+
+        // Read file as base64 for API
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const base64Image = e.target?.result as string;
+
+          try {
+            const response = await fetch('/api/validate-photo', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: base64Image }),
+            });
+
+            const validation = await response.json();
+
+            setIsValidating(false);
+
+            if (validation.valid) {
+              setValidationErrors([]);
+              onValidated?.(true, []);
+            } else {
+              // Combine errors and suggestions for display
+              const errorMessages = validation.errors.map((err: string, i: number) => {
+                const suggestion = validation.suggestions?.[i];
+                return suggestion ? `${err} - ${suggestion}` : err;
+              });
+              setValidationErrors(errorMessages);
+              onValidated?.(false, errorMessages);
+            }
+          } catch (apiError) {
+            console.error('Photo validation API error:', apiError);
+            setIsValidating(false);
+            setValidationErrors(['Unable to validate photo. Please try again.']);
+            onValidated?.(false, ['Validation service unavailable']);
+          }
+        };
+        reader.readAsDataURL(file);
       } else {
         setUploadError('Failed to upload file');
       }

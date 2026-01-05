@@ -57,15 +57,58 @@ export function PassportUpload({ value, onUpload, onExtracted, error }: Passport
     try {
       const result = await onUpload(file);
       if (result) {
-        // TODO: Phase 8 - Call OCR extraction API
+        // Call OCR extraction API
         setIsExtracting(true);
-        // Simulated extraction delay - will be replaced with actual API call
-        setTimeout(() => {
-          setIsExtracting(false);
-          setExtracted(true);
-          // For now, just mark as extracted (Phase 8 will add real extraction)
-          onExtracted?.({});
-        }, 1500);
+
+        // Read file as base64 for API
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const base64Image = e.target?.result as string;
+
+          try {
+            const response = await fetch('/api/extract-passport', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: base64Image }),
+            });
+
+            const extraction = await response.json();
+
+            setIsExtracting(false);
+
+            if (extraction.success && extraction.data) {
+              setExtracted(true);
+              // Map extracted data to EmployeeFormData format
+              const mappedData = {
+                first_name: extraction.data.first_name,
+                middle_name: extraction.data.middle_name,
+                last_name: extraction.data.family_name,
+                nationality: extraction.data.nationality,
+                passport_no: extraction.data.passport_no,
+                passport_issue_date: extraction.data.passport_issue_date,
+                passport_expiry_date: extraction.data.passport_expiry_date,
+                date_of_birth: extraction.data.date_of_birth,
+                gender: extraction.data.gender,
+                place_of_birth: extraction.data.place_of_birth,
+              };
+              // Remove undefined values
+              const cleanData = Object.fromEntries(
+                Object.entries(mappedData).filter(([, v]) => v !== undefined)
+              );
+              onExtracted?.(cleanData);
+            } else {
+              setExtracted(true);
+              setUploadError(extraction.error || 'Could not extract passport data');
+              onExtracted?.({});
+            }
+          } catch (apiError) {
+            console.error('Passport extraction API error:', apiError);
+            setIsExtracting(false);
+            setUploadError('Unable to extract passport data. Please try again.');
+            onExtracted?.({});
+          }
+        };
+        reader.readAsDataURL(file);
       } else {
         setUploadError('Failed to upload file');
       }
