@@ -9,6 +9,7 @@ import { getAnthropicClient, withTimeout } from './anthropic';
 export interface PassportExtractionResult {
   success: boolean;
   data: {
+    title?: string; // Mr, Mrs, Ms - inferred from gender
     first_name?: string;
     middle_name?: string;
     family_name?: string;
@@ -40,15 +41,17 @@ Look for and extract:
 4. Passport number (usually near top right, 6-9 alphanumeric characters)
 5. Issue date (date of issue)
 6. Expiry date (date of expiry)
-7. Nationality / Citizenship
+7. Nationality / Citizenship (full country name, e.g., "Germany", "India", "United Kingdom")
 8. Date of birth
 9. Gender (Male/Female)
 10. Place of birth
+11. Title (INFER from gender: Male = "Mr", Female = "Ms")
 
 IMPORTANT formatting rules:
 - Convert ALL dates to DD.MM.YYYY format (e.g., 15.03.2025)
 - Convert names from ALL CAPS to Title Case (e.g., JOHN SMITH → John Smith)
 - Keep passport number in original format (usually uppercase)
+- Nationality must be the FULL country name (not code): "DEU" → "Germany", "GBR" → "United Kingdom", "IND" → "India", "USA" → "United States", "PAK" → "Pakistan", "PHL" → "Philippines", etc.
 
 Also check the MRZ (Machine Readable Zone - the two lines of characters at the bottom of the passport):
 - Verify passport number matches
@@ -59,6 +62,7 @@ Respond with a JSON object in exactly this format:
 {
   "success": true,
   "data": {
+    "title": "Mr",
     "first_name": "John",
     "middle_name": "Michael",
     "family_name": "Smith",
@@ -97,18 +101,58 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
   const client = getAnthropicClient();
 
   // Remove data URL prefix if present
-  const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+  const base64Data = imageBase64.replace(/^data:[^;]+;base64,/, '');
   const isPdf = imageBase64.includes('data:application/pdf');
 
-  // Detect media type
+  // ALWAYS detect media type from magic bytes (more reliable than data URL prefix)
   let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg';
-  if (imageBase64.includes('data:image/png')) {
-    mediaType = 'image/png';
-  } else if (imageBase64.includes('data:image/gif')) {
-    mediaType = 'image/gif';
-  } else if (imageBase64.includes('data:image/webp')) {
-    mediaType = 'image/webp';
+  try {
+    // Decode first 16 base64 chars (12 bytes) to check magic bytes
+    const firstBytes = atob(base64Data.substring(0, 16));
+    const bytes = new Uint8Array(firstBytes.length);
+    for (let i = 0; i < firstBytes.length; i++) {
+      bytes[i] = firstBytes.charCodeAt(i);
+    }
+
+    // Check magic bytes
+    // PNG: 89 50 4E 47 (0x89 'P' 'N' 'G')
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+      mediaType = 'image/png';
+    }
+    // GIF: 47 49 46 ('G' 'I' 'F')
+    else if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+      mediaType = 'image/gif';
+    }
+    // WEBP: 52 49 46 46 ... 57 45 42 50 ('RIFF' ... 'WEBP')
+    else if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+             bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+      mediaType = 'image/webp';
+    }
+    // JPEG: FF D8 FF
+    else if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+      mediaType = 'image/jpeg';
+    }
+    // If no magic bytes match, fall back to data URL prefix
+    else if (imageBase64.includes('data:image/png')) {
+      mediaType = 'image/png';
+    } else if (imageBase64.includes('data:image/gif')) {
+      mediaType = 'image/gif';
+    } else if (imageBase64.includes('data:image/webp')) {
+      mediaType = 'image/webp';
+    }
+    // Default remains jpeg
+  } catch {
+    // If magic bytes check fails, fall back to data URL prefix
+    if (imageBase64.includes('data:image/png')) {
+      mediaType = 'image/png';
+    } else if (imageBase64.includes('data:image/gif')) {
+      mediaType = 'image/gif';
+    } else if (imageBase64.includes('data:image/webp')) {
+      mediaType = 'image/webp';
+    }
   }
+
+  console.log('[Passport Extraction] Detected media type:', mediaType);
 
   // For PDFs, we need to handle differently
   if (isPdf) {
@@ -124,7 +168,7 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
   try {
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-3-5-sonnet-20241022', // Sonnet for better accuracy
+        model: 'claude-sonnet-4-20250514', // Sonnet 4 for accuracy
         max_tokens: 2048,
         messages: [
           {

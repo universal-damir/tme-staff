@@ -17,47 +17,39 @@ export interface PhotoValidationResult {
 /**
  * Photo validation prompt based on UAE visa photo requirements
  */
-const PHOTO_VALIDATION_PROMPT = `Analyze this passport/visa photo against official UAE visa photo requirements.
+const PHOTO_VALIDATION_PROMPT = `Analyze this passport/visa photo against UAE visa photo requirements.
 
-Check ALL of the following criteria carefully:
+ONLY check these CRITICAL requirements (ignore everything else like clothing, hairstyle, etc.):
 
-1. BACKGROUND: Must be white or uniform light color (no patterns, objects, or other people visible)
-2. FACE SIZE: Face should occupy approximately 70-80% of the photo height
-3. FOCUS: Image must be sharp and clear, not blurry or pixelated
-4. GAZE: Person must be looking directly at the camera
-5. EYES: Both eyes must be open and clearly visible
-6. HAIR: No hair should cover the eyes or face
-7. ANGLE: Face must be square to the camera (not turned to the side/portrait style)
-8. TILT: Head must not be tilted to either side
-9. GLASSES: No glasses allowed (even clear lenses)
-10. HEAD COVERING: Only permitted for religious reasons; if present, face from chin to forehead and both cheeks must still be fully visible
-11. EXPRESSION: Neutral expression with mouth closed (no smiling)
-12. FACE SHADOWS: No shadows across the face
-13. BACKGROUND SHADOWS: No shadows behind the head
-14. FLASH: No flash reflection or glare on skin
-15. RED-EYE: No red-eye effect
-16. SINGLE PERSON: Only one person in the photo
-17. CENTERING: Face must be centered in the frame
-18. TOO CLOSE: Face should not be cropped or too close to edges
-19. TOO FAR: Face should not be too small (must be 70-80% of frame)
+1. BACKGROUND: Must be white or light colored (not busy/patterned)
+2. FACE VISIBLE: Full face clearly visible, not obscured
+3. EYES: Both eyes open and visible (no hair covering eyes)
+4. GLASSES: No glasses (this is strict - any glasses = fail)
+5. FACE ANGLE: Looking at camera, face not turned sideways
+6. HEAD COVERING: Only religious head coverings allowed (face must still be visible)
+7. IMAGE QUALITY: Not blurry, reasonably clear
+8. SINGLE PERSON: Only one person in photo
+9. OBVIOUS ISSUES: No sunglasses, masks, or face covered
 
-Respond with a JSON object in exactly this format:
+DO NOT flag these (they are acceptable):
+- Clothing style, color, or patterns
+- Hair style or if hair looks "messy"
+- Minor shadows that don't obscure the face
+- Slight smile (only flag wide open-mouth smiles)
+- Exact face size percentage (as long as face is clearly visible)
+- Minor lighting variations
+
+BE LENIENT. This photo will be reviewed by a human anyway. Only reject if there's a CLEAR problem that would definitely cause the visa photo to be rejected.
+
+Return JSON:
 {
   "valid": true or false,
-  "errors": ["list of specific issues found - be clear and helpful"],
-  "suggestions": ["specific action to fix each error"],
-  "confidence": 0-100 (how confident you are in this assessment)
+  "errors": ["only list REAL problems"],
+  "suggestions": ["how to fix"],
+  "confidence": 0-100
 }
 
-If the photo passes all criteria, return:
-{
-  "valid": true,
-  "errors": [],
-  "suggestions": [],
-  "confidence": 95
-}
-
-Be strict but fair. Only flag clear violations. If something is borderline acceptable, lean towards accepting it.`;
+When in doubt, ACCEPT the photo.`;
 
 /**
  * Validate a passport photo using Claude Vision

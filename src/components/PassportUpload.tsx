@@ -81,6 +81,7 @@ export function PassportUpload({ value, onUpload, onExtracted, onRemove, error }
               setExtracted(true);
               // Map extracted data to EmployeeFormData format
               const mappedData = {
+                title: extraction.data.title, // Mr, Mrs, Ms - inferred from gender
                 first_name: extraction.data.first_name,
                 middle_name: extraction.data.middle_name,
                 last_name: extraction.data.family_name,
@@ -89,7 +90,7 @@ export function PassportUpload({ value, onUpload, onExtracted, onRemove, error }
                 passport_issue_date: extraction.data.passport_issue_date,
                 passport_expiry_date: extraction.data.passport_expiry_date,
                 date_of_birth: extraction.data.date_of_birth,
-                gender: extraction.data.gender,
+                gender: extraction.data.gender?.toLowerCase(), // Form expects lowercase: 'male' | 'female'
                 place_of_birth: extraction.data.place_of_birth,
               };
               // Remove undefined values
