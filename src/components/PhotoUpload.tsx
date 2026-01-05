@@ -9,10 +9,11 @@ interface PhotoUploadProps {
   value?: { path: string; filename: string; validated: boolean };
   onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
   onValidated?: (validated: boolean, errors?: string[]) => void;
+  onRemove?: () => void;
   error?: string;
 }
 
-export function PhotoUpload({ value, onUpload, onValidated, error }: PhotoUploadProps) {
+export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: PhotoUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -107,6 +108,7 @@ export function PhotoUpload({ value, onUpload, onValidated, error }: PhotoUpload
     if (inputRef.current) {
       inputRef.current.value = '';
     }
+    onRemove?.();
   };
 
   const isValidated = value?.validated ?? false;

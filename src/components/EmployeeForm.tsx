@@ -167,11 +167,13 @@ export function EmployeeForm({
                 setPhotoDoc({ ...photoDoc, validated, validation_errors: validationErrors });
               }
             }}
+            onRemove={() => setPhotoDoc(undefined)}
           />
           <PassportUpload
             value={passportDoc}
             onUpload={handlePassportUpload}
             onExtracted={handlePassportExtracted}
+            onRemove={() => setPassportDoc(undefined)}
           />
         </div>
       </FormSection>

@@ -10,10 +10,11 @@ interface PassportUploadProps {
   value?: { path: string; filename: string; extracted_data?: Record<string, unknown> };
   onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
   onExtracted?: (data: Partial<EmployeeFormData>) => void;
+  onRemove?: () => void;
   error?: string;
 }
 
-export function PassportUpload({ value, onUpload, onExtracted, error }: PassportUploadProps) {
+export function PassportUpload({ value, onUpload, onExtracted, onRemove, error }: PassportUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -126,6 +127,7 @@ export function PassportUpload({ value, onUpload, onExtracted, error }: Passport
     if (inputRef.current) {
       inputRef.current.value = '';
     }
+    onRemove?.();
   };
 
   return (
