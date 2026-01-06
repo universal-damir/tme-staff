@@ -7,14 +7,17 @@ import {
   JOB_TITLES,
   DEPARTMENTS,
   WEEKLY_OFF_OPTIONS,
-  TIME_PERIOD_UNITS,
   LEAVE_TYPES,
 } from '@/lib/constants';
-import { Input, Select, DatePicker, Button } from '@/components/ui';
+import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/components/ui';
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
-import { Briefcase, DollarSign, Calendar, FileSignature } from 'lucide-react';
+import { Briefcase, Banknote, Calendar, FileSignature } from 'lucide-react';
+
+// Convert string array to dropdown options format
+const toDropdownOptions = (items: readonly string[]) =>
+  items.map((item) => ({ value: item, label: item }));
 
 interface FormSectionProps {
   title: string;
@@ -26,12 +29,7 @@ function FormSection({ title, icon, children }: FormSectionProps) {
   return (
     <div className="bg-white rounded-xl p-6 shadow-sm">
       <div className="flex items-center gap-3 mb-6">
-        <div
-          className="w-10 h-10 rounded-lg flex items-center justify-center"
-          style={{ backgroundColor: TME_COLORS.secondary }}
-        >
-          {icon}
-        </div>
+        {icon}
         <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
           {title}
         </h2>
@@ -39,6 +37,12 @@ function FormSection({ title, icon, children }: FormSectionProps) {
       {children}
     </div>
   );
+}
+
+// Helper function to pluralize time units
+function pluralize(value: number | undefined, singular: string): string {
+  if (value === undefined || value === null) return singular + 's';
+  return value === 1 ? singular : singular + 's';
 }
 
 export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFormProps) {
@@ -73,6 +77,20 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
   const salaryTransport = watch('salary_transport');
   const salaryFood = watch('salary_food');
   const salaryOther = watch('salary_other');
+  const noticePeriodValue = watch('notice_period_value');
+  const probationPeriodValue = watch('probation_period_value');
+  const startingDate = watch('starting_date');
+  const annualLeaveType = watch('annual_leave_type');
+  const noticePeriodUnit = watch('notice_period_unit');
+  const probationPeriodUnit = watch('probation_period_unit');
+  const weeklyOff = watch('weekly_off');
+
+  // Create dynamic time period options based on the value
+  const getTimePeriodOptions = (value: number | undefined) => [
+    { value: 'days', label: pluralize(value, 'day') },
+    { value: 'weeks', label: pluralize(value, 'week') },
+    { value: 'months', label: pluralize(value, 'month') },
+  ];
 
   const handleFormSubmit = async (data: EmployerFormData) => {
     if (!signature) {
@@ -110,12 +128,15 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <Select
+            <CustomDropdown
               label="Job Title"
-              options={JOB_TITLES}
+              options={toDropdownOptions(JOB_TITLES)}
+              value={jobTitle || ''}
+              onChange={(val) => setValue('job_title', val)}
               error={errors.job_title?.message}
               required
-              {...register('job_title', { required: 'Job title is required' })}
+              searchable
+              placeholder="Select job title..."
             />
             {jobTitle === 'Other' && (
               <div className="mt-2">
@@ -132,12 +153,15 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
           </div>
 
           <div>
-            <Select
+            <CustomDropdown
               label="Department"
-              options={DEPARTMENTS}
+              options={toDropdownOptions(DEPARTMENTS)}
+              value={department || ''}
+              onChange={(val) => setValue('department', val)}
               error={errors.department?.message}
               required
-              {...register('department', { required: 'Department is required' })}
+              searchable
+              placeholder="Select department..."
             />
             {department === 'Other' && (
               <div className="mt-2">
@@ -158,7 +182,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
       {/* Compensation */}
       <FormSection
         title="Compensation"
-        icon={<DollarSign className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
         <SalaryBreakdown
           currency={salaryCurrency || 'AED'}
@@ -191,18 +215,19 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
             </label>
             <div className="grid grid-cols-2 gap-4">
               <Input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 placeholder="Days"
-                min={0}
                 error={errors.annual_leave_days?.message}
                 {...register('annual_leave_days', {
                   required: 'Required',
                   min: { value: 0, message: 'Must be positive' },
                 })}
               />
-              <Select
-                options={LEAVE_TYPES}
-                {...register('annual_leave_type')}
+              <CustomDropdown
+                options={LEAVE_TYPES.map(opt => ({ value: opt.value, label: opt.label }))}
+                value={annualLeaveType || 'calendar'}
+                onChange={(val) => setValue('annual_leave_type', val as 'calendar' | 'working')}
               />
             </div>
           </div>
@@ -217,18 +242,19 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
             </label>
             <div className="grid grid-cols-2 gap-4">
               <Input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 placeholder="Value"
-                min={0}
                 error={errors.notice_period_value?.message}
                 {...register('notice_period_value', {
                   required: 'Required',
                   min: { value: 0, message: 'Must be positive' },
                 })}
               />
-              <Select
-                options={TIME_PERIOD_UNITS}
-                {...register('notice_period_unit')}
+              <CustomDropdown
+                options={getTimePeriodOptions(noticePeriodValue)}
+                value={noticePeriodUnit || 'months'}
+                onChange={(val) => setValue('notice_period_unit', val as 'days' | 'weeks' | 'months')}
               />
             </div>
           </div>
@@ -243,37 +269,40 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
             </label>
             <div className="grid grid-cols-2 gap-4">
               <Input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 placeholder="Value"
-                min={0}
                 error={errors.probation_period_value?.message}
                 {...register('probation_period_value', {
                   required: 'Required',
                   min: { value: 0, message: 'Must be positive' },
                 })}
               />
-              <Select
-                options={TIME_PERIOD_UNITS}
-                {...register('probation_period_unit')}
+              <CustomDropdown
+                options={getTimePeriodOptions(probationPeriodValue)}
+                value={probationPeriodUnit || 'months'}
+                onChange={(val) => setValue('probation_period_unit', val as 'days' | 'weeks' | 'months')}
               />
             </div>
           </div>
 
           {/* Weekly Off */}
-          <Select
+          <CustomDropdown
             label="Weekly Off"
-            options={WEEKLY_OFF_OPTIONS}
+            options={WEEKLY_OFF_OPTIONS.map(opt => ({ value: opt.value, label: opt.label }))}
+            value={weeklyOff || 'saturday_sunday'}
+            onChange={(val) => setValue('weekly_off', val as 'sunday' | 'saturday_sunday')}
             error={errors.weekly_off?.message}
             required
-            {...register('weekly_off', { required: 'Required' })}
           />
 
           {/* Starting Date */}
-          <DatePicker
+          <CustomDatePicker
             label="Starting Date"
+            value={startingDate || ''}
+            onChange={(val) => setValue('starting_date', val)}
             error={errors.starting_date?.message}
             required
-            {...register('starting_date', { required: 'Starting date is required' })}
           />
         </div>
       </FormSection>

@@ -396,3 +396,5 @@ export const TME_COLORS = {
   error: '#ef4444',
   success: '#22c55e',
 } as const;
+
+export const INPUT_HEIGHT = 42;

@@ -1,9 +1,32 @@
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { TME_COLORS, SALARY_CURRENCIES, SALARY_BREAKDOWN_EXPLANATION, DEFAULT_SALARY_BREAKDOWN } from '@/lib/constants';
-import { Select, Input } from '@/components/ui';
+import { TME_COLORS, SALARY_BREAKDOWN_EXPLANATION, DEFAULT_SALARY_BREAKDOWN } from '@/lib/constants';
+import { CustomDropdown } from '@/components/ui';
 import { ChevronDown, ChevronUp, Info, AlertTriangle } from 'lucide-react';
+
+// Abbreviated currency options
+const CURRENCY_OPTIONS = [
+  { value: 'AED', label: 'AED' },
+  { value: 'USD', label: 'USD' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'GBP', label: 'GBP' },
+  { value: 'CHF', label: 'CHF' },
+];
+
+// Helper functions for number formatting
+const formatNumber = (value: number | undefined | null): string => {
+  if (value === undefined || value === null || isNaN(value)) return '';
+  return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+};
+
+const parseFormattedNumber = (value: string): number | undefined => {
+  if (!value || value.trim() === '') return undefined;
+  // Remove commas and parse
+  const cleaned = value.replace(/,/g, '');
+  const parsed = parseFloat(cleaned);
+  return isNaN(parsed) ? undefined : parsed;
+};
 
 interface SalaryBreakdownProps {
   currency: string;
@@ -31,14 +54,76 @@ interface SalaryBreakdownProps {
   };
 }
 
+// Custom input component for salary fields (no steppers, comma formatting)
+interface SalaryInputProps {
+  label?: string;
+  value: number | undefined;
+  onChange: (value: number | undefined) => void;
+  error?: string;
+  placeholder?: string;
+  required?: boolean;
+}
+
+function SalaryInput({ label, value, onChange, error, placeholder, required }: SalaryInputProps) {
+  const [displayValue, setDisplayValue] = useState(formatNumber(value));
+
+  // Sync display value when external value changes
+  useEffect(() => {
+    setDisplayValue(formatNumber(value));
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const inputValue = e.target.value;
+    // Remove all non-numeric except decimal
+    const cleaned = inputValue.replace(/[^0-9.]/g, '');
+
+    // Parse and format with commas
+    const parsed = parseFormattedNumber(cleaned);
+    onChange(parsed);
+
+    // Show formatted value immediately
+    if (parsed !== undefined) {
+      setDisplayValue(formatNumber(parsed));
+    } else {
+      setDisplayValue('');
+    }
+  };
+
+  return (
+    <div className="w-full">
+      {label && (
+        <label
+          className="block text-sm font-medium mb-1"
+          style={{ color: TME_COLORS.primary }}
+        >
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      <input
+        type="text"
+        inputMode="decimal"
+        value={displayValue}
+        onChange={handleChange}
+        placeholder={placeholder}
+        className={`w-full px-3 py-2 rounded-lg border-2 transition-all duration-200 h-[42px] ${
+          error ? 'border-red-500' : 'border-gray-200'
+        } focus:outline-none focus:border-[#243F7B]`}
+        style={{ fontFamily: 'Inter, sans-serif' }}
+      />
+      {error && <p className="mt-1 text-sm text-red-500">{error}</p>}
+    </div>
+  );
+}
+
 export function SalaryBreakdown({
   currency,
   total,
   basic,
   accommodation,
   transport,
-  food = 0,
-  other = 0,
+  food,
+  other,
   onChange,
   errors,
 }: SalaryBreakdownProps) {
@@ -47,7 +132,7 @@ export function SalaryBreakdown({
 
   // Calculate sum and discrepancy
   const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0);
-  const hasDiscrepancy = total !== undefined && Math.abs(sum - total) > 0.01;
+  const hasDiscrepancy = total !== undefined && total > 0 && Math.abs(sum - total) > 0.01;
 
   // Auto-expand if there's a discrepancy
   useEffect(() => {
@@ -118,12 +203,12 @@ export function SalaryBreakdown({
     <div className="space-y-4">
       {/* Currency and Total */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Select
+        <CustomDropdown
           label="Currency"
           value={currency}
-          onChange={(e) =>
+          onChange={(val) =>
             onChange({
-              salary_currency: e.target.value,
+              salary_currency: val,
               salary_total: total,
               salary_basic: basic,
               salary_accommodation: accommodation,
@@ -132,19 +217,16 @@ export function SalaryBreakdown({
               salary_other: other,
             })
           }
-          options={SALARY_CURRENCIES}
+          options={CURRENCY_OPTIONS}
           error={errors?.currency}
           required
         />
 
         <div className="md:col-span-2">
-          <Input
+          <SalaryInput
             label="Monthly Salary (Total)"
-            type="number"
-            value={total ?? ''}
-            onChange={(e) =>
-              handleTotalChange(e.target.value ? parseFloat(e.target.value) : undefined)
-            }
+            value={total}
+            onChange={handleTotalChange}
             placeholder="Enter total monthly salary"
             error={errors?.total}
             required
@@ -193,103 +275,88 @@ export function SalaryBreakdown({
       {isExpanded && (
         <div className="space-y-4 pt-2 border-t border-gray-200">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div>
-              <Input
-                label={`Basic (${getPercentage(basic)})`}
-                type="number"
-                value={basic ?? ''}
-                onChange={(e) =>
-                  onChange({
-                    salary_currency: currency,
-                    salary_total: total,
-                    salary_basic: e.target.value ? parseFloat(e.target.value) : undefined,
-                    salary_accommodation: accommodation,
-                    salary_transport: transport,
-                    salary_food: food,
-                    salary_other: other,
-                  })
-                }
-                error={errors?.basic}
-              />
-            </div>
+            <SalaryInput
+              label={`Basic (${getPercentage(basic)})`}
+              value={basic}
+              onChange={(val) =>
+                onChange({
+                  salary_currency: currency,
+                  salary_total: total,
+                  salary_basic: val,
+                  salary_accommodation: accommodation,
+                  salary_transport: transport,
+                  salary_food: food,
+                  salary_other: other,
+                })
+              }
+              error={errors?.basic}
+            />
 
-            <div>
-              <Input
-                label={`Housing (${getPercentage(accommodation)})`}
-                type="number"
-                value={accommodation ?? ''}
-                onChange={(e) =>
-                  onChange({
-                    salary_currency: currency,
-                    salary_total: total,
-                    salary_basic: basic,
-                    salary_accommodation: e.target.value ? parseFloat(e.target.value) : undefined,
-                    salary_transport: transport,
-                    salary_food: food,
-                    salary_other: other,
-                  })
-                }
-                error={errors?.accommodation}
-              />
-            </div>
+            <SalaryInput
+              label={`Housing (${getPercentage(accommodation)})`}
+              value={accommodation}
+              onChange={(val) =>
+                onChange({
+                  salary_currency: currency,
+                  salary_total: total,
+                  salary_basic: basic,
+                  salary_accommodation: val,
+                  salary_transport: transport,
+                  salary_food: food,
+                  salary_other: other,
+                })
+              }
+              error={errors?.accommodation}
+            />
 
-            <div>
-              <Input
-                label={`Transport (${getPercentage(transport)})`}
-                type="number"
-                value={transport ?? ''}
-                onChange={(e) =>
-                  onChange({
-                    salary_currency: currency,
-                    salary_total: total,
-                    salary_basic: basic,
-                    salary_accommodation: accommodation,
-                    salary_transport: e.target.value ? parseFloat(e.target.value) : undefined,
-                    salary_food: food,
-                    salary_other: other,
-                  })
-                }
-                error={errors?.transport}
-              />
-            </div>
+            <SalaryInput
+              label={`Transport (${getPercentage(transport)})`}
+              value={transport}
+              onChange={(val) =>
+                onChange({
+                  salary_currency: currency,
+                  salary_total: total,
+                  salary_basic: basic,
+                  salary_accommodation: accommodation,
+                  salary_transport: val,
+                  salary_food: food,
+                  salary_other: other,
+                })
+              }
+              error={errors?.transport}
+            />
 
-            <div>
-              <Input
-                label={`Food (${getPercentage(food)})`}
-                type="number"
-                value={food ?? ''}
-                onChange={(e) =>
-                  onChange({
-                    salary_currency: currency,
-                    salary_total: total,
-                    salary_basic: basic,
-                    salary_accommodation: accommodation,
-                    salary_transport: transport,
-                    salary_food: e.target.value ? parseFloat(e.target.value) : undefined,
-                    salary_other: other,
-                  })
-                }
-              />
-            </div>
+            <SalaryInput
+              label={`Food (${getPercentage(food)})`}
+              value={food}
+              onChange={(val) =>
+                onChange({
+                  salary_currency: currency,
+                  salary_total: total,
+                  salary_basic: basic,
+                  salary_accommodation: accommodation,
+                  salary_transport: transport,
+                  salary_food: val,
+                  salary_other: other,
+                })
+              }
+            />
 
-            <div>
-              <Input
-                label={`Other (${getPercentage(other)})`}
-                type="number"
-                value={other ?? ''}
-                onChange={(e) =>
-                  onChange({
-                    salary_currency: currency,
-                    salary_total: total,
-                    salary_basic: basic,
-                    salary_accommodation: accommodation,
-                    salary_transport: transport,
-                    salary_food: food,
-                    salary_other: e.target.value ? parseFloat(e.target.value) : undefined,
-                  })
-                }
-              />
-            </div>
+            <SalaryInput
+              label={`Other (${getPercentage(other)})`}
+              value={other}
+              onChange={(val) =>
+                onChange({
+                  salary_currency: currency,
+                  salary_total: total,
+                  salary_basic: basic,
+                  salary_accommodation: accommodation,
+                  salary_transport: transport,
+                  salary_food: food,
+                  salary_other: val,
+                })
+              }
+            />
           </div>
 
           {/* Discrepancy Warning */}
@@ -298,7 +365,7 @@ export function SalaryBreakdown({
               <div className="flex items-center gap-2 text-red-600">
                 <AlertTriangle className="w-5 h-5" />
                 <span className="text-sm">
-                  Sum ({currency} {sum.toFixed(2)}) does not match total ({currency} {total?.toFixed(2)})
+                  Sum ({currency} {formatNumber(sum)}) does not match total ({currency} {formatNumber(total)})
                 </span>
               </div>
               <button
@@ -307,7 +374,7 @@ export function SalaryBreakdown({
                 className="px-3 py-1 text-sm font-medium text-white rounded"
                 style={{ backgroundColor: TME_COLORS.primary }}
               >
-                Set Total to {currency} {sum.toFixed(2)}
+                Set Total to {currency} {formatNumber(sum)}
               </button>
             </div>
           )}
