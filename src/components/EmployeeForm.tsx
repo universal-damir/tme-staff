@@ -70,6 +70,19 @@ export function EmployeeForm({
   const [photoDoc, setPhotoDoc] = useState(submission.documents?.photo);
   const [passportDoc, setPassportDoc] = useState(submission.documents?.passport);
 
+  // Refs to track latest values (avoids stale closure issues in callbacks)
+  const photoDocRef = React.useRef(photoDoc);
+  const passportDocRef = React.useRef(passportDoc);
+
+  // Keep refs in sync with state
+  React.useEffect(() => {
+    photoDocRef.current = photoDoc;
+  }, [photoDoc]);
+
+  React.useEffect(() => {
+    passportDocRef.current = passportDoc;
+  }, [passportDoc]);
+
   const {
     register,
     handleSubmit,
@@ -130,10 +143,11 @@ export function EmployeeForm({
     if (result) {
       const newDoc = { ...result, validated: false };
       setPhotoDoc(newDoc);
-      setPhotoError(null); // Clear any validation error
+      photoDocRef.current = newDoc; // Update ref immediately
+      setPhotoError(null);
       await updateDocumentReferences(submission.id, {
-        ...submission.documents,
         photo: newDoc,
+        passport: passportDocRef.current,
       });
       return result;
     }
@@ -145,8 +159,9 @@ export function EmployeeForm({
     if (result) {
       const newDoc = { ...result };
       setPassportDoc(newDoc);
+      passportDocRef.current = newDoc; // Update ref immediately
       await updateDocumentReferences(submission.id, {
-        ...submission.documents,
+        photo: photoDocRef.current,
         passport: newDoc,
       });
       return result;
@@ -174,21 +189,36 @@ export function EmployeeForm({
           <PhotoUpload
             value={photoDoc}
             onUpload={handlePhotoUpload}
-            onValidated={(validated, validationErrors) => {
-              if (photoDoc) {
-                setPhotoDoc({ ...photoDoc, validated, validation_errors: validationErrors });
+            onValidated={async (validated, validationErrors) => {
+              // Use ref to get latest photoDoc (avoids stale closure)
+              const currentPhotoDoc = photoDocRef.current;
+              if (currentPhotoDoc) {
+                const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
+                setPhotoDoc(updatedDoc);
+                photoDocRef.current = updatedDoc; // Update ref immediately
+                // Persist validation result to Supabase
+                await updateDocumentReferences(submission.id, {
+                  photo: updatedDoc,
+                  passport: passportDocRef.current,
+                });
               }
               // Clear error when photo is uploaded
               if (photoError) setPhotoError(null);
             }}
-            onRemove={() => setPhotoDoc(undefined)}
+            onRemove={() => {
+              setPhotoDoc(undefined);
+              photoDocRef.current = undefined;
+            }}
             error={photoError || undefined}
           />
           <PassportUpload
             value={passportDoc}
             onUpload={handlePassportUpload}
             onExtracted={handlePassportExtracted}
-            onRemove={() => setPassportDoc(undefined)}
+            onRemove={() => {
+              setPassportDoc(undefined);
+              passportDocRef.current = undefined;
+            }}
           />
         </div>
       </FormSection>
