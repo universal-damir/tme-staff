@@ -160,6 +160,36 @@ export async function uploadDocument(
 }
 
 // ===================================================================
+// UPLOAD PASSPORT PAGE (for multi-page passport upload)
+// ===================================================================
+
+export type PassportPageKey = 'cover' | 'dataPage' | 'observationsPage';
+
+export async function uploadPassportPage(
+  submissionId: string,
+  pageKey: PassportPageKey,
+  file: File
+): Promise<{ path: string; filename: string } | null> {
+  const timestamp = Date.now();
+  const sanitizedFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const path = `${submissionId}/passport/${pageKey}/${timestamp}-${sanitizedFilename}`;
+
+  const { error } = await supabase.storage
+    .from('staff-documents')
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: true,
+    });
+
+  if (error) {
+    console.error('Error uploading passport page:', error);
+    return null;
+  }
+
+  return { path, filename: file.name };
+}
+
+// ===================================================================
 // UPDATE DOCUMENT REFERENCES
 // ===================================================================
 

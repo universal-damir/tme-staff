@@ -40,7 +40,8 @@ export interface EmployeeFormData {
   last_name: string;
   full_name?: string; // Auto-calculated
   nationality: string;
-  additional_nationalities?: string[];
+  other_nationality?: string; // For "I have another nationality" checkbox
+  additional_nationalities?: string[]; // Legacy field
   previous_nationality?: string;
   date_of_birth?: string; // ISO format
   passport_number?: string;
@@ -55,12 +56,14 @@ export interface EmployeeFormData {
   marital_status: string;
   spouse_name?: string;
 
-  // Contact - Home Country
-  home_street_address: string;
-  home_postal_code: string;
-  home_city: string;
-  home_country: string;
-  home_telephone: string;
+  // Contact - Home Country (single textarea)
+  home_address: string; // Full address in single field
+  home_telephone?: string;
+  // Legacy fields (for backwards compatibility)
+  home_street_address?: string;
+  home_postal_code?: string;
+  home_city?: string;
+  home_country?: string;
 
   // Contact - UAE
   uae_presence: 'inside' | 'outside';
@@ -95,6 +98,12 @@ export interface EmployeeFormData {
 // DOCUMENT REFERENCES
 // ===================================================================
 
+export interface PassportPageReference {
+  path: string;
+  filename: string;
+  validated: boolean;
+}
+
 export interface StaffDocumentReferences {
   photo?: {
     path: string;
@@ -102,9 +111,17 @@ export interface StaffDocumentReferences {
     validated: boolean;
     validation_errors?: string[];
   };
+  // Legacy single passport field (for backwards compatibility)
   passport?: {
     path: string;
     filename: string;
+    extracted_data?: Record<string, unknown>;
+  };
+  // New multi-page passport structure
+  passportPages?: {
+    cover?: PassportPageReference;
+    dataPage?: PassportPageReference;
+    observationsPage?: PassportPageReference;
     extracted_data?: Record<string, unknown>;
   };
   eid?: {

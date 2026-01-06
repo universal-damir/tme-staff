@@ -1,6 +1,6 @@
 'use client';
 
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useMemo } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { ChevronDown } from 'lucide-react';
 
@@ -15,10 +15,27 @@ interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>
   helperText?: string;
   options: readonly (string | SelectOption)[];
   placeholder?: string;
+  sortAlphabetically?: boolean; // Default true - sorts options A-Z
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ label, error, helperText, options, placeholder = 'Select...', className = '', ...props }, ref) => {
+  ({ label, error, helperText, options, placeholder = 'Select...', sortAlphabetically = true, className = '', ...props }, ref) => {
+    // Sort options alphabetically (keeping "Other" at the end)
+    const sortedOptions = useMemo(() => {
+      if (!sortAlphabetically) return options;
+
+      return [...options].sort((a, b) => {
+        const labelA = typeof a === 'string' ? a : a.label;
+        const labelB = typeof b === 'string' ? b : b.label;
+
+        // Keep "Other" at the end
+        if (labelA === 'Other') return 1;
+        if (labelB === 'Other') return -1;
+
+        return labelA.localeCompare(labelB);
+      });
+    }, [options, sortAlphabetically]);
+
     return (
       <div className="w-full">
         {label && (
@@ -50,12 +67,12 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             {...props}
           >
             <option value="">{placeholder}</option>
-            {options.map((option) => {
+            {sortedOptions.map((option) => {
               const value = typeof option === 'string' ? option : option.value;
-              const label = typeof option === 'string' ? option : option.label;
+              const optionLabel = typeof option === 'string' ? option : option.label;
               return (
                 <option key={value} value={value}>
-                  {label}
+                  {optionLabel}
                 </option>
               );
             })}

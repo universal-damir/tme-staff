@@ -30,12 +30,18 @@ import {
   Camera,
 } from 'lucide-react';
 
-// Sort languages alphabetically
-const SORTED_LANGUAGES = [...LANGUAGES].sort((a, b) => {
-  if (a === 'Other') return 1;
-  if (b === 'Other') return -1;
-  return a.localeCompare(b);
-});
+// Sort lists alphabetically (with "Other" at the end)
+const sortWithOtherLast = (items: readonly string[]) =>
+  [...items].sort((a, b) => {
+    if (a === 'Other') return 1;
+    if (b === 'Other') return -1;
+    return a.localeCompare(b);
+  });
+
+const SORTED_LANGUAGES = sortWithOtherLast(LANGUAGES);
+const SORTED_NATIONALITIES = sortWithOtherLast(NATIONALITIES);
+const SORTED_RELIGIONS = sortWithOtherLast(RELIGIONS);
+const SORTED_BANKS = sortWithOtherLast(UAE_BANKS);
 
 interface FormSectionProps {
   title: string;
@@ -372,7 +378,7 @@ export function EmployeeForm({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <CustomDropdown
               label="Nationality"
-              options={NATIONALITIES.map(n => ({ value: n, label: n }))}
+              options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
               value={nationality || ''}
               onChange={(val) => setValue('nationality', val)}
               error={errors.nationality?.message}
@@ -403,7 +409,7 @@ export function EmployeeForm({
               <div className="pl-6">
                 <CustomDropdown
                   label="Other Nationality"
-                  options={NATIONALITIES.map(n => ({ value: n, label: n }))}
+                  options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
                   value={otherNationality || ''}
                   onChange={(val) => setValue('other_nationality', val)}
                   placeholder="Select nationality"
@@ -435,7 +441,7 @@ export function EmployeeForm({
               <div className="pl-6">
                 <CustomDropdown
                   label="Previous Nationality"
-                  options={NATIONALITIES.map(n => ({ value: n, label: n }))}
+                  options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
                   value={previousNationality || ''}
                   onChange={(val) => setValue('previous_nationality', val)}
                   placeholder="Select previous nationality"
@@ -471,7 +477,7 @@ export function EmployeeForm({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <CustomDropdown
               label="Religion"
-              options={RELIGIONS.map(r => ({ value: r, label: r }))}
+              options={SORTED_RELIGIONS.map(r => ({ value: r, label: r }))}
               value={religion || ''}
               onChange={(val) => setValue('religion', val)}
               error={errors.religion?.message}
@@ -699,7 +705,7 @@ export function EmployeeForm({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <CustomDropdown
                   label="Bank Name"
-                  options={UAE_BANKS.map(b => ({ value: b, label: b }))}
+                  options={SORTED_BANKS.map(b => ({ value: b, label: b }))}
                   value={bankName || ''}
                   onChange={(val) => setValue('bank_name', val)}
                   error={errors.bank_name?.message}
