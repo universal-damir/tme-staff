@@ -224,11 +224,14 @@ export function PassportMultiUpload({
       >
         <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
         <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-          <p className="font-medium">Please upload 2 passport images:</p>
+          <p className="font-medium">Please upload 2 passport images (passport must be open/spread):</p>
           <ul className="mt-1 list-disc list-inside space-y-0.5">
-            <li>Passport cover (outside front)</li>
-            <li>Inside pages (open passport showing data page + opposite page)</li>
+            <li>Passport cover spread (open passport showing front cover + back cover)</li>
+            <li>Inside pages spread (open passport showing data page + opposite page)</li>
           </ul>
+          <p className="mt-2 text-xs text-gray-600">
+            ⚠️ Single page photos are not accepted. Passport must be spread open.
+          </p>
         </div>
       </div>
 
@@ -236,7 +239,7 @@ export function PassportMultiUpload({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <UploadSlot
           label="Passport Cover"
-          description="Outside front of closed passport"
+          description="Spread open: front + back cover visible"
           expectedType="COVER"
           file={pages.cover.file}
           preview={pages.cover.preview || undefined}
@@ -249,7 +252,7 @@ export function PassportMultiUpload({
 
         <UploadSlot
           label="Inside Pages"
-          description="Open passport showing both pages"
+          description="Spread open: data page + opposite page"
           expectedType="INSIDE_PAGES"
           file={pages.insidePages.file}
           preview={pages.insidePages.preview || undefined}

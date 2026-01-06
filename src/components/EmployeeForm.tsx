@@ -138,6 +138,9 @@ export function EmployeeForm({
     !!(submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
   );
 
+  // Check if passport inside pages are uploaded (required before personal details can be edited)
+  const isPassportUploaded = !!(passportPages.insidePages?.validated);
+
   // Auto-calculate full name
   React.useEffect(() => {
     if (firstName || lastName) {
@@ -333,7 +336,14 @@ export function EmployeeForm({
         title="Personal Details"
         icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
-        <div className="space-y-4">
+        {!isPassportUploaded && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2">
+            <span className="text-amber-600 text-sm">
+              ⚠️ Please upload passport pages above first. Personal details will be auto-filled from your passport.
+            </span>
+          </div>
+        )}
+        <div className={`space-y-4 ${!isPassportUploaded ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <CustomDropdown
               label="Title"
@@ -342,21 +352,25 @@ export function EmployeeForm({
               onChange={(val) => setValue('title', val)}
               error={errors.title?.message}
               required
+              disabled={!isPassportUploaded}
             />
             <Input
               label="First Name"
               error={errors.first_name?.message}
               required
+              disabled={!isPassportUploaded}
               {...register('first_name', { required: 'Required' })}
             />
             <Input
               label="Middle Name"
+              disabled={!isPassportUploaded}
               {...register('middle_name')}
             />
             <Input
               label="Family Name"
               error={errors.last_name?.message}
               required
+              disabled={!isPassportUploaded}
               {...register('last_name', { required: 'Required' })}
             />
           </div>
@@ -377,12 +391,13 @@ export function EmployeeForm({
               error={errors.nationality?.message}
               required
               searchable
+              disabled={!isPassportUploaded}
             />
           </div>
 
           {/* Other Nationality */}
           <div className="space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className={`flex items-center gap-2 ${isPassportUploaded ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
               <input
                 type="checkbox"
                 checked={hasOtherNationality}
@@ -393,6 +408,7 @@ export function EmployeeForm({
                   }
                 }}
                 className="w-4 h-4 rounded border-gray-300"
+                disabled={!isPassportUploaded}
               />
               <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
                 I have another nationality
@@ -407,6 +423,7 @@ export function EmployeeForm({
                   onChange={(val) => setValue('other_nationality', val)}
                   placeholder="Select nationality"
                   searchable
+                  disabled={!isPassportUploaded}
                 />
               </div>
             )}
@@ -414,7 +431,7 @@ export function EmployeeForm({
 
           {/* Previous Nationality */}
           <div className="space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className={`flex items-center gap-2 ${isPassportUploaded ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
               <input
                 type="checkbox"
                 checked={hasPreviousNationality}
@@ -425,6 +442,7 @@ export function EmployeeForm({
                   }
                 }}
                 className="w-4 h-4 rounded border-gray-300"
+                disabled={!isPassportUploaded}
               />
               <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
                 I had a previous nationality
@@ -439,6 +457,7 @@ export function EmployeeForm({
                   onChange={(val) => setValue('previous_nationality', val)}
                   placeholder="Select previous nationality"
                   searchable
+                  disabled={!isPassportUploaded}
                 />
               </div>
             )}

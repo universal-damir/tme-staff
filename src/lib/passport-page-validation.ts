@@ -16,29 +16,36 @@ export interface PassportPageValidationResult {
 }
 
 /**
- * Passport page validation - count pages
+ * Passport page validation - requires spread/open passport (both pages visible)
+ * UAE government requirement: passport must be photographed open/spread, not single pages
  */
-const PASSPORT_PAGE_VALIDATION_PROMPT = `How many passport pages are visible in this image?
 
-- If it's the outside cover of a closed passport: return "COVER"
-- If 2 pages visible (open passport lying flat): return "INSIDE_PAGES"
-- If only 1 page visible (just the data page): return "INVALID"
-- If not a passport: return "INVALID"
+// Prompt for COVER validation
+const COVER_VALIDATION_PROMPT = `Look at where the passport emblem/logo/text is positioned in this image.
 
-Return JSON:
-{
-  "page_type": "COVER" | "INSIDE_PAGES" | "INVALID",
-  "confidence": 0-100,
-  "pages_visible": number
-}`;
+If emblem/text is CENTERED in the image = single cover page only = INVALID
+If emblem/text is on ONE SIDE with the other side plain/empty = spread open passport = VALID
+
+{"valid": true or false}`;
+
+// Prompt for INSIDE_PAGES validation
+const INSIDE_PAGES_VALIDATION_PROMPT = `Step 1: How many passport pages are visible in this image? (Count: 1 or 2)
+Step 2: Based on count, answer valid or invalid.
+
+If count is 1 (only the data page visible, no second page): {"count": 1, "valid": false}
+If count is 2 (data page AND opposite page both visible): {"count": 2, "valid": true}`;
 
 /**
- * Validate what type of passport page an image is
+ * Validate passport page based on expected type
  *
  * @param imageBase64 - Base64 encoded image (with or without data URL prefix)
+ * @param expectedType - The type of page we expect (COVER or INSIDE_PAGES)
  * @returns PassportPageValidationResult
  */
-export async function validatePassportPage(imageBase64: string): Promise<PassportPageValidationResult> {
+export async function validatePassportPage(
+  imageBase64: string,
+  expectedType?: PassportPageType
+): Promise<PassportPageValidationResult> {
   const client = getAnthropicClient();
 
   // Remove data URL prefix if present
@@ -54,11 +61,18 @@ export async function validatePassportPage(imageBase64: string): Promise<Passpor
     mediaType = 'image/webp';
   }
 
+  // Select prompt based on expected type
+  const prompt = expectedType === 'COVER'
+    ? COVER_VALIDATION_PROMPT
+    : expectedType === 'INSIDE_PAGES'
+    ? INSIDE_PAGES_VALIDATION_PROMPT
+    : COVER_VALIDATION_PROMPT; // default
+
   try {
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-3-5-haiku-20241022', // Haiku for speed and cost
-        max_tokens: 512,
+        model: 'claude-sonnet-4-20250514', // Sonnet for better visual analysis
+        max_tokens: 256,
         messages: [
           {
             role: 'user',
@@ -73,7 +87,7 @@ export async function validatePassportPage(imageBase64: string): Promise<Passpor
               },
               {
                 type: 'text',
-                text: PASSPORT_PAGE_VALIDATION_PROMPT,
+                text: prompt,
               },
             ],
           },
@@ -94,19 +108,22 @@ export async function validatePassportPage(imageBase64: string): Promise<Passpor
       throw new Error('Could not parse JSON response');
     }
 
-    const result = JSON.parse(jsonMatch[0]) as PassportPageValidationResult;
+    const result = JSON.parse(jsonMatch[0]) as { valid: boolean; reason?: string };
 
-    // Validate response structure
-    const validPageTypes: PassportPageType[] = ['COVER', 'INSIDE_PAGES', 'INVALID'];
-    if (!validPageTypes.includes(result.page_type)) {
-      result.page_type = 'INVALID';
+    // Convert valid/invalid to page_type
+    if (result.valid) {
+      return {
+        page_type: expectedType || 'COVER',
+        confidence: 90,
+        details: result.reason || 'Valid passport page',
+      };
+    } else {
+      return {
+        page_type: 'INVALID',
+        confidence: 90,
+        details: result.reason || 'Not a valid spread passport - need both pages visible',
+      };
     }
-
-    return {
-      page_type: result.page_type,
-      confidence: result.confidence || 0,
-      details: result.details || 'Unable to determine page type',
-    };
   } catch (error) {
     console.error('Passport page validation error:', error);
 

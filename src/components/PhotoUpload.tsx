@@ -135,13 +135,12 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
           onClick={() => inputRef.current?.click()}
         >
           <div
-            className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center"
-            style={{ backgroundColor: TME_COLORS.secondary }}
+            className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center border-2 border-dashed border-gray-300"
           >
-            <Camera className="w-8 h-8" style={{ color: TME_COLORS.primary }} />
+            <Camera className="w-8 h-8 text-gray-400" />
           </div>
           <p className="text-gray-600 mb-2">Click to upload your photo</p>
-          <p className="text-sm text-gray-400">JPG, PNG up to 10MB</p>
+          <p className="text-sm text-gray-400">JPG, PNG up to 5MB</p>
           <input
             ref={inputRef}
             type="file"

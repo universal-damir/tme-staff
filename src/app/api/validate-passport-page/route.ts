@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await validatePassportPage(image);
+    const result = await validatePassportPage(image, expectedType);
 
     // If expectedType is provided, check if it matches
     let matches = true;
@@ -22,11 +22,15 @@ export async function POST(req: NextRequest) {
     if (expectedType && result.page_type !== expectedType) {
       matches = false;
       const typeLabels: Record<PassportPageType, string> = {
-        COVER: 'Passport Cover',
-        INSIDE_PAGES: 'Inside Pages (open passport with both pages)',
+        COVER: 'Passport Cover Spread (open passport showing front + back cover)',
+        INSIDE_PAGES: 'Inside Pages Spread (open passport showing data page + opposite page)',
         INVALID: 'Valid Passport Page',
       };
-      errorMessage = `This doesn't appear to be a ${typeLabels[expectedType]}. Please upload the correct page.`;
+      if (result.page_type === 'INVALID') {
+        errorMessage = `Please upload the passport spread open showing both pages. Single page photos are not accepted.`;
+      } else {
+        errorMessage = `This doesn't appear to be a ${typeLabels[expectedType]}. Please upload the correct page spread.`;
+      }
     }
 
     return NextResponse.json({
