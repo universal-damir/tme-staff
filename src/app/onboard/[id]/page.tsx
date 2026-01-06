@@ -116,8 +116,29 @@ export default function OnboardingPage() {
           const success = await updateEmployerData(id, data, signature, clientIP || undefined);
 
           if (success) {
-            // TODO: Trigger employee email via TME Portal API
-            // await triggerEmployeeEmail(id);
+            // Trigger employee email via TME Portal API
+            try {
+              const notifyResponse = await fetch('/api/notify-employer-complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  supabaseId: id,
+                  jobTitle: data.job_title === 'Other' ? data.job_title_custom : data.job_title,
+                }),
+              });
+
+              const notifyResult = await notifyResponse.json();
+              console.log('Employee email notification result:', notifyResult);
+
+              if (!notifyResponse.ok) {
+                console.error('Failed to send employee notification:', notifyResult);
+                // Don't fail the whole flow, just log the error
+              }
+            } catch (notifyError) {
+              console.error('Error notifying TME Portal:', notifyError);
+              // Don't fail the whole flow, just log the error
+            }
+
             setPageState('success');
           } else {
             setError('Failed to save form. Please try again.');
