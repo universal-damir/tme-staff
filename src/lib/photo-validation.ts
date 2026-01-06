@@ -15,41 +15,71 @@ export interface PhotoValidationResult {
 }
 
 /**
- * Photo validation prompt based on UAE visa photo requirements
+ * Practical photo validation prompt for UAE visa photos
+ *
+ * IMPORTANT: This should accept standard professional passport photos.
+ * Only reject photos with CLEAR, OBVIOUS problems.
  */
-const PHOTO_VALIDATION_PROMPT = `Analyze this passport/visa photo against UAE visa photo requirements.
+const PHOTO_VALIDATION_PROMPT = `Analyze this passport/visa photo. Your job is to accept standard passport photos and only reject photos with CLEAR PROBLEMS.
 
-ONLY check these CRITICAL requirements (ignore everything else like clothing, hairstyle, etc.):
+IMPORTANT MINDSET: If this photo looks like a normal passport photo taken at a photo studio, ACCEPT IT. Do not be pedantic about minor details.
 
-1. BACKGROUND: Must be white or light colored (not busy/patterned)
-2. FACE VISIBLE: Full face clearly visible, not obscured
-3. EYES: Both eyes open and visible (no hair covering eyes)
-4. GLASSES: No glasses (this is strict - any glasses = fail)
-5. FACE ANGLE: Looking at camera, face not turned sideways
-6. HEAD COVERING: Only religious head coverings allowed (face must still be visible)
-7. IMAGE QUALITY: Not blurry, reasonably clear
-8. SINGLE PERSON: Only one person in photo
-9. OBVIOUS ISSUES: No sunglasses, masks, or face covered
+ACCEPT the photo if:
+- It's a professional-looking passport/ID photo
+- The person's face is clearly visible
+- Background is white, off-white, or very light gray (typical studio backgrounds)
+- Normal lighting with the face clearly lit
 
-DO NOT flag these (they are acceptable):
-- Clothing style, color, or patterns
-- Hair style or if hair looks "messy"
-- Minor shadows that don't obscure the face
-- Slight smile (only flag wide open-mouth smiles)
-- Exact face size percentage (as long as face is clearly visible)
-- Minor lighting variations
+ONLY REJECT for these CLEAR PROBLEMS:
 
-BE LENIENT. This photo will be reviewed by a human anyway. Only reject if there's a CLEAR problem that would definitely cause the visa photo to be rejected.
+1. BACKGROUND - Only reject if:
+   - Background is a CLEARLY VISIBLE COLOR (blue, red, green, etc.)
+   - Background shows objects, furniture, or is clearly not a studio background
+   - DO NOT reject for: minor shadows, slight gradients, off-white tones - these are NORMAL in studio photos
+
+2. FACE VISIBILITY - Only reject if:
+   - Face is significantly cut off (forehead or chin missing from frame)
+   - Face is way too small (clearly a full-body or distance shot)
+   - Hair or objects ACTUALLY COVERING the eyes or significant part of face
+   - DO NOT reject for: normal hairstyles, hair on forehead that doesn't cover eyes
+
+3. EYES - Only reject if:
+   - Eyes are closed
+   - Sunglasses or dark glasses covering eyes
+   - DO NOT reject for: regular prescription glasses with clear lenses
+
+4. HEAD POSITION - Only reject if:
+   - Head is significantly tilted or turned away (profile shot)
+   - Person looking away from camera
+   - DO NOT reject for: slight natural head position variations
+
+5. EXPRESSION - Only reject if:
+   - Wide open mouth or extreme expression
+   - DO NOT reject for: slight smile, neutral expression variations
+
+6. LIGHTING - Only reject if:
+   - Face is in complete shadow or severely underexposed
+   - Harsh flash making face completely white/overexposed
+   - DO NOT reject for: normal studio lighting shadows, natural skin tones
+
+THINGS TO ALWAYS ACCEPT (DO NOT FLAG):
+- Minor shadows on background (normal in studio photos)
+- Off-white or light gray backgrounds
+- Normal hairstyles even if hair is on forehead
+- Natural skin blemishes or features
+- Slight variations in background uniformity
+- Regular clear prescription glasses
+- Any professional-looking passport photo
 
 Return JSON:
 {
   "valid": true or false,
-  "errors": ["only list REAL problems"],
-  "suggestions": ["how to fix"],
+  "errors": ["only list CLEAR problems that make photo unusable"],
+  "suggestions": ["helpful fix if rejected"],
   "confidence": 0-100
 }
 
-When in doubt, ACCEPT the photo.`;
+REMEMBER: When in doubt, ACCEPT the photo. Most passport photos from studios are fine.`;
 
 /**
  * Validate a passport photo using Claude Vision
