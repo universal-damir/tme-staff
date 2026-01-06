@@ -34,9 +34,15 @@ export function UploadSlot({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
+      if (selectedFile.size > MAX_FILE_SIZE) {
+        alert('File too large. Maximum size is 5MB.');
+        return;
+      }
       await onUpload(selectedFile);
     }
     // Reset input
@@ -50,6 +56,10 @@ export function UploadSlot({
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile && droppedFile.type.startsWith('image/')) {
+      if (droppedFile.size > MAX_FILE_SIZE) {
+        alert('File too large. Maximum size is 5MB.');
+        return;
+      }
       await onUpload(droppedFile);
     }
   };

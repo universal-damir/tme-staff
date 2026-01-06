@@ -31,9 +31,9 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
       return;
     }
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setUploadError('File size must be less than 10MB');
+    // Validate file size (max 5MB - Claude API limit)
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('File size must be less than 5MB');
       return;
     }
 
