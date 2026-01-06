@@ -120,8 +120,7 @@ export interface StaffDocumentReferences {
   // New multi-page passport structure
   passportPages?: {
     cover?: PassportPageReference;
-    dataPage?: PassportPageReference;
-    observationsPage?: PassportPageReference;
+    insidePages?: PassportPageReference;
     extracted_data?: Record<string, unknown>;
   };
   eid?: {

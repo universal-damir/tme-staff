@@ -80,8 +80,7 @@ export function EmployeeForm({
   // Passport pages state
   const [passportPages, setPassportPages] = useState<{
     cover?: PassportPageReference;
-    dataPage?: PassportPageReference;
-    observationsPage?: PassportPageReference;
+    insidePages?: PassportPageReference;
   }>(submission.documents?.passportPages || {});
 
   // Refs to track latest values (avoids stale closure issues in callbacks)
@@ -158,9 +157,9 @@ export function EmployeeForm({
     setPhotoError(null);
 
     // Validate all passport pages are uploaded
-    const pagesUploaded = passportPages.cover && passportPages.dataPage && passportPages.observationsPage;
+    const pagesUploaded = passportPages.cover && passportPages.insidePages;
     if (!pagesUploaded) {
-      setPassportError('Please upload all three passport pages');
+      setPassportError('Please upload both passport images');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -224,8 +223,7 @@ export function EmployeeForm({
 
   const handlePassportPagesChange = async (pages: {
     cover: { storagePath: string | null; validated: boolean };
-    dataPage: { storagePath: string | null; validated: boolean };
-    observationsPage: { storagePath: string | null; validated: boolean };
+    insidePages: { storagePath: string | null; validated: boolean };
   }) => {
     // Convert internal page state to PassportPageReference format
     const updatedPages: typeof passportPages = {};
@@ -236,17 +234,10 @@ export function EmployeeForm({
         validated: true,
       };
     }
-    if (pages.dataPage.storagePath && pages.dataPage.validated) {
-      updatedPages.dataPage = {
-        path: pages.dataPage.storagePath,
-        filename: pages.dataPage.storagePath.split('/').pop() || '',
-        validated: true,
-      };
-    }
-    if (pages.observationsPage.storagePath && pages.observationsPage.validated) {
-      updatedPages.observationsPage = {
-        path: pages.observationsPage.storagePath,
-        filename: pages.observationsPage.storagePath.split('/').pop() || '',
+    if (pages.insidePages.storagePath && pages.insidePages.validated) {
+      updatedPages.insidePages = {
+        path: pages.insidePages.storagePath,
+        filename: pages.insidePages.storagePath.split('/').pop() || '',
         validated: true,
       };
     }
@@ -318,13 +309,9 @@ export function EmployeeForm({
                   path: submission.documents.passportPages.cover.path,
                   validated: submission.documents.passportPages.cover.validated,
                 } : undefined,
-                dataPage: submission.documents.passportPages.dataPage ? {
-                  path: submission.documents.passportPages.dataPage.path,
-                  validated: submission.documents.passportPages.dataPage.validated,
-                } : undefined,
-                observationsPage: submission.documents.passportPages.observationsPage ? {
-                  path: submission.documents.passportPages.observationsPage.path,
-                  validated: submission.documents.passportPages.observationsPage.validated,
+                insidePages: submission.documents.passportPages.insidePages ? {
+                  path: submission.documents.passportPages.insidePages.path,
+                  validated: submission.documents.passportPages.insidePages.validated,
                 } : undefined,
               } : undefined}
             />

@@ -163,7 +163,7 @@ export async function uploadDocument(
 // UPLOAD PASSPORT PAGE (for multi-page passport upload)
 // ===================================================================
 
-export type PassportPageKey = 'cover' | 'dataPage' | 'observationsPage';
+export type PassportPageKey = 'cover' | 'insidePages';
 
 export async function uploadPassportPage(
   submissionId: string,
