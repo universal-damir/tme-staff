@@ -66,6 +66,7 @@ export function EmployeeForm({
     reuseEmployerSignature ? submission.employer_signature_data : null
   );
   const [signatureError, setSignatureError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoDoc, setPhotoDoc] = useState(submission.documents?.photo);
   const [passportDoc, setPassportDoc] = useState(submission.documents?.passport);
 
@@ -100,6 +101,16 @@ export function EmployeeForm({
   }, [firstName, middleName, lastName, setValue]);
 
   const handleFormSubmit = async (data: EmployeeFormData) => {
+    // Validate photo is uploaded
+    if (!photoDoc) {
+      setPhotoError('Please upload your photo');
+      // Scroll to top where photo upload is
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setPhotoError(null);
+
+    // Validate signature
     if (!signature && !reuseEmployerSignature) {
       setSignatureError('Please sign the form');
       return;
@@ -119,6 +130,7 @@ export function EmployeeForm({
     if (result) {
       const newDoc = { ...result, validated: false };
       setPhotoDoc(newDoc);
+      setPhotoError(null); // Clear any validation error
       await updateDocumentReferences(submission.id, {
         ...submission.documents,
         photo: newDoc,
@@ -166,8 +178,11 @@ export function EmployeeForm({
               if (photoDoc) {
                 setPhotoDoc({ ...photoDoc, validated, validation_errors: validationErrors });
               }
+              // Clear error when photo is uploaded
+              if (photoError) setPhotoError(null);
             }}
             onRemove={() => setPhotoDoc(undefined)}
+            error={photoError || undefined}
           />
           <PassportUpload
             value={passportDoc}
