@@ -10,15 +10,14 @@ import {
   MARITAL_STATUS_OPTIONS,
   EDUCATIONAL_QUALIFICATIONS,
   LANGUAGES,
-  UAE_PRESENCE_OPTIONS,
   UAE_BANKS,
 } from '@/lib/constants';
-import { Input, Select, Button } from '@/components/ui';
+import { Input, Button, MultiSelectDropdown, CustomDropdown } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
-import { PassportUpload } from '@/components/PassportUpload';
-import type { EmployeeFormData, EmployeeFormProps } from '@/types';
-import { uploadDocument, updateDocumentReferences } from '@/lib/supabase';
+import { PassportMultiUpload } from '@/components/PassportMultiUpload';
+import type { EmployeeFormData, EmployeeFormProps, PassportPageReference } from '@/types';
+import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey } from '@/lib/supabase';
 import { calculateFullName } from '@/lib/utils';
 import {
   User,
@@ -31,6 +30,13 @@ import {
   Camera,
 } from 'lucide-react';
 
+// Sort languages alphabetically
+const SORTED_LANGUAGES = [...LANGUAGES].sort((a, b) => {
+  if (a === 'Other') return 1;
+  if (b === 'Other') return -1;
+  return a.localeCompare(b);
+});
+
 interface FormSectionProps {
   title: string;
   icon: React.ReactNode;
@@ -41,12 +47,7 @@ function FormSection({ title, icon, children }: FormSectionProps) {
   return (
     <div className="bg-white rounded-xl p-6 shadow-sm">
       <div className="flex items-center gap-3 mb-6">
-        <div
-          className="w-10 h-10 rounded-lg flex items-center justify-center"
-          style={{ backgroundColor: TME_COLORS.secondary }}
-        >
-          {icon}
-        </div>
+        {icon}
         <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
           {title}
         </h2>
@@ -67,12 +68,19 @@ export function EmployeeForm({
   );
   const [signatureError, setSignatureError] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [passportError, setPassportError] = useState<string | null>(null);
   const [photoDoc, setPhotoDoc] = useState(submission.documents?.photo);
-  const [passportDoc, setPassportDoc] = useState(submission.documents?.passport);
+
+  // Passport pages state
+  const [passportPages, setPassportPages] = useState<{
+    cover?: PassportPageReference;
+    dataPage?: PassportPageReference;
+    observationsPage?: PassportPageReference;
+  }>(submission.documents?.passportPages || {});
 
   // Refs to track latest values (avoids stale closure issues in callbacks)
   const photoDocRef = React.useRef(photoDoc);
-  const passportDocRef = React.useRef(passportDoc);
+  const passportPagesRef = React.useRef(passportPages);
 
   // Keep refs in sync with state
   React.useEffect(() => {
@@ -80,8 +88,8 @@ export function EmployeeForm({
   }, [photoDoc]);
 
   React.useEffect(() => {
-    passportDocRef.current = passportDoc;
-  }, [passportDoc]);
+    passportPagesRef.current = passportPages;
+  }, [passportPages]);
 
   const {
     register,
@@ -98,12 +106,32 @@ export function EmployeeForm({
     },
   });
 
+  const title = watch('title');
+  const nationality = watch('nationality');
+  const religion = watch('religion');
   const maritalStatus = watch('marital_status');
+  const educationalQualification = watch('educational_qualification');
+  const bankName = watch('bank_name');
   const sameEmails = watch('same_emails');
   const hasUAEBank = watch('has_uae_bank');
   const firstName = watch('first_name');
   const middleName = watch('middle_name');
   const lastName = watch('last_name');
+  const languagesSpoken = watch('languages_spoken') || [];
+  const otherNationality = watch('other_nationality');
+  const previousNationality = watch('previous_nationality');
+
+  // New checkbox states for nationality and address
+  const [hasOtherNationality, setHasOtherNationality] = useState(
+    !!submission.employee_data?.other_nationality
+  );
+  const [hasPreviousNationality, setHasPreviousNationality] = useState(
+    !!submission.employee_data?.previous_nationality
+  );
+  const [isInUAE, setIsInUAE] = useState(
+    submission.employee_data?.uae_presence === 'inside' ||
+    !!(submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
+  );
 
   // Auto-calculate full name
   React.useEffect(() => {
@@ -122,6 +150,15 @@ export function EmployeeForm({
       return;
     }
     setPhotoError(null);
+
+    // Validate all passport pages are uploaded
+    const pagesUploaded = passportPages.cover && passportPages.dataPage && passportPages.observationsPage;
+    if (!pagesUploaded) {
+      setPassportError('Please upload all three passport pages');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setPassportError(null);
 
     // Validate signature
     if (!signature && !reuseEmployerSignature) {
@@ -147,26 +184,68 @@ export function EmployeeForm({
       setPhotoError(null);
       await updateDocumentReferences(submission.id, {
         photo: newDoc,
-        passport: passportDocRef.current,
+        passportPages: passportPagesRef.current,
       });
       return result;
     }
     return null;
   };
 
-  const handlePassportUpload = async (file: File) => {
-    const result = await uploadDocument(submission.id, 'passport', file);
+  const handlePassportPageUpload = async (pageType: string, file: File): Promise<{ path: string } | null> => {
+    const pageKey = pageType as PassportPageKey;
+    const result = await uploadPassportPage(submission.id, pageKey, file);
     if (result) {
-      const newDoc = { ...result };
-      setPassportDoc(newDoc);
-      passportDocRef.current = newDoc; // Update ref immediately
+      const newPage: PassportPageReference = {
+        path: result.path,
+        filename: result.filename,
+        validated: true,
+      };
+      const updatedPages = {
+        ...passportPagesRef.current,
+        [pageKey]: newPage,
+      };
+      setPassportPages(updatedPages);
+      passportPagesRef.current = updatedPages;
+      setPassportError(null);
       await updateDocumentReferences(submission.id, {
         photo: photoDocRef.current,
-        passport: newDoc,
+        passportPages: updatedPages,
       });
-      return result;
+      return { path: result.path };
     }
     return null;
+  };
+
+  const handlePassportPagesChange = async (pages: {
+    cover: { storagePath: string | null; validated: boolean };
+    dataPage: { storagePath: string | null; validated: boolean };
+    observationsPage: { storagePath: string | null; validated: boolean };
+  }) => {
+    // Convert internal page state to PassportPageReference format
+    const updatedPages: typeof passportPages = {};
+    if (pages.cover.storagePath && pages.cover.validated) {
+      updatedPages.cover = {
+        path: pages.cover.storagePath,
+        filename: pages.cover.storagePath.split('/').pop() || '',
+        validated: true,
+      };
+    }
+    if (pages.dataPage.storagePath && pages.dataPage.validated) {
+      updatedPages.dataPage = {
+        path: pages.dataPage.storagePath,
+        filename: pages.dataPage.storagePath.split('/').pop() || '',
+        validated: true,
+      };
+    }
+    if (pages.observationsPage.storagePath && pages.observationsPage.validated) {
+      updatedPages.observationsPage = {
+        path: pages.observationsPage.storagePath,
+        filename: pages.observationsPage.storagePath.split('/').pop() || '',
+        validated: true,
+      };
+    }
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
   };
 
   const handlePassportExtracted = (data: Partial<EmployeeFormData>) => {
@@ -185,41 +264,68 @@ export function EmployeeForm({
         title="Documents"
         icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <PhotoUpload
-            value={photoDoc}
-            onUpload={handlePhotoUpload}
-            onValidated={async (validated, validationErrors) => {
-              // Use ref to get latest photoDoc (avoids stale closure)
-              const currentPhotoDoc = photoDocRef.current;
-              if (currentPhotoDoc) {
-                const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
-                setPhotoDoc(updatedDoc);
-                photoDocRef.current = updatedDoc; // Update ref immediately
-                // Persist validation result to Supabase
-                await updateDocumentReferences(submission.id, {
-                  photo: updatedDoc,
-                  passport: passportDocRef.current,
-                });
-              }
-              // Clear error when photo is uploaded
-              if (photoError) setPhotoError(null);
-            }}
-            onRemove={() => {
-              setPhotoDoc(undefined);
-              photoDocRef.current = undefined;
-            }}
-            error={photoError || undefined}
-          />
-          <PassportUpload
-            value={passportDoc}
-            onUpload={handlePassportUpload}
-            onExtracted={handlePassportExtracted}
-            onRemove={() => {
-              setPassportDoc(undefined);
-              passportDocRef.current = undefined;
-            }}
-          />
+        <div className="space-y-6">
+          {/* Photo Upload */}
+          <div>
+            <h3 className="text-sm font-medium mb-3" style={{ color: TME_COLORS.primary }}>
+              Passport Photo
+            </h3>
+            <PhotoUpload
+              value={photoDoc}
+              onUpload={handlePhotoUpload}
+              onValidated={async (validated, validationErrors) => {
+                // Use ref to get latest photoDoc (avoids stale closure)
+                const currentPhotoDoc = photoDocRef.current;
+                if (currentPhotoDoc) {
+                  const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
+                  setPhotoDoc(updatedDoc);
+                  photoDocRef.current = updatedDoc; // Update ref immediately
+                  // Persist validation result to Supabase
+                  await updateDocumentReferences(submission.id, {
+                    photo: updatedDoc,
+                    passportPages: passportPagesRef.current,
+                  });
+                }
+                // Clear error when photo is uploaded
+                if (photoError) setPhotoError(null);
+              }}
+              onRemove={() => {
+                setPhotoDoc(undefined);
+                photoDocRef.current = undefined;
+              }}
+              error={photoError || undefined}
+            />
+          </div>
+
+          {/* Passport Pages Upload */}
+          <div>
+            <h3 className="text-sm font-medium mb-3" style={{ color: TME_COLORS.primary }}>
+              Passport Pages
+            </h3>
+            <PassportMultiUpload
+              submissionId={submission.id}
+              onUpload={handlePassportPageUpload}
+              onExtracted={handlePassportExtracted}
+              onPagesChange={handlePassportPagesChange}
+              initialPages={submission.documents?.passportPages ? {
+                cover: submission.documents.passportPages.cover ? {
+                  path: submission.documents.passportPages.cover.path,
+                  validated: submission.documents.passportPages.cover.validated,
+                } : undefined,
+                dataPage: submission.documents.passportPages.dataPage ? {
+                  path: submission.documents.passportPages.dataPage.path,
+                  validated: submission.documents.passportPages.dataPage.validated,
+                } : undefined,
+                observationsPage: submission.documents.passportPages.observationsPage ? {
+                  path: submission.documents.passportPages.observationsPage.path,
+                  validated: submission.documents.passportPages.observationsPage.validated,
+                } : undefined,
+              } : undefined}
+            />
+            {passportError && (
+              <p className="mt-2 text-sm text-red-500">{passportError}</p>
+            )}
+          </div>
         </div>
       </FormSection>
 
@@ -230,12 +336,13 @@ export function EmployeeForm({
       >
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Select
+            <CustomDropdown
               label="Title"
-              options={TITLES}
+              options={TITLES.map(t => ({ value: t, label: t }))}
+              value={title || ''}
+              onChange={(val) => setValue('title', val)}
               error={errors.title?.message}
               required
-              {...register('title', { required: 'Required' })}
             />
             <Input
               label="First Name"
@@ -263,18 +370,79 @@ export function EmployeeForm({
           />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
+            <CustomDropdown
               label="Nationality"
-              options={NATIONALITIES}
+              options={NATIONALITIES.map(n => ({ value: n, label: n }))}
+              value={nationality || ''}
+              onChange={(val) => setValue('nationality', val)}
               error={errors.nationality?.message}
               required
-              {...register('nationality', { required: 'Required' })}
+              searchable
             />
-            <Input
-              label="Previous Nationality"
-              placeholder="If applicable"
-              {...register('previous_nationality')}
-            />
+          </div>
+
+          {/* Other Nationality */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hasOtherNationality}
+                onChange={(e) => {
+                  setHasOtherNationality(e.target.checked);
+                  if (!e.target.checked) {
+                    setValue('other_nationality', undefined);
+                  }
+                }}
+                className="w-4 h-4 rounded border-gray-300"
+              />
+              <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                I have another nationality
+              </span>
+            </label>
+            {hasOtherNationality && (
+              <div className="pl-6">
+                <CustomDropdown
+                  label="Other Nationality"
+                  options={NATIONALITIES.map(n => ({ value: n, label: n }))}
+                  value={otherNationality || ''}
+                  onChange={(val) => setValue('other_nationality', val)}
+                  placeholder="Select nationality"
+                  searchable
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Previous Nationality */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hasPreviousNationality}
+                onChange={(e) => {
+                  setHasPreviousNationality(e.target.checked);
+                  if (!e.target.checked) {
+                    setValue('previous_nationality', undefined);
+                  }
+                }}
+                className="w-4 h-4 rounded border-gray-300"
+              />
+              <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                I had a previous nationality
+              </span>
+            </label>
+            {hasPreviousNationality && (
+              <div className="pl-6">
+                <CustomDropdown
+                  label="Previous Nationality"
+                  options={NATIONALITIES.map(n => ({ value: n, label: n }))}
+                  value={previousNationality || ''}
+                  onChange={(val) => setValue('previous_nationality', val)}
+                  placeholder="Select previous nationality"
+                  searchable
+                />
+              </div>
+            )}
           </div>
         </div>
       </FormSection>
@@ -301,19 +469,22 @@ export function EmployeeForm({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
+            <CustomDropdown
               label="Religion"
-              options={RELIGIONS}
+              options={RELIGIONS.map(r => ({ value: r, label: r }))}
+              value={religion || ''}
+              onChange={(val) => setValue('religion', val)}
               error={errors.religion?.message}
               required
-              {...register('religion', { required: 'Required' })}
+              searchable
             />
-            <Select
+            <CustomDropdown
               label="Marital Status"
-              options={MARITAL_STATUS_OPTIONS}
+              options={MARITAL_STATUS_OPTIONS.map(m => ({ value: m, label: m }))}
+              value={maritalStatus || ''}
+              onChange={(val) => setValue('marital_status', val)}
               error={errors.marital_status?.message}
               required
-              {...register('marital_status', { required: 'Required' })}
             />
           </div>
 
@@ -336,66 +507,89 @@ export function EmployeeForm({
         icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
         <div className="space-y-4">
-          <Input
-            label="Street Address"
-            error={errors.home_street_address?.message}
-            required
-            {...register('home_street_address', { required: 'Required' })}
-          />
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Input
-              label="City"
-              error={errors.home_city?.message}
-              required
-              {...register('home_city', { required: 'Required' })}
+          <div>
+            <label
+              className="block text-sm font-medium mb-1"
+              style={{ color: TME_COLORS.primary }}
+            >
+              Home Country Address <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none focus:border-[#243F7B] transition-all duration-200 min-h-[80px]"
+              placeholder="Enter your full address (street, city, postal code, country)"
+              {...register('home_address', { required: 'Home address is required' })}
+              style={{ fontFamily: 'Inter, sans-serif' }}
             />
-            <Input
-              label="Postal Code"
-              {...register('home_postal_code')}
-            />
-            <Select
-              label="Country"
-              options={NATIONALITIES}
-              error={errors.home_country?.message}
-              required
-              {...register('home_country', { required: 'Required' })}
-            />
-            <Input
-              label="Telephone"
-              type="tel"
-              {...register('home_telephone')}
-            />
+            {errors.home_address && (
+              <p className="mt-1 text-sm text-red-500">{errors.home_address.message}</p>
+            )}
           </div>
+
+          <Input
+            label="Home Telephone"
+            type="tel"
+            placeholder="+XX XXX XXX XXXX"
+            {...register('home_telephone')}
+          />
         </div>
       </FormSection>
 
-      {/* Contact - UAE */}
+      {/* Contact - UAE (Conditional) */}
       <FormSection
         title="UAE Address"
         icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
         <div className="space-y-4">
-          <Select
-            label="Current Presence"
-            options={UAE_PRESENCE_OPTIONS}
-            {...register('uae_presence')}
-          />
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isInUAE}
+              onChange={(e) => {
+                setIsInUAE(e.target.checked);
+                setValue('uae_presence', e.target.checked ? 'inside' : 'outside');
+                if (!e.target.checked) {
+                  setValue('uae_flat_villa', '');
+                  setValue('uae_building_name', '');
+                  setValue('uae_street_name', '');
+                }
+              }}
+              className="w-4 h-4 rounded border-gray-300"
+            />
+            <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+              Applicant is currently in the UAE
+            </span>
+          </label>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Input
-              label="Flat/Villa Number"
-              {...register('uae_flat_villa')}
-            />
-            <Input
-              label="Building Name"
-              {...register('uae_building_name')}
-            />
-            <Input
-              label="Street Name"
-              {...register('uae_street_name')}
-            />
-          </div>
+          {isInUAE && (
+            <div className="space-y-4 pl-6 border-l-2 border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Input
+                  label="Flat/Villa Number"
+                  error={errors.uae_flat_villa?.message}
+                  required
+                  {...register('uae_flat_villa', {
+                    required: isInUAE ? 'Required' : false,
+                  })}
+                />
+                <Input
+                  label="Building Name"
+                  error={errors.uae_building_name?.message}
+                  required
+                  {...register('uae_building_name', {
+                    required: isInUAE ? 'Required' : false,
+                  })}
+                />
+                <Input
+                  label="Street Name"
+                  error={errors.uae_street_name?.message}
+                  required
+                  {...register('uae_street_name', {
+                    required: isInUAE ? 'Required' : false,
+                  })}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </FormSection>
 
@@ -462,39 +656,26 @@ export function EmployeeForm({
         icon={<GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
         <div className="space-y-4">
-          <Select
+          <CustomDropdown
             label="Educational Qualification"
-            options={EDUCATIONAL_QUALIFICATIONS}
+            options={EDUCATIONAL_QUALIFICATIONS.map(e => ({ value: e, label: e }))}
+            value={educationalQualification || ''}
+            onChange={(val) => setValue('educational_qualification', val)}
             error={errors.educational_qualification?.message}
             required
-            {...register('educational_qualification', { required: 'Required' })}
           />
 
-          <div>
-            <label
-              className="block text-sm font-medium mb-2"
-              style={{ color: TME_COLORS.primary }}
-            >
-              Languages Spoken
-              <span className="text-red-500 ml-1">*</span>
-            </label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {LANGUAGES.slice(0, 12).map((lang) => (
-                <label key={lang} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    value={lang}
-                    {...register('languages_spoken', { required: 'Select at least one' })}
-                    className="rounded"
-                  />
-                  {lang}
-                </label>
-              ))}
-            </div>
-            {errors.languages_spoken && (
-              <p className="mt-1 text-sm text-red-500">{errors.languages_spoken.message}</p>
-            )}
-          </div>
+          <MultiSelectDropdown
+            label="Languages Spoken"
+            options={SORTED_LANGUAGES}
+            value={languagesSpoken}
+            onChange={(values) => setValue('languages_spoken', values)}
+            required
+            searchable
+            allowCustom
+            customPlaceholder="Add another language..."
+            error={errors.languages_spoken?.message}
+          />
         </div>
       </FormSection>
 
@@ -516,14 +697,14 @@ export function EmployeeForm({
           {hasUAEBank && (
             <div className="space-y-4 pt-4 border-t border-gray-200">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Select
+                <CustomDropdown
                   label="Bank Name"
-                  options={UAE_BANKS}
+                  options={UAE_BANKS.map(b => ({ value: b, label: b }))}
+                  value={bankName || ''}
+                  onChange={(val) => setValue('bank_name', val)}
                   error={errors.bank_name?.message}
                   required
-                  {...register('bank_name', {
-                    required: hasUAEBank ? 'Required' : false,
-                  })}
+                  searchable
                 />
                 <Input
                   label="Branch"
