@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { TME_COLORS } from '@/lib/constants';
+import { compressImageForAI } from '@/lib/utils';
 import { UploadSlot } from '@/components/UploadSlot';
 import { Info } from 'lucide-react';
 import type { PassportPageType } from '@/lib/passport-page-validation';
@@ -62,10 +63,13 @@ export function PassportMultiUpload({
     expectedType: PassportPageType
   ): Promise<{ valid: boolean; error?: string }> => {
     try {
+      // Compress image to fit Claude API limits
+      const compressedImage = await compressImageForAI(imageBase64);
+
       const response = await fetch('/api/validate-passport-page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageBase64, expectedType }),
+        body: JSON.stringify({ image: compressedImage, expectedType }),
       });
 
       if (!response.ok) {
@@ -88,10 +92,13 @@ export function PassportMultiUpload({
 
   const extractPassportData = useCallback(async (imageBase64: string): Promise<void> => {
     try {
+      // Compress image to fit Claude API limits
+      const compressedImage = await compressImageForAI(imageBase64);
+
       const response = await fetch('/api/extract-passport', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageBase64 }),
+        body: JSON.stringify({ image: compressedImage }),
       });
 
       if (response.ok) {

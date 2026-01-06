@@ -24,8 +24,6 @@ export async function POST(req: NextRequest) {
       const typeLabels: Record<PassportPageType, string> = {
         COVER: 'Passport Cover',
         INSIDE_PAGES: 'Inside Pages (open passport with both pages)',
-        DATA_PAGE: 'Data Page (with photo and MRZ)',
-        OBSERVATIONS_PAGE: 'Second Data Page / Observations Page',
         INVALID: 'Valid Passport Page',
       };
       errorMessage = `This doesn't appear to be a ${typeLabels[expectedType]}. Please upload the correct page.`;

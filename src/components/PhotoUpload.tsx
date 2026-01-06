@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from 'react';
 import { TME_COLORS } from '@/lib/constants';
+import { compressImageForAI } from '@/lib/utils';
 import { Camera, Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -61,10 +62,13 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
           const base64Image = e.target?.result as string;
 
           try {
+            // Compress image to fit Claude API limits
+            const compressedImage = await compressImageForAI(base64Image);
+
             const response = await fetch('/api/validate-photo', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ image: base64Image }),
+              body: JSON.stringify({ image: compressedImage }),
             });
 
             const validation = await response.json();

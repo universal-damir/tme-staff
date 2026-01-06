@@ -163,3 +163,44 @@ export function formatCurrency(
 export function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
 }
+
+// ===================================================================
+// IMAGE COMPRESSION
+// ===================================================================
+
+/**
+ * Compress image to fit within Claude API limits (5MB base64 = ~3.5MB raw)
+ * Resizes to max 1500px and compresses to JPEG
+ */
+export async function compressImageForAI(base64Image: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d')!;
+
+      // Max dimension 1500px (enough for AI to analyze)
+      const maxDim = 1500;
+      let { width, height } = img;
+
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = (height / width) * maxDim;
+          width = maxDim;
+        } else {
+          width = (width / height) * maxDim;
+          height = maxDim;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Compress to JPEG at 80% quality
+      const compressed = canvas.toDataURL('image/jpeg', 0.8);
+      resolve(compressed);
+    };
+    img.src = base64Image;
+  });
+}

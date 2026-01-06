@@ -7,7 +7,7 @@
 
 import { getAnthropicClient, withTimeout } from './anthropic';
 
-export type PassportPageType = 'COVER' | 'INSIDE_PAGES' | 'DATA_PAGE' | 'OBSERVATIONS_PAGE' | 'INVALID';
+export type PassportPageType = 'COVER' | 'INSIDE_PAGES' | 'INVALID';
 
 export interface PassportPageValidationResult {
   page_type: PassportPageType;
@@ -16,36 +16,20 @@ export interface PassportPageValidationResult {
 }
 
 /**
- * Prompt for identifying passport page types
+ * Passport page validation - count pages
  */
-const PASSPORT_PAGE_VALIDATION_PROMPT = `Analyze this passport image and determine what type of page it is.
+const PASSPORT_PAGE_VALIDATION_PROMPT = `How many passport pages are visible in this image?
 
-COVER: The outer cover/front of a closed passport. Usually shows:
-- Country name and emblem/coat of arms
-- The word "PASSPORT" in the country's language
-- Typically has a distinct color (burgundy, blue, green, etc.)
+- If it's the outside cover of a closed passport: return "COVER"
+- If 2 pages visible (open passport lying flat): return "INSIDE_PAGES"
+- If only 1 page visible (just the data page): return "INVALID"
+- If not a passport: return "INVALID"
 
-INSIDE_PAGES: An open passport showing both inside pages together (data page + opposite page). MUST have:
-- Holder's photograph visible
-- Personal details (name, date of birth, nationality, etc.)
-- MRZ (Machine Readable Zone) - two lines at the bottom
-- Shows TWO pages side by side (the open passport)
-
-DATA_PAGE: Just the biographical data page alone (not the full open passport). Has:
-- Holder's photograph
-- Personal details
-- MRZ at the bottom
-- Only ONE page visible
-
-OBSERVATIONS_PAGE: Just the observations/amendments page alone.
-
-INVALID: Not a valid passport page.
-
-Respond ONLY with JSON:
+Return JSON:
 {
-  "page_type": "COVER" | "INSIDE_PAGES" | "DATA_PAGE" | "OBSERVATIONS_PAGE" | "INVALID",
+  "page_type": "COVER" | "INSIDE_PAGES" | "INVALID",
   "confidence": 0-100,
-  "details": "Brief description"
+  "pages_visible": number
 }`;
 
 /**
@@ -113,7 +97,7 @@ export async function validatePassportPage(imageBase64: string): Promise<Passpor
     const result = JSON.parse(jsonMatch[0]) as PassportPageValidationResult;
 
     // Validate response structure
-    const validPageTypes: PassportPageType[] = ['COVER', 'INSIDE_PAGES', 'DATA_PAGE', 'OBSERVATIONS_PAGE', 'INVALID'];
+    const validPageTypes: PassportPageType[] = ['COVER', 'INSIDE_PAGES', 'INVALID'];
     if (!validPageTypes.includes(result.page_type)) {
       result.page_type = 'INVALID';
     }

@@ -245,11 +245,17 @@ export function EmployeeForm({
     passportPagesRef.current = updatedPages;
   };
 
-  const handlePassportExtracted = (data: Partial<EmployeeFormData>) => {
+  const handlePassportExtracted = (data: Partial<EmployeeFormData> & { family_name?: string }) => {
+    // Map extraction fields to form fields
+    const fieldMapping: Record<string, string> = {
+      family_name: 'last_name',
+    };
+
     // Auto-fill form fields from extracted data
     Object.entries(data).forEach(([key, value]) => {
       if (value !== undefined) {
-        setValue(key as keyof EmployeeFormData, value as never);
+        const formField = fieldMapping[key] || key;
+        setValue(formField as keyof EmployeeFormData, value as never);
       }
     });
   };
@@ -348,7 +354,7 @@ export function EmployeeForm({
               {...register('middle_name')}
             />
             <Input
-              label="Last Name"
+              label="Family Name"
               error={errors.last_name?.message}
               required
               {...register('last_name', { required: 'Required' })}

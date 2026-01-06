@@ -7,7 +7,7 @@ import { Upload, CheckCircle, AlertCircle, X, Loader2 } from 'lucide-react';
 interface UploadSlotProps {
   label: string;
   description: string;
-  expectedType: 'COVER' | 'INSIDE_PAGES' | 'DATA_PAGE' | 'OBSERVATIONS_PAGE';
+  expectedType: 'COVER' | 'INSIDE_PAGES';
   file: File | null;
   onUpload: (file: File) => Promise<boolean>;
   onRemove: () => void;
