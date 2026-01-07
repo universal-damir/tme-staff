@@ -56,14 +56,14 @@ export interface EmployeeFormData {
   marital_status: string;
   spouse_name?: string;
 
-  // Contact - Home Country (single textarea)
-  home_address: string; // Full address in single field
-  home_telephone?: string;
-  // Legacy fields (for backwards compatibility)
-  home_street_address?: string;
+  // Contact - Home Country (separate fields)
+  home_street_address: string;
+  home_city: string;
+  home_country: string;
   home_postal_code?: string;
-  home_city?: string;
-  home_country?: string;
+  home_telephone?: string;
+  // Legacy field (for backwards compatibility)
+  home_address?: string;
 
   // Contact - UAE
   uae_presence: 'inside' | 'outside';

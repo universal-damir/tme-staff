@@ -525,22 +525,38 @@ export function EmployeeForm({
         icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
         <div className="space-y-4">
-          <div>
-            <label
-              className="block text-sm font-medium mb-1"
-              style={{ color: TME_COLORS.primary }}
-            >
-              Home Country Address <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none focus:border-[#243F7B] transition-all duration-200 min-h-[80px]"
-              placeholder="Enter your full address (street, city, postal code, country)"
-              {...register('home_address', { required: 'Home address is required' })}
-              style={{ fontFamily: 'Inter, sans-serif' }}
+          <Input
+            label="Street Address"
+            placeholder="Enter your street address"
+            error={errors.home_street_address?.message}
+            required
+            {...register('home_street_address', { required: 'Street address is required' })}
+          />
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Input
+              label="City"
+              placeholder="Enter city"
+              error={errors.home_city?.message}
+              required
+              {...register('home_city', { required: 'City is required' })}
             />
-            {errors.home_address && (
-              <p className="mt-1 text-sm text-red-500">{errors.home_address.message}</p>
-            )}
+            <Input
+              label="Postal Code"
+              placeholder="Enter postal code"
+              error={errors.home_postal_code?.message}
+              {...register('home_postal_code')}
+            />
+            <CustomDropdown
+              label="Country"
+              value={watch('home_country') || ''}
+              onChange={(value) => setValue('home_country', value)}
+              options={SORTED_NATIONALITIES.map((n) => ({ value: n, label: n }))}
+              placeholder="Select country"
+              error={errors.home_country?.message}
+              required
+              searchable
+            />
           </div>
 
           <Input

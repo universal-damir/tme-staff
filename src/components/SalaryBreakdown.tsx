@@ -293,7 +293,7 @@ export function SalaryBreakdown({
             />
 
             <SalaryInput
-              label={`Housing (${getPercentage(accommodation)})`}
+              label={`Accommodation (${getPercentage(accommodation)})`}
               value={accommodation}
               onChange={(val) =>
                 onChange({
