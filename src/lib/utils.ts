@@ -119,14 +119,6 @@ export function isValidEmail(email: string): boolean {
 }
 
 /**
- * Validate UAE mobile number (starts with 05)
- */
-export function isValidUAEMobile(number: string): boolean {
-  const cleaned = number.replace(/\D/g, '');
-  return cleaned.length === 10 && cleaned.startsWith('05');
-}
-
-/**
  * Validate IBAN format (basic check)
  */
 export function isValidIBAN(iban: string): boolean {

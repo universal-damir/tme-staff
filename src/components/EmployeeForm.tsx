@@ -12,7 +12,7 @@ import {
   LANGUAGES,
   UAE_BANKS,
 } from '@/lib/constants';
-import { Input, Button, MultiSelectDropdown, CustomDropdown } from '@/components/ui';
+import { Input, Button, MultiSelectDropdown, CustomDropdown, PhoneInput } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { PassportMultiUpload } from '@/components/PassportMultiUpload';
@@ -125,6 +125,9 @@ export function EmployeeForm({
   const languagesSpoken = watch('languages_spoken') || [];
   const otherNationality = watch('other_nationality');
   const previousNationality = watch('previous_nationality');
+  const mobileUae = watch('mobile_uae');
+  const mobileInternational = watch('mobile_international');
+  const homeTelephone = watch('home_telephone');
 
   // New checkbox states for nationality and address
   const [hasOtherNationality, setHasOtherNationality] = useState(
@@ -559,11 +562,11 @@ export function EmployeeForm({
             />
           </div>
 
-          <Input
+          <PhoneInput
             label="Home Telephone"
-            type="tel"
-            placeholder="+XX XXX XXX XXXX"
-            {...register('home_telephone')}
+            value={homeTelephone}
+            onChange={(value) => setValue('home_telephone', value || '')}
+            defaultCountry="AE"
           />
         </div>
       </FormSection>
@@ -666,19 +669,17 @@ export function EmployeeForm({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
+            <PhoneInput
               label="UAE Mobile"
-              type="tel"
-              placeholder="05X XXX XXXX"
-              error={errors.mobile_uae?.message}
-              required
-              {...register('mobile_uae', { required: 'Required' })}
+              value={mobileUae}
+              onChange={(value) => setValue('mobile_uae', value || '')}
+              country="AE"
             />
-            <Input
+            <PhoneInput
               label="International Mobile"
-              type="tel"
-              placeholder="+XX XXX XXX XXXX"
-              {...register('mobile_international')}
+              value={mobileInternational}
+              onChange={(value) => setValue('mobile_international', value || '')}
+              defaultCountry="AE"
             />
           </div>
         </div>
