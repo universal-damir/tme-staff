@@ -111,6 +111,20 @@ export function EmployeeForm({
     },
   });
 
+  // Register dropdown fields that use setValue (required for form submission)
+  React.useEffect(() => {
+    register('title');
+    register('nationality');
+    register('religion');
+    register('marital_status');
+    register('educational_qualification');
+    register('bank_name');
+    register('other_nationality');
+    register('previous_nationality');
+    register('languages_spoken');
+    register('uae_presence');
+  }, [register]);
+
   const title = watch('title');
   const nationality = watch('nationality');
   const religion = watch('religion');
