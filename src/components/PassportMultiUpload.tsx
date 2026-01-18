@@ -90,7 +90,7 @@ export function PassportMultiUpload({
     }
   };
 
-  const extractPassportData = useCallback(async (imageBase64: string): Promise<void> => {
+  const extractPassportData = useCallback(async (imageBase64: string): Promise<Record<string, unknown> | null> => {
     try {
       // Compress image to fit Claude API limits
       const compressedImage = await compressImageForAI(imageBase64);
@@ -103,12 +103,17 @@ export function PassportMultiUpload({
 
       if (response.ok) {
         const result = await response.json();
-        if (result.success && result.data && onExtracted) {
-          onExtracted(result.data);
+        if (result.success && result.data) {
+          if (onExtracted) {
+            onExtracted(result.data);
+          }
+          return result.data;
         }
       }
+      return null;
     } catch (error) {
       console.error('Passport extraction error:', error);
+      return null;
     }
   }, [onExtracted]);
 
@@ -170,8 +175,9 @@ export function PassportMultiUpload({
       }
 
       // If this is the inside pages, extract passport info
-      if (pageKey === 'insidePages' && onExtracted) {
-        await extractPassportData(preview);
+      let extractedData: Record<string, unknown> | null = null;
+      if (pageKey === 'insidePages') {
+        extractedData = await extractPassportData(preview);
       }
 
       // Update state with success
@@ -184,6 +190,7 @@ export function PassportMultiUpload({
           validating: false,
           error: null,
           storagePath: uploadResult.path,
+          extractedData: extractedData || undefined,
         },
       };
       setPages(newPages);

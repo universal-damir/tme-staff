@@ -242,8 +242,8 @@ export function EmployeeForm({
   };
 
   const handlePassportPagesChange = async (pages: {
-    cover: { storagePath: string | null; validated: boolean };
-    insidePages: { storagePath: string | null; validated: boolean };
+    cover: { storagePath: string | null; validated: boolean; extractedData?: Record<string, unknown> };
+    insidePages: { storagePath: string | null; validated: boolean; extractedData?: Record<string, unknown> };
   }) => {
     // Convert internal page state to PassportPageReference format
     const updatedPages: typeof passportPages = {};
@@ -259,6 +259,7 @@ export function EmployeeForm({
         path: pages.insidePages.storagePath,
         filename: pages.insidePages.storagePath.split('/').pop() || '',
         validated: true,
+        extracted_data: pages.insidePages.extractedData,
       };
     }
     setPassportPages(updatedPages);

@@ -102,6 +102,7 @@ export interface PassportPageReference {
   path: string;
   filename: string;
   validated: boolean;
+  extracted_data?: Record<string, unknown>;
 }
 
 export interface StaffDocumentReferences {

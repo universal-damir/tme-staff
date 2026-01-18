@@ -102,6 +102,9 @@ export async function validatePassportPage(
       throw new Error('No text response from Claude');
     }
 
+    // DEBUG: Log raw Claude response
+    console.log('[Passport Validation] Raw Claude response:', textBlock.text);
+
     // Parse JSON from response
     const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -109,6 +112,7 @@ export async function validatePassportPage(
     }
 
     const result = JSON.parse(jsonMatch[0]) as { valid: boolean; reason?: string };
+    console.log('[Passport Validation] Parsed result:', result);
 
     // Convert valid/invalid to page_type
     if (result.valid) {

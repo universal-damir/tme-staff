@@ -91,6 +91,9 @@ export async function validatePhoto(imageBase64: string): Promise<PhotoValidatio
       throw new Error('No text response from Claude');
     }
 
+    // DEBUG: Log raw Claude response
+    console.log('[Photo Validation] Raw Claude response:', textBlock.text);
+
     // Parse JSON from response
     const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -98,6 +101,7 @@ export async function validatePhoto(imageBase64: string): Promise<PhotoValidatio
     }
 
     const result = JSON.parse(jsonMatch[0]) as PhotoValidationResult;
+    console.log('[Photo Validation] Parsed result:', result);
 
     // Validate response structure
     if (typeof result.valid !== 'boolean') {
