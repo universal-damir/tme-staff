@@ -93,7 +93,7 @@ function SalaryInput({ label, value, onChange, error, placeholder, required }: S
     <div className="w-full">
       {label && (
         <label
-          className="block text-sm font-medium mb-1"
+          className="block text-sm font-medium mb-1 whitespace-nowrap"
           style={{ color: TME_COLORS.primary }}
         >
           {label}
@@ -293,7 +293,7 @@ export function SalaryBreakdown({
             />
 
             <SalaryInput
-              label={`Accommodation (${getPercentage(accommodation)})`}
+              label={`Accom. (${getPercentage(accommodation)})`}
               value={accommodation}
               onChange={(val) =>
                 onChange({
