@@ -183,8 +183,10 @@ export default function CustomDatePicker({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
-            className="absolute z-50 w-full mt-1 bg-white border-2 rounded-lg shadow-xl p-4 min-w-[320px]"
-            style={{ borderColor: TME_COLORS.primary }}
+            className="absolute z-50 w-full mt-1 bg-white border-2 rounded-lg shadow-xl p-4 min-w-[280px]"
+            onClick={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            style={{ borderColor: TME_COLORS.primary, maxWidth: 'calc(100vw - 2rem)' }}
           >
             {/* Calendar Header */}
             <div className="flex items-center justify-between mb-4 gap-2">

@@ -68,11 +68,34 @@ export default function CustomDropdown({
   const updateDropdownPosition = () => {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      setDropdownPosition({
-        top: rect.bottom + 4, // 4px gap - use viewport coordinates directly for fixed position
-        left: rect.left,
-        width: rect.width,
-      });
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      // Clamp width to not exceed viewport
+      const width = Math.min(rect.width, viewportWidth - 16);
+
+      // Clamp left so dropdown stays within viewport
+      let left = rect.left;
+      if (left + width > viewportWidth - 8) {
+        left = Math.max(8, viewportWidth - width - 8);
+      }
+      if (left < 8) left = 8;
+
+      // Check if dropdown should open upward
+      const spaceBelow = viewportHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const dropdownMaxHeight = 240; // max-h-60 = 240px
+
+      let top: number;
+      if (spaceBelow < dropdownMaxHeight && spaceAbove > spaceBelow) {
+        // Open upward
+        top = rect.top - Math.min(dropdownMaxHeight, spaceAbove - 8) - 4;
+      } else {
+        // Open downward
+        top = rect.bottom + 4;
+      }
+
+      setDropdownPosition({ top, left, width });
     }
   };
 

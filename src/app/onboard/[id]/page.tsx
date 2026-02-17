@@ -105,6 +105,8 @@ export default function OnboardingPage() {
           // Store employer data and show employee section
           setEmployerData(data);
           setShowEmployeeSection(true);
+          // Scroll to top when transitioning to employee section
+          window.scrollTo({ top: 0, behavior: 'smooth' });
           // Update local submission state
           setSubmission({
             ...submission,

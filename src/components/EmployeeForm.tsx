@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   TME_COLORS,
   TITLES,
@@ -28,6 +29,8 @@ import {
   Building2,
   FileSignature,
   Camera,
+  CheckCircle,
+  ChevronDown,
 } from 'lucide-react';
 
 // Sort lists alphabetically (with "Other" at the end)
@@ -43,16 +46,36 @@ const SORTED_NATIONALITIES = sortWithOtherLast(NATIONALITIES);
 const SORTED_RELIGIONS = sortWithOtherLast(RELIGIONS);
 const SORTED_BANKS = sortWithOtherLast(UAE_BANKS);
 
+// --- Step definitions for progressive reveal ---
+const STEP_LABELS = [
+  'Photo',
+  'Passport',
+  'Personal Details',
+  'Family Details',
+  'Address & Contact',
+  'Education & More',
+  'Review & Sign',
+];
+
 interface FormSectionProps {
   title: string;
   icon: React.ReactNode;
   children: React.ReactNode;
+  stepNumber?: number;
 }
 
-function FormSection({ title, icon, children }: FormSectionProps) {
+function FormSection({ title, icon, children, stepNumber }: FormSectionProps) {
   return (
-    <div className="bg-white rounded-xl p-6 shadow-sm">
+    <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm">
       <div className="flex items-center gap-3 mb-6">
+        {stepNumber !== undefined && (
+          <span
+            className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+            style={{ backgroundColor: TME_COLORS.primary }}
+          >
+            {stepNumber}
+          </span>
+        )}
         {icon}
         <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
           {title}
@@ -60,6 +83,68 @@ function FormSection({ title, icon, children }: FormSectionProps) {
       </div>
       {children}
     </div>
+  );
+}
+
+// --- Step Progress Bar ---
+function StepProgress({ currentStep, totalSteps }: { currentStep: number; totalSteps: number }) {
+  return (
+    <div className="bg-white rounded-xl p-4 shadow-sm mb-2">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+          Step {currentStep} of {totalSteps}
+        </span>
+        <span className="text-xs text-gray-500">
+          {STEP_LABELS[currentStep - 1] || ''}
+        </span>
+      </div>
+      <div className="w-full bg-gray-200 rounded-full h-2">
+        <motion.div
+          className="h-2 rounded-full"
+          style={{ backgroundColor: TME_COLORS.primary }}
+          initial={{ width: 0 }}
+          animate={{ width: `${(currentStep / totalSteps) * 100}%` }}
+          transition={{ duration: 0.5, ease: 'easeOut' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// --- Reveal animation wrapper ---
+const revealVariants = {
+  hidden: { opacity: 0, y: 30, height: 0, marginBottom: 0 },
+  visible: { opacity: 1, y: 0, height: 'auto', marginBottom: 24 },
+  exit: { opacity: 0, y: -20, height: 0, marginBottom: 0 },
+};
+
+function RevealSection({ show, children, onReveal }: { show: boolean; children: React.ReactNode; onReveal?: () => void }) {
+  const hasBeenShown = useRef(false);
+
+  useEffect(() => {
+    if (show && !hasBeenShown.current) {
+      hasBeenShown.current = true;
+      // Delay scroll to allow animation to start
+      if (onReveal) {
+        setTimeout(onReveal, 200);
+      }
+    }
+  }, [show, onReveal]);
+
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          variants={revealVariants}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -86,6 +171,14 @@ export function EmployeeForm({
   // Refs to track latest values (avoids stale closure issues in callbacks)
   const photoDocRef = React.useRef(photoDoc);
   const passportPagesRef = React.useRef(passportPages);
+
+  // Section refs for auto-scrolling
+  const passportRef = useRef<HTMLDivElement>(null);
+  const personalRef = useRef<HTMLDivElement>(null);
+  const familyRef = useRef<HTMLDivElement>(null);
+  const contactRef = useRef<HTMLDivElement>(null);
+  const educationRef = useRef<HTMLDivElement>(null);
+  const signatureRef = useRef<HTMLDivElement>(null);
 
   // Keep refs in sync with state
   React.useEffect(() => {
@@ -142,6 +235,12 @@ export function EmployeeForm({
   const mobileUae = watch('mobile_uae');
   const mobileInternational = watch('mobile_international');
   const homeTelephone = watch('home_telephone');
+  const personalEmail = watch('personal_email');
+  const homeStreetAddress = watch('home_street_address');
+  const homeCity = watch('home_city');
+  const homeCountry = watch('home_country');
+  const fatherFullName = watch('father_full_name');
+  const motherFullName = watch('mother_full_name');
 
   // New checkbox states for nationality and address
   const [hasOtherNationality, setHasOtherNationality] = useState(
@@ -155,8 +254,34 @@ export function EmployeeForm({
     !!(submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
   );
 
-  // Check if passport inside pages are uploaded (required before personal details can be edited)
+  // --- Progressive reveal step computation ---
+  const isPhotoUploaded = !!photoDoc;
   const isPassportUploaded = !!(passportPages.insidePages?.validated);
+  const isPersonalComplete = !!(firstName && lastName && nationality);
+  const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
+  const isContactComplete = !!(homeStreetAddress && homeCity && homeCountry && personalEmail);
+  const isEducationComplete = !!(educationalQualification && languagesSpoken.length > 0);
+
+  // Compute the highest unlocked step (1-indexed)
+  const computeCurrentStep = useCallback(() => {
+    if (!isPhotoUploaded) return 1;
+    if (!isPassportUploaded) return 2;
+    if (!isPersonalComplete) return 3;
+    if (!isFamilyComplete) return 4;
+    if (!isContactComplete) return 5;
+    if (!isEducationComplete) return 6;
+    return 7;
+  }, [isPhotoUploaded, isPassportUploaded, isPersonalComplete, isFamilyComplete, isContactComplete, isEducationComplete]);
+
+  const currentStep = computeCurrentStep();
+  const totalSteps = STEP_LABELS.length;
+
+  // Auto-scroll to newly revealed section
+  const scrollToRef = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
+    if (ref.current) {
+      ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   // Auto-calculate full name
   React.useEffect(() => {
@@ -170,7 +295,6 @@ export function EmployeeForm({
     // Validate photo is uploaded
     if (!photoDoc) {
       setPhotoError('Please upload your photo');
-      // Scroll to top where photo upload is
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -205,7 +329,7 @@ export function EmployeeForm({
     if (result) {
       const newDoc = { ...result, validated: false };
       setPhotoDoc(newDoc);
-      photoDocRef.current = newDoc; // Update ref immediately
+      photoDocRef.current = newDoc;
       setPhotoError(null);
       await updateDocumentReferences(submission.id, {
         photo: newDoc,
@@ -245,7 +369,6 @@ export function EmployeeForm({
     cover: { storagePath: string | null; validated: boolean; extractedData?: Record<string, unknown> };
     insidePages: { storagePath: string | null; validated: boolean; extractedData?: Record<string, unknown> };
   }) => {
-    // Convert internal page state to PassportPageReference format
     const updatedPages: typeof passportPages = {};
     if (pages.cover.storagePath && pages.cover.validated) {
       updatedPages.cover = {
@@ -267,12 +390,10 @@ export function EmployeeForm({
   };
 
   const handlePassportExtracted = (data: Partial<EmployeeFormData> & { family_name?: string }) => {
-    // Map extraction fields to form fields
     const fieldMapping: Record<string, string> = {
       family_name: 'last_name',
     };
 
-    // Auto-fill form fields from extracted data
     Object.entries(data).forEach(([key, value]) => {
       if (value !== undefined) {
         const formField = fieldMapping[key] || key;
@@ -283,49 +404,57 @@ export function EmployeeForm({
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
-      {/* Document Upload */}
-      <FormSection
-        title="Documents"
-        icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-      >
-        <div className="space-y-6">
-          {/* Photo Upload */}
-          <div>
-            <h3 className="text-sm font-medium mb-3" style={{ color: TME_COLORS.primary }}>
-              Passport Photo
-            </h3>
-            <PhotoUpload
-              value={photoDoc}
-              onUpload={handlePhotoUpload}
-              onValidated={async (validated, validationErrors) => {
-                // Use ref to get latest photoDoc (avoids stale closure)
-                const currentPhotoDoc = photoDocRef.current;
-                if (currentPhotoDoc) {
-                  const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
-                  setPhotoDoc(updatedDoc);
-                  photoDocRef.current = updatedDoc; // Update ref immediately
-                  // Persist validation result to Supabase
-                  await updateDocumentReferences(submission.id, {
-                    photo: updatedDoc,
-                    passportPages: passportPagesRef.current,
-                  });
-                }
-                // Clear error when photo is uploaded
-                if (photoError) setPhotoError(null);
-              }}
-              onRemove={() => {
-                setPhotoDoc(undefined);
-                photoDocRef.current = undefined;
-              }}
-              error={photoError || undefined}
-            />
-          </div>
+      {/* Step Progress */}
+      <StepProgress currentStep={currentStep} totalSteps={totalSteps} />
 
-          {/* Passport Pages Upload */}
-          <div>
-            <h3 className="text-sm font-medium mb-3" style={{ color: TME_COLORS.primary }}>
-              Passport Pages
-            </h3>
+      {/* Step 1: Photo Upload - Always visible */}
+      <FormSection
+        title="Passport Photo"
+        icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        stepNumber={1}
+      >
+        <PhotoUpload
+          value={photoDoc}
+          onUpload={handlePhotoUpload}
+          onValidated={async (validated, validationErrors) => {
+            const currentPhotoDoc = photoDocRef.current;
+            if (currentPhotoDoc) {
+              const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
+              setPhotoDoc(updatedDoc);
+              photoDocRef.current = updatedDoc;
+              await updateDocumentReferences(submission.id, {
+                photo: updatedDoc,
+                passportPages: passportPagesRef.current,
+              });
+            }
+            if (photoError) setPhotoError(null);
+          }}
+          onRemove={() => {
+            setPhotoDoc(undefined);
+            photoDocRef.current = undefined;
+          }}
+          error={photoError || undefined}
+        />
+        {isPhotoUploaded && (
+          <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
+            <CheckCircle className="w-4 h-4" />
+            Photo uploaded. Continue with passport below.
+            <ChevronDown className="w-4 h-4 animate-bounce" />
+          </div>
+        )}
+      </FormSection>
+
+      {/* Step 2: Passport Pages - After photo uploaded */}
+      <RevealSection
+        show={isPhotoUploaded}
+        onReveal={() => scrollToRef(passportRef)}
+      >
+        <div ref={passportRef}>
+          <FormSection
+            title="Passport Pages"
+            icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            stepNumber={2}
+          >
             <PassportMultiUpload
               submissionId={submission.id}
               onUpload={handlePassportPageUpload}
@@ -345,511 +474,558 @@ export function EmployeeForm({
             {passportError && (
               <p className="mt-2 text-sm text-red-500">{passportError}</p>
             )}
-          </div>
-        </div>
-      </FormSection>
-
-      {/* Personal Details */}
-      <FormSection
-        title="Personal Details"
-        icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-      >
-        {!isPassportUploaded && (
-          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2">
-            <span className="text-amber-600 text-sm">
-              ⚠️ Please upload passport pages above first. Personal details will be auto-filled from your passport.
-            </span>
-          </div>
-        )}
-        <div className={`space-y-4 ${!isPassportUploaded ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <CustomDropdown
-              label="Title"
-              options={TITLES.map(t => ({ value: t, label: t }))}
-              value={title || ''}
-              onChange={(val) => setValue('title', val)}
-              error={errors.title?.message}
-              required
-              disabled={!isPassportUploaded}
-            />
-            <Input
-              label="First Name"
-              error={errors.first_name?.message}
-              required
-              disabled={!isPassportUploaded}
-              {...register('first_name', { required: 'Required' })}
-            />
-            <Input
-              label="Middle Name"
-              disabled={!isPassportUploaded}
-              {...register('middle_name')}
-            />
-            <Input
-              label="Family Name"
-              error={errors.last_name?.message}
-              required
-              disabled={!isPassportUploaded}
-              {...register('last_name', { required: 'Required' })}
-            />
-          </div>
-
-          <Input
-            label="Full Name"
-            value={calculateFullName(firstName || '', middleName, lastName || '')}
-            disabled
-            helperText="Auto-calculated from name fields"
-          />
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <CustomDropdown
-              label="Nationality"
-              options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
-              value={nationality || ''}
-              onChange={(val) => setValue('nationality', val)}
-              error={errors.nationality?.message}
-              required
-              searchable
-              disabled={!isPassportUploaded}
-            />
-          </div>
-
-          {/* Other Nationality */}
-          <div className="space-y-2">
-            <label className={`flex items-center gap-2 ${isPassportUploaded ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-              <input
-                type="checkbox"
-                checked={hasOtherNationality}
-                onChange={(e) => {
-                  setHasOtherNationality(e.target.checked);
-                  if (!e.target.checked) {
-                    setValue('other_nationality', undefined);
-                  }
-                }}
-                className="w-4 h-4 rounded border-gray-300"
-                disabled={!isPassportUploaded}
-              />
-              <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-                I have another nationality
-              </span>
-            </label>
-            {hasOtherNationality && (
-              <div className="pl-6">
-                <CustomDropdown
-                  label="Other Nationality"
-                  options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
-                  value={otherNationality || ''}
-                  onChange={(val) => setValue('other_nationality', val)}
-                  placeholder="Select nationality"
-                  searchable
-                  disabled={!isPassportUploaded}
-                />
+            {isPassportUploaded && (
+              <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
+                <CheckCircle className="w-4 h-4" />
+                Passport verified. Please review your personal details below.
+                <ChevronDown className="w-4 h-4 animate-bounce" />
               </div>
             )}
-          </div>
+          </FormSection>
+        </div>
+      </RevealSection>
 
-          {/* Previous Nationality */}
-          <div className="space-y-2">
-            <label className={`flex items-center gap-2 ${isPassportUploaded ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-              <input
-                type="checkbox"
-                checked={hasPreviousNationality}
-                onChange={(e) => {
-                  setHasPreviousNationality(e.target.checked);
-                  if (!e.target.checked) {
-                    setValue('previous_nationality', undefined);
-                  }
-                }}
-                className="w-4 h-4 rounded border-gray-300"
-                disabled={!isPassportUploaded}
-              />
-              <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-                I had a previous nationality
-              </span>
-            </label>
-            {hasPreviousNationality && (
-              <div className="pl-6">
+      {/* Step 3: Personal Details - After passport validated */}
+      <RevealSection
+        show={isPassportUploaded}
+        onReveal={() => scrollToRef(personalRef)}
+      >
+        <div ref={personalRef}>
+          <FormSection
+            title="Personal Details"
+            icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            stepNumber={3}
+          >
+            <p className="text-sm text-gray-500 mb-4">
+              These details were auto-filled from your passport. Please review and correct if needed.
+            </p>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <CustomDropdown
-                  label="Previous Nationality"
-                  options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
-                  value={previousNationality || ''}
-                  onChange={(val) => setValue('previous_nationality', val)}
-                  placeholder="Select previous nationality"
-                  searchable
-                  disabled={!isPassportUploaded}
+                  label="Title"
+                  options={TITLES.map(t => ({ value: t, label: t }))}
+                  value={title || ''}
+                  onChange={(val) => setValue('title', val)}
+                  error={errors.title?.message}
+                  required
+                />
+                <Input
+                  label="First Name"
+                  error={errors.first_name?.message}
+                  required
+                  {...register('first_name', { required: 'Required' })}
+                />
+                <Input
+                  label="Middle Name"
+                  {...register('middle_name')}
+                />
+                <Input
+                  label="Family Name"
+                  error={errors.last_name?.message}
+                  required
+                  {...register('last_name', { required: 'Required' })}
                 />
               </div>
-            )}
-          </div>
+
+              <Input
+                label="Full Name"
+                value={calculateFullName(firstName || '', middleName, lastName || '')}
+                disabled
+                helperText="Auto-calculated from name fields"
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CustomDropdown
+                  label="Nationality"
+                  options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
+                  value={nationality || ''}
+                  onChange={(val) => setValue('nationality', val)}
+                  error={errors.nationality?.message}
+                  required
+                  searchable
+                />
+              </div>
+
+              {/* Other Nationality */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={hasOtherNationality}
+                    onChange={(e) => {
+                      setHasOtherNationality(e.target.checked);
+                      if (!e.target.checked) {
+                        setValue('other_nationality', undefined);
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                    I have another nationality
+                  </span>
+                </label>
+                {hasOtherNationality && (
+                  <div className="pl-6">
+                    <CustomDropdown
+                      label="Other Nationality"
+                      options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
+                      value={otherNationality || ''}
+                      onChange={(val) => setValue('other_nationality', val)}
+                      placeholder="Select nationality"
+                      searchable
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Previous Nationality */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={hasPreviousNationality}
+                    onChange={(e) => {
+                      setHasPreviousNationality(e.target.checked);
+                      if (!e.target.checked) {
+                        setValue('previous_nationality', undefined);
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                    I had a previous nationality
+                  </span>
+                </label>
+                {hasPreviousNationality && (
+                  <div className="pl-6">
+                    <CustomDropdown
+                      label="Previous Nationality"
+                      options={SORTED_NATIONALITIES.map(n => ({ value: n, label: n }))}
+                      value={previousNationality || ''}
+                      onChange={(val) => setValue('previous_nationality', val)}
+                      placeholder="Select previous nationality"
+                      searchable
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </FormSection>
         </div>
-      </FormSection>
+      </RevealSection>
 
-      {/* Family Details */}
-      <FormSection
-        title="Family Details"
-        icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+      {/* Step 4: Family Details - After personal details complete */}
+      <RevealSection
+        show={isPersonalComplete}
+        onReveal={() => scrollToRef(familyRef)}
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              label="Father's Full Name"
-              error={errors.father_full_name?.message}
-              required
-              {...register('father_full_name', { required: 'Required' })}
-            />
-            <Input
-              label="Mother's Full Name"
-              error={errors.mother_full_name?.message}
-              required
-              {...register('mother_full_name', { required: 'Required' })}
-            />
-          </div>
+        <div ref={familyRef}>
+          <FormSection
+            title="Family Details"
+            icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            stepNumber={4}
+          >
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Father's Full Name"
+                  error={errors.father_full_name?.message}
+                  required
+                  {...register('father_full_name', { required: 'Required' })}
+                />
+                <Input
+                  label="Mother's Full Name"
+                  error={errors.mother_full_name?.message}
+                  required
+                  {...register('mother_full_name', { required: 'Required' })}
+                />
+              </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <CustomDropdown
-              label="Religion"
-              options={SORTED_RELIGIONS.map(r => ({ value: r, label: r }))}
-              value={religion || ''}
-              onChange={(val) => setValue('religion', val)}
-              error={errors.religion?.message}
-              required
-              searchable
-            />
-            <CustomDropdown
-              label="Marital Status"
-              options={MARITAL_STATUS_OPTIONS.map(m => ({ value: m, label: m }))}
-              value={maritalStatus || ''}
-              onChange={(val) => setValue('marital_status', val)}
-              error={errors.marital_status?.message}
-              required
-            />
-          </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CustomDropdown
+                  label="Religion"
+                  options={SORTED_RELIGIONS.map(r => ({ value: r, label: r }))}
+                  value={religion || ''}
+                  onChange={(val) => setValue('religion', val)}
+                  error={errors.religion?.message}
+                  required
+                  searchable
+                />
+                <CustomDropdown
+                  label="Marital Status"
+                  options={MARITAL_STATUS_OPTIONS.map(m => ({ value: m, label: m }))}
+                  value={maritalStatus || ''}
+                  onChange={(val) => setValue('marital_status', val)}
+                  error={errors.marital_status?.message}
+                  required
+                />
+              </div>
 
-          {maritalStatus === 'Married' && (
-            <Input
-              label="Spouse Name"
-              error={errors.spouse_name?.message}
-              required
-              {...register('spouse_name', {
-                required: maritalStatus === 'Married' ? 'Required' : false,
-              })}
-            />
-          )}
+              {maritalStatus === 'Married' && (
+                <Input
+                  label="Spouse Name"
+                  error={errors.spouse_name?.message}
+                  required
+                  {...register('spouse_name', {
+                    required: maritalStatus === 'Married' ? 'Required' : false,
+                  })}
+                />
+              )}
+            </div>
+          </FormSection>
         </div>
-      </FormSection>
+      </RevealSection>
 
-      {/* Contact - Home Country */}
-      <FormSection
-        title="Home Country Address"
-        icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+      {/* Step 5: Address & Contact - After family complete */}
+      <RevealSection
+        show={isFamilyComplete}
+        onReveal={() => scrollToRef(contactRef)}
       >
-        <div className="space-y-4">
-          <Input
-            label="Street Address"
-            placeholder="Enter your street address"
-            error={errors.home_street_address?.message}
-            required
-            {...register('home_street_address', { required: 'Street address is required' })}
-          />
+        <div ref={contactRef} className="space-y-6">
+          {/* Home Country Address */}
+          <FormSection
+            title="Home Country Address"
+            icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            stepNumber={5}
+          >
+            <div className="space-y-4">
+              <Input
+                label="Street Address"
+                placeholder="Enter your street address"
+                error={errors.home_street_address?.message}
+                required
+                {...register('home_street_address', { required: 'Street address is required' })}
+              />
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Input
-              label="City"
-              placeholder="Enter city"
-              error={errors.home_city?.message}
-              required
-              {...register('home_city', { required: 'City is required' })}
-            />
-            <Input
-              label="Postal Code"
-              placeholder="Enter postal code"
-              error={errors.home_postal_code?.message}
-              {...register('home_postal_code')}
-            />
-            <CustomDropdown
-              label="Country"
-              value={watch('home_country') || ''}
-              onChange={(value) => setValue('home_country', value)}
-              options={SORTED_NATIONALITIES.map((n) => ({ value: n, label: n }))}
-              placeholder="Select country"
-              error={errors.home_country?.message}
-              required
-              searchable
-            />
-          </div>
-
-          <PhoneInput
-            label="Home Telephone"
-            value={homeTelephone}
-            onChange={(value) => setValue('home_telephone', value || '')}
-            defaultCountry="AE"
-          />
-        </div>
-      </FormSection>
-
-      {/* Contact - UAE (Conditional) */}
-      <FormSection
-        title="UAE Address"
-        icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-      >
-        <div className="space-y-4">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isInUAE}
-              onChange={(e) => {
-                setIsInUAE(e.target.checked);
-                setValue('uae_presence', e.target.checked ? 'inside' : 'outside');
-                if (!e.target.checked) {
-                  setValue('uae_flat_villa', '');
-                  setValue('uae_building_name', '');
-                  setValue('uae_street_name', '');
-                }
-              }}
-              className="w-4 h-4 rounded border-gray-300"
-            />
-            <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-              Applicant is currently in the UAE
-            </span>
-          </label>
-
-          {isInUAE && (
-            <div className="space-y-4 pl-6 border-l-2 border-gray-200">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Input
-                  label="Flat/Villa Number"
-                  error={errors.uae_flat_villa?.message}
+                  label="City"
+                  placeholder="Enter city"
+                  error={errors.home_city?.message}
                   required
-                  {...register('uae_flat_villa', {
-                    required: isInUAE ? 'Required' : false,
-                  })}
+                  {...register('home_city', { required: 'City is required' })}
                 />
                 <Input
-                  label="Building Name"
-                  error={errors.uae_building_name?.message}
-                  required
-                  {...register('uae_building_name', {
-                    required: isInUAE ? 'Required' : false,
-                  })}
+                  label="Postal Code"
+                  placeholder="Enter postal code"
+                  error={errors.home_postal_code?.message}
+                  {...register('home_postal_code')}
                 />
-                <Input
-                  label="Street Name"
-                  error={errors.uae_street_name?.message}
-                  required
-                  {...register('uae_street_name', {
-                    required: isInUAE ? 'Required' : false,
-                  })}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      </FormSection>
-
-      {/* Email & Phone */}
-      <FormSection
-        title="Email & Phone"
-        icon={<Mail className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              label="Personal Email"
-              type="email"
-              error={errors.personal_email?.message}
-              required
-              {...register('personal_email', {
-                required: 'Required',
-                pattern: {
-                  value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                  message: 'Invalid email format',
-                },
-              })}
-            />
-            <div>
-              <Input
-                label="Company Email"
-                type="email"
-                disabled={sameEmails}
-                {...register('company_email')}
-              />
-              <label className="flex items-center gap-2 mt-2 text-sm text-gray-600">
-                <input
-                  type="checkbox"
-                  {...register('same_emails')}
-                  className="rounded"
-                />
-                Same as personal email
-              </label>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <PhoneInput
-              label="UAE Mobile"
-              value={mobileUae}
-              onChange={(value) => setValue('mobile_uae', value || '')}
-              country="AE"
-            />
-            <PhoneInput
-              label="International Mobile"
-              value={mobileInternational}
-              onChange={(value) => setValue('mobile_international', value || '')}
-              defaultCountry="AE"
-            />
-          </div>
-        </div>
-      </FormSection>
-
-      {/* Education & Languages */}
-      <FormSection
-        title="Education & Languages"
-        icon={<GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-      >
-        <div className="space-y-4">
-          <CustomDropdown
-            label="Educational Qualification"
-            options={EDUCATIONAL_QUALIFICATIONS.map(e => ({ value: e, label: e }))}
-            value={educationalQualification || ''}
-            onChange={(val) => setValue('educational_qualification', val)}
-            error={errors.educational_qualification?.message}
-            required
-          />
-
-          <MultiSelectDropdown
-            label="Languages Spoken"
-            options={SORTED_LANGUAGES}
-            value={languagesSpoken}
-            onChange={(values) => setValue('languages_spoken', values)}
-            required
-            searchable
-            allowCustom
-            customPlaceholder="Add another language..."
-            error={errors.languages_spoken?.message}
-          />
-        </div>
-      </FormSection>
-
-      {/* Bank Details */}
-      <FormSection
-        title="Bank Details"
-        icon={<Building2 className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-      >
-        <div className="space-y-4">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              {...register('has_uae_bank')}
-              className="rounded"
-            />
-            <span className="text-sm text-gray-700">I have a UAE bank account</span>
-          </label>
-
-          {hasUAEBank && (
-            <div className="space-y-4 pt-4 border-t border-gray-200">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <CustomDropdown
-                  label="Bank Name"
-                  options={SORTED_BANKS.map(b => ({ value: b, label: b }))}
-                  value={bankName || ''}
-                  onChange={(val) => setValue('bank_name', val)}
-                  error={errors.bank_name?.message}
+                  label="Country"
+                  value={homeCountry || ''}
+                  onChange={(value) => setValue('home_country', value)}
+                  options={SORTED_NATIONALITIES.map((n) => ({ value: n, label: n }))}
+                  placeholder="Select country"
+                  error={errors.home_country?.message}
                   required
                   searchable
                 />
-                <Input
-                  label="Branch"
-                  {...register('bank_branch')}
+              </div>
+
+              <PhoneInput
+                label="Home Telephone"
+                value={homeTelephone}
+                onChange={(value) => setValue('home_telephone', value || '')}
+                defaultCountry="AE"
+              />
+            </div>
+          </FormSection>
+
+          {/* UAE Address */}
+          <FormSection
+            title="UAE Address"
+            icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
+            <div className="space-y-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isInUAE}
+                  onChange={(e) => {
+                    setIsInUAE(e.target.checked);
+                    setValue('uae_presence', e.target.checked ? 'inside' : 'outside');
+                    if (!e.target.checked) {
+                      setValue('uae_flat_villa', '');
+                      setValue('uae_building_name', '');
+                      setValue('uae_street_name', '');
+                    }
+                  }}
+                  className="w-4 h-4 rounded border-gray-300"
                 />
+                <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                  Applicant is currently in the UAE
+                </span>
+              </label>
+
+              {isInUAE && (
+                <div className="space-y-4 pl-6 border-l-2 border-gray-200">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Input
+                      label="Flat/Villa Number"
+                      error={errors.uae_flat_villa?.message}
+                      required
+                      {...register('uae_flat_villa', {
+                        required: isInUAE ? 'Required' : false,
+                      })}
+                    />
+                    <Input
+                      label="Building Name"
+                      error={errors.uae_building_name?.message}
+                      required
+                      {...register('uae_building_name', {
+                        required: isInUAE ? 'Required' : false,
+                      })}
+                    />
+                    <Input
+                      label="Street Name"
+                      error={errors.uae_street_name?.message}
+                      required
+                      {...register('uae_street_name', {
+                        required: isInUAE ? 'Required' : false,
+                      })}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </FormSection>
+
+          {/* Email & Phone */}
+          <FormSection
+            title="Email & Phone"
+            icon={<Mail className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Personal Email"
+                  type="email"
+                  error={errors.personal_email?.message}
+                  required
+                  {...register('personal_email', {
+                    required: 'Required',
+                    pattern: {
+                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                      message: 'Invalid email format',
+                    },
+                  })}
+                />
+                <div>
+                  <Input
+                    label="Company Email"
+                    type="email"
+                    disabled={sameEmails}
+                    {...register('company_email')}
+                  />
+                  <label className="flex items-center gap-2 mt-2 text-sm text-gray-600">
+                    <input
+                      type="checkbox"
+                      {...register('same_emails')}
+                      className="rounded"
+                    />
+                    Same as personal email
+                  </label>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Account Name"
-                  error={errors.bank_account_name?.message}
-                  required
-                  {...register('bank_account_name', {
-                    required: hasUAEBank ? 'Required' : false,
-                  })}
+                <PhoneInput
+                  label="UAE Mobile"
+                  value={mobileUae}
+                  onChange={(value) => setValue('mobile_uae', value || '')}
+                  country="AE"
                 />
-                <Input
-                  label="SWIFT Code"
-                  {...register('bank_swift')}
+                <PhoneInput
+                  label="International Mobile"
+                  value={mobileInternational}
+                  onChange={(value) => setValue('mobile_international', value || '')}
+                  defaultCountry="AE"
                 />
               </div>
+            </div>
+          </FormSection>
+        </div>
+      </RevealSection>
 
-              <Input
-                label="IBAN"
-                placeholder="AE..."
-                error={errors.bank_iban?.message}
+      {/* Step 6: Education & More - After contact complete */}
+      <RevealSection
+        show={isContactComplete}
+        onReveal={() => scrollToRef(educationRef)}
+      >
+        <div ref={educationRef} className="space-y-6">
+          {/* Education & Languages */}
+          <FormSection
+            title="Education & Languages"
+            icon={<GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            stepNumber={6}
+          >
+            <div className="space-y-4">
+              <CustomDropdown
+                label="Educational Qualification"
+                options={EDUCATIONAL_QUALIFICATIONS.map(e => ({ value: e, label: e }))}
+                value={educationalQualification || ''}
+                onChange={(val) => setValue('educational_qualification', val)}
+                error={errors.educational_qualification?.message}
                 required
-                {...register('bank_iban', {
-                  required: hasUAEBank ? 'Required' : false,
-                  pattern: {
-                    value: /^AE\d{21}$/i,
-                    message: 'Invalid UAE IBAN format',
-                  },
-                })}
+              />
+
+              <MultiSelectDropdown
+                label="Languages Spoken"
+                options={SORTED_LANGUAGES}
+                value={languagesSpoken}
+                onChange={(values) => setValue('languages_spoken', values)}
+                required
+                searchable
+                allowCustom
+                customPlaceholder="Add another language..."
+                error={errors.languages_spoken?.message}
               />
             </div>
-          )}
-        </div>
-      </FormSection>
+          </FormSection>
 
-      {/* Other Information */}
-      <div className="bg-white rounded-xl p-6 shadow-sm">
-        <label
-          className="block text-sm font-medium mb-2"
-          style={{ color: TME_COLORS.primary }}
-        >
-          Other Information
-        </label>
-        <textarea
-          className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 min-h-[100px]"
-          placeholder="Any additional information you would like to provide..."
-          {...register('other_information')}
-        />
-      </div>
+          {/* Bank Details */}
+          <FormSection
+            title="Bank Details"
+            icon={<Building2 className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
+            <div className="space-y-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  {...register('has_uae_bank')}
+                  className="rounded"
+                />
+                <span className="text-sm text-gray-700">I have a UAE bank account</span>
+              </label>
 
-      {/* Signature */}
-      {!reuseEmployerSignature && (
-        <FormSection
-          title="Signature"
-          icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-        >
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600">
-              By signing below, I confirm that the information provided above is accurate and complete.
-            </p>
-            <SignaturePad
-              onSignatureChange={setSignature}
-              disabled={isSubmitting}
-              label="Employee Signature"
+              {hasUAEBank && (
+                <div className="space-y-4 pt-4 border-t border-gray-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <CustomDropdown
+                      label="Bank Name"
+                      options={SORTED_BANKS.map(b => ({ value: b, label: b }))}
+                      value={bankName || ''}
+                      onChange={(val) => setValue('bank_name', val)}
+                      error={errors.bank_name?.message}
+                      required
+                      searchable
+                    />
+                    <Input
+                      label="Branch"
+                      {...register('bank_branch')}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input
+                      label="Account Name"
+                      error={errors.bank_account_name?.message}
+                      required
+                      {...register('bank_account_name', {
+                        required: hasUAEBank ? 'Required' : false,
+                      })}
+                    />
+                    <Input
+                      label="SWIFT Code"
+                      {...register('bank_swift')}
+                    />
+                  </div>
+
+                  <Input
+                    label="IBAN"
+                    placeholder="AE..."
+                    error={errors.bank_iban?.message}
+                    required
+                    {...register('bank_iban', {
+                      required: hasUAEBank ? 'Required' : false,
+                      pattern: {
+                        value: /^AE\d{21}$/i,
+                        message: 'Invalid UAE IBAN format',
+                      },
+                    })}
+                  />
+                </div>
+              )}
+            </div>
+          </FormSection>
+
+          {/* Other Information */}
+          <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm">
+            <label
+              className="block text-sm font-medium mb-2"
+              style={{ color: TME_COLORS.primary }}
+            >
+              Other Information
+            </label>
+            <textarea
+              className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 min-h-[100px]"
+              placeholder="Any additional information you would like to provide..."
+              {...register('other_information')}
             />
-            {signatureError && (
-              <p className="text-sm text-red-500">{signatureError}</p>
-            )}
           </div>
-        </FormSection>
-      )}
-
-      {reuseEmployerSignature && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-          <p className="text-sm text-blue-700">
-            Your signature from the employer section will be used for both sections.
-          </p>
         </div>
-      )}
+      </RevealSection>
 
-      {/* Submit Button */}
-      <div className="flex justify-end">
-        <Button
-          type="submit"
-          loading={isSubmitting}
-          size="lg"
-        >
-          Submit Onboarding Form
-        </Button>
-      </div>
+      {/* Step 7: Signature - After education complete */}
+      <RevealSection
+        show={isEducationComplete}
+        onReveal={() => scrollToRef(signatureRef)}
+      >
+        <div ref={signatureRef}>
+          {!reuseEmployerSignature && (
+            <FormSection
+              title="Review & Sign"
+              icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+              stepNumber={7}
+            >
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  By signing below, I confirm that the information provided above is accurate and complete.
+                </p>
+                <SignaturePad
+                  onSignatureChange={setSignature}
+                  disabled={isSubmitting}
+                  label="Employee Signature"
+                />
+                {signatureError && (
+                  <p className="text-sm text-red-500">{signatureError}</p>
+                )}
+              </div>
+            </FormSection>
+          )}
+
+          {reuseEmployerSignature && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-2">
+                <span
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                  style={{ backgroundColor: TME_COLORS.primary }}
+                >
+                  7
+                </span>
+                <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
+                  Signature
+                </h2>
+              </div>
+              <p className="text-sm text-blue-700">
+                Your signature from the employer section will be used for both sections.
+              </p>
+            </div>
+          )}
+
+          {/* Submit Button */}
+          <div className="flex justify-end mt-6">
+            <Button
+              type="submit"
+              loading={isSubmitting}
+              size="lg"
+            >
+              Submit Onboarding Form
+            </Button>
+          </div>
+        </div>
+      </RevealSection>
     </form>
   );
 }

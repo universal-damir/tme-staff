@@ -16,6 +16,12 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
   const [isEmpty, setIsEmpty] = useState(true);
   const [history, setHistory] = useState<string[]>([]);
   const [canUndo, setCanUndo] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+
+  // Detect touch device
+  useEffect(() => {
+    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  }, []);
 
   // Resize canvas to container width
   useEffect(() => {
@@ -115,6 +121,7 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
         style={{
           border: `2px solid ${isEmpty ? '#e5e7eb' : TME_COLORS.primary}`,
           borderRadius: '8px',
+          overflow: 'hidden',
           backgroundColor: disabled ? '#f5f5f5' : '#ffffff',
           transition: 'border-color 0.2s',
         }}
@@ -127,6 +134,7 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
             style: {
               width: '100%',
               cursor: disabled ? 'not-allowed' : 'crosshair',
+              touchAction: 'none',
             },
           }}
           onBegin={handleBegin}
@@ -146,7 +154,7 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
 
       <div className="flex justify-between items-center mt-2">
         <span className="text-sm text-gray-500">
-          Draw your signature {canUndo && <span className="text-gray-400">• ⌘Z to undo</span>}
+          Draw your signature {canUndo && <span className="text-gray-400">{isTouchDevice ? '• Tap Undo to erase' : '• ⌘Z to undo'}</span>}
         </span>
         <div className="flex gap-2">
           <button
