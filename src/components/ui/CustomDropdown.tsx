@@ -19,19 +19,10 @@ interface CustomDropdownProps {
   required?: boolean;
   placeholder?: string;
   disabled?: boolean;
-  searchable?: boolean; // Enable search functionality
-  formatBrackets?: boolean; // Display bracketed text on new line with smaller font
+  searchable?: boolean;
+  formatBrackets?: boolean;
 }
 
-/**
- * CustomDropdown - Reusable styled dropdown component
- * Features:
- * - TME design standards (42px height, colors, fonts)
- * - Clickable arrow to toggle
- * - Optional search functionality (searchable prop)
- * - Keyboard navigation (when searchable)
- * - Framer Motion animations
- */
 export default function CustomDropdown({
   label,
   value,
@@ -52,11 +43,23 @@ export default function CustomDropdown({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
-  // Track mount state for portal
+  // Detect mobile on mount
   useEffect(() => {
     setIsMounted(true);
-    return () => setIsMounted(false);
+    const checkMobile = () => {
+      setIsMobile(
+        'ontouchstart' in window &&
+        window.innerWidth < 768
+      );
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => {
+      setIsMounted(false);
+      window.removeEventListener('resize', checkMobile);
+    };
   }, []);
 
   // Filter options based on search term
@@ -71,27 +74,22 @@ export default function CustomDropdown({
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
 
-      // Clamp width to not exceed viewport
       const width = Math.min(rect.width, viewportWidth - 16);
 
-      // Clamp left so dropdown stays within viewport
       let left = rect.left;
       if (left + width > viewportWidth - 8) {
         left = Math.max(8, viewportWidth - width - 8);
       }
       if (left < 8) left = 8;
 
-      // Check if dropdown should open upward
       const spaceBelow = viewportHeight - rect.bottom;
       const spaceAbove = rect.top;
-      const dropdownMaxHeight = 240; // max-h-60 = 240px
+      const dropdownMaxHeight = 240;
 
       let top: number;
       if (spaceBelow < dropdownMaxHeight && spaceAbove > spaceBelow) {
-        // Open upward
         top = rect.top - Math.min(dropdownMaxHeight, spaceAbove - 8) - 4;
       } else {
-        // Open downward
         top = rect.bottom + 4;
       }
 
@@ -101,7 +99,7 @@ export default function CustomDropdown({
 
   // Update position when dropdown opens or on scroll/resize
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !isMobile) {
       updateDropdownPosition();
       window.addEventListener('scroll', updateDropdownPosition, true);
       window.addEventListener('resize', updateDropdownPosition);
@@ -110,13 +108,13 @@ export default function CustomDropdown({
         window.removeEventListener('resize', updateDropdownPosition);
       };
     }
-  }, [isOpen]);
+  }, [isOpen, isMobile]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
+    if (isMobile) return; // Native select handles its own closing
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      // Check if click is outside both container AND dropdown menu
       if (
         containerRef.current &&
         !containerRef.current.contains(target) &&
@@ -130,9 +128,8 @@ export default function CustomDropdown({
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [isMobile]);
 
-  // Handle selection
   const handleSelect = (optionValue: string) => {
     onChange(optionValue);
     setIsOpen(false);
@@ -140,7 +137,6 @@ export default function CustomDropdown({
     setFocusedIndex(-1);
   };
 
-  // Handle keyboard navigation (for searchable mode)
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!searchable || !isOpen) return;
 
@@ -167,9 +163,71 @@ export default function CustomDropdown({
     }
   };
 
-  // Get display label for current value
   const displayLabel = options.find((opt) => opt.value === value)?.label || placeholder;
 
+  // --- MOBILE: Use native <select> for best UX (iOS picker wheel, Android native) ---
+  if (isMobile) {
+    return (
+      <div ref={containerRef} className="relative">
+        {label && (
+          <label
+            className="block text-sm font-medium mb-1"
+            style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+          >
+            {label}
+            {required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+
+        <div className="relative">
+          <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={disabled}
+            className={`w-full px-3 py-2 text-sm rounded-lg border-2 transition-all duration-200 appearance-none bg-white ${
+              disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : ''
+            }`}
+            style={{
+              height: `${INPUT_HEIGHT}px`,
+              borderColor: error ? '#ef4444' : '#e5e7eb',
+              fontFamily: 'Inter, sans-serif',
+              color: value ? '#111827' : '#9ca3af',
+            }}
+          >
+            <option value="" disabled>
+              {placeholder}
+            </option>
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Arrow icon overlay */}
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg
+              className="w-5 h-5"
+              style={{ color: TME_COLORS.primary }}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </div>
+
+        {error && (
+          <p className="text-red-500 text-xs mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
+            {error}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // --- DESKTOP: Custom dropdown with portal ---
   return (
     <div ref={containerRef} className="relative">
       {label && (
@@ -182,10 +240,8 @@ export default function CustomDropdown({
         </label>
       )}
 
-      {/* Display / Toggle */}
       <div className="relative">
         {searchable && isOpen ? (
-          /* Search input for searchable mode when open */
           <div className="relative">
             <motion.input
               ref={inputRef}
@@ -214,16 +270,13 @@ export default function CustomDropdown({
               }}
               autoFocus
             />
-            {/* Dropdown arrow for search input */}
             <div
               className="absolute right-3 top-1/2 transform -translate-y-1/2 cursor-pointer"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 setIsOpen(!isOpen);
-                if (isOpen) {
-                  setSearchTerm('');
-                }
+                if (isOpen) setSearchTerm('');
               }}
             >
               <motion.svg
@@ -240,7 +293,6 @@ export default function CustomDropdown({
             </div>
           </div>
         ) : (
-          /* Regular display div for non-searchable or when closed */
           <motion.div
             onClick={() => !disabled && setIsOpen(!isOpen)}
             whileHover={!disabled ? { scale: 1.01 } : undefined}
@@ -254,17 +306,12 @@ export default function CustomDropdown({
               fontFamily: 'Inter, sans-serif',
             }}
             onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
-              if (!disabled && !isOpen && !error) {
-                e.currentTarget.style.borderColor = TME_COLORS.primary;
-              }
+              if (!disabled && !isOpen && !error) e.currentTarget.style.borderColor = TME_COLORS.primary;
             }}
             onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
-              if (!disabled && !isOpen && !error) {
-                e.currentTarget.style.borderColor = '#e5e7eb';
-              }
+              if (!disabled && !isOpen && !error) e.currentTarget.style.borderColor = '#e5e7eb';
             }}
           >
-            {/* Display value */}
             <div
               className={`text-sm flex-1 min-w-0 ${value ? 'text-gray-900' : 'text-gray-500'}`}
               style={{ fontFamily: 'Inter, sans-serif' }}
@@ -279,16 +326,13 @@ export default function CustomDropdown({
               )}
             </div>
 
-            {/* Dropdown arrow - clickable to toggle */}
             <div
               className={`flex-shrink-0 ${disabled ? '' : 'cursor-pointer'}`}
               onClick={(e) => {
                 if (!disabled) {
                   e.stopPropagation();
                   setIsOpen(!isOpen);
-                  if (isOpen) {
-                    setSearchTerm('');
-                  }
+                  if (isOpen) setSearchTerm('');
                 }
               }}
             >
@@ -308,7 +352,6 @@ export default function CustomDropdown({
         )}
       </div>
 
-      {/* Dropdown menu - rendered via portal */}
       {isMounted && isOpen && createPortal(
         <AnimatePresence>
           <motion.div
@@ -356,7 +399,6 @@ export default function CustomDropdown({
         document.body
       )}
 
-      {/* Error message */}
       {error && (
         <p className="text-red-500 text-xs mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
           {error}

@@ -387,6 +387,11 @@ export function EmployeeForm({
     }
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
+    // Persist to Supabase (handles both adds and removals)
+    await updateDocumentReferences(submission.id, {
+      photo: photoDocRef.current,
+      passportPages: updatedPages,
+    });
   };
 
   const handlePassportExtracted = (data: Partial<EmployeeFormData> & { family_name?: string }) => {
@@ -429,9 +434,14 @@ export function EmployeeForm({
             }
             if (photoError) setPhotoError(null);
           }}
-          onRemove={() => {
+          onRemove={async () => {
             setPhotoDoc(undefined);
             photoDocRef.current = undefined;
+            // Persist removal to Supabase
+            await updateDocumentReferences(submission.id, {
+              photo: undefined,
+              passportPages: passportPagesRef.current,
+            });
           }}
           error={photoError || undefined}
         />

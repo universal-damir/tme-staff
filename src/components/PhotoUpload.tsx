@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { compressImageForAI } from '@/lib/utils';
+import { getDocumentUrl } from '@/lib/supabase';
 import { Camera, Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 
@@ -116,6 +117,8 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
   };
 
   const isValidated = value?.validated ?? false;
+  // Build the image source: prefer local preview, fall back to Supabase storage URL
+  const imageSrc = preview || (value?.path ? getDocumentUrl(value.path) : null);
 
   return (
     <div className="w-full">
@@ -154,13 +157,18 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
         <div className="relative border-2 rounded-lg p-4" style={{ borderColor: isValidated ? '#22c55e' : '#e5e7eb' }}>
           <div className="flex items-start gap-4">
             <div className="relative w-32 h-32 rounded-lg overflow-hidden bg-gray-100">
-              {preview && (
+              {imageSrc ? (
                 <Image
-                  src={preview}
+                  src={imageSrc}
                   alt="Photo preview"
                   fill
                   className="object-cover"
+                  unoptimized
                 />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <Camera className="w-8 h-8 text-gray-300" />
+                </div>
               )}
               {(isUploading || isValidating) && (
                 <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
@@ -192,6 +200,21 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
                 <div className="flex items-center gap-2 text-sm text-green-600">
                   <CheckCircle className="w-4 h-4" />
                   Photo validated
+                </div>
+              )}
+
+              {!isValidated && !isValidating && !isUploading && value && validationErrors.length === 0 && (
+                <div className="flex items-center gap-2 text-sm text-amber-600">
+                  <AlertCircle className="w-4 h-4" />
+                  Photo needs re-upload for validation
+                  <button
+                    type="button"
+                    onClick={() => inputRef.current?.click()}
+                    className="ml-1 text-sm underline"
+                    style={{ color: TME_COLORS.primary }}
+                  >
+                    Re-upload
+                  </button>
                 </div>
               )}
 

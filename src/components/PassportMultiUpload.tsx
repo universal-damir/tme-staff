@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { compressImageForAI } from '@/lib/utils';
+import { getDocumentUrl } from '@/lib/supabase';
 import { UploadSlot } from '@/components/UploadSlot';
 import { Info } from 'lucide-react';
 import type { PassportPageType } from '@/lib/passport-page-validation';
@@ -42,7 +43,7 @@ export function PassportMultiUpload({
   }>({
     cover: {
       file: null,
-      preview: initialPages?.cover?.path || null,
+      preview: initialPages?.cover?.path ? getDocumentUrl(initialPages.cover.path) : null,
       validated: initialPages?.cover?.validated || false,
       validating: false,
       error: null,
@@ -50,7 +51,7 @@ export function PassportMultiUpload({
     },
     insidePages: {
       file: null,
-      preview: initialPages?.insidePages?.path || null,
+      preview: initialPages?.insidePages?.path ? getDocumentUrl(initialPages.insidePages.path) : null,
       validated: initialPages?.insidePages?.validated || false,
       validating: false,
       error: null,
