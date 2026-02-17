@@ -49,7 +49,8 @@ const SORTED_BANKS = sortWithOtherLast(UAE_BANKS);
 // --- Step definitions for progressive reveal ---
 const STEP_LABELS = [
   'Photo',
-  'Passport',
+  'Passport Cover',
+  'Inside Pages',
   'Personal Details',
   'Family Details',
   'Address & Contact',
@@ -86,21 +87,21 @@ function FormSection({ title, icon, children, stepNumber }: FormSectionProps) {
   );
 }
 
-// --- Step Progress Bar ---
+// --- Sticky Step Progress Bar ---
 function StepProgress({ currentStep, totalSteps }: { currentStep: number; totalSteps: number }) {
   return (
-    <div className="bg-white rounded-xl p-4 shadow-sm mb-2">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+    <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-sm mb-2">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: TME_COLORS.primary }}>
           Step {currentStep} of {totalSteps}
         </span>
-        <span className="text-xs text-gray-500">
+        <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: `${TME_COLORS.primary}15`, color: TME_COLORS.primary }}>
           {STEP_LABELS[currentStep - 1] || ''}
         </span>
       </div>
-      <div className="w-full bg-gray-200 rounded-full h-2">
+      <div className="w-full bg-gray-200 rounded-full h-1.5">
         <motion.div
-          className="h-2 rounded-full"
+          className="h-1.5 rounded-full"
           style={{ backgroundColor: TME_COLORS.primary }}
           initial={{ width: 0 }}
           animate={{ width: `${(currentStep / totalSteps) * 100}%` }}
@@ -173,7 +174,8 @@ export function EmployeeForm({
   const passportPagesRef = React.useRef(passportPages);
 
   // Section refs for auto-scrolling
-  const passportRef = useRef<HTMLDivElement>(null);
+  const passportCoverRef = useRef<HTMLDivElement>(null);
+  const passportInsideRef = useRef<HTMLDivElement>(null);
   const personalRef = useRef<HTMLDivElement>(null);
   const familyRef = useRef<HTMLDivElement>(null);
   const contactRef = useRef<HTMLDivElement>(null);
@@ -254,24 +256,32 @@ export function EmployeeForm({
     !!(submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
   );
 
+  // Track whether passport data has been extracted/pre-filled
+  const [passportDataReady, setPassportDataReady] = useState(
+    // If form already has employee data with a first name, data was previously extracted
+    !!(submission.employee_data?.first_name)
+  );
+
   // --- Progressive reveal step computation ---
   const isPhotoUploaded = !!photoDoc;
-  const isPassportUploaded = !!(passportPages.insidePages?.validated);
+  const isCoverUploaded = !!(passportPages.cover?.validated);
+  const isInsidePagesUploaded = !!(passportPages.insidePages?.validated);
   const isPersonalComplete = !!(firstName && lastName && nationality);
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
   const isContactComplete = !!(homeStreetAddress && homeCity && homeCountry && personalEmail);
   const isEducationComplete = !!(educationalQualification && languagesSpoken.length > 0);
 
-  // Compute the highest unlocked step (1-indexed)
+  // Compute the highest unlocked step (1-indexed, 8 steps total)
   const computeCurrentStep = useCallback(() => {
     if (!isPhotoUploaded) return 1;
-    if (!isPassportUploaded) return 2;
-    if (!isPersonalComplete) return 3;
-    if (!isFamilyComplete) return 4;
-    if (!isContactComplete) return 5;
-    if (!isEducationComplete) return 6;
-    return 7;
-  }, [isPhotoUploaded, isPassportUploaded, isPersonalComplete, isFamilyComplete, isContactComplete, isEducationComplete]);
+    if (!isCoverUploaded) return 2;
+    if (!isInsidePagesUploaded) return 3;
+    if (!isPersonalComplete) return 4;
+    if (!isFamilyComplete) return 5;
+    if (!isContactComplete) return 6;
+    if (!isEducationComplete) return 7;
+    return 8;
+  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, isPersonalComplete, isFamilyComplete, isContactComplete, isEducationComplete]);
 
   const currentStep = computeCurrentStep();
   const totalSteps = STEP_LABELS.length;
@@ -405,7 +415,21 @@ export function EmployeeForm({
         setValue(formField as keyof EmployeeFormData, value as never);
       }
     });
+
+    // Mark passport data as ready so personal details section can appear
+    setPassportDataReady(true);
   };
+
+  // Fallback: if inside pages are uploaded but extraction didn't fire (API error),
+  // show personal details after a delay so user can fill manually
+  useEffect(() => {
+    if (isInsidePagesUploaded && !passportDataReady) {
+      const timer = setTimeout(() => {
+        setPassportDataReady(true);
+      }, 5000); // 5s fallback
+      return () => clearTimeout(timer);
+    }
+  }, [isInsidePagesUploaded, passportDataReady]);
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
@@ -454,14 +478,14 @@ export function EmployeeForm({
         )}
       </FormSection>
 
-      {/* Step 2: Passport Pages - After photo uploaded */}
+      {/* Steps 2-3: Passport Pages - After photo uploaded */}
       <RevealSection
         show={isPhotoUploaded}
-        onReveal={() => scrollToRef(passportRef)}
+        onReveal={() => scrollToRef(passportCoverRef)}
       >
-        <div ref={passportRef}>
+        <div ref={passportCoverRef}>
           <FormSection
-            title="Passport Pages"
+            title="Passport Cover"
             icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
             stepNumber={2}
           >
@@ -480,11 +504,13 @@ export function EmployeeForm({
                   validated: submission.documents.passportPages.insidePages.validated,
                 } : undefined,
               } : undefined}
+              revealInsidePages={isCoverUploaded}
+              insideStepNumber={3}
             />
             {passportError && (
               <p className="mt-2 text-sm text-red-500">{passportError}</p>
             )}
-            {isPassportUploaded && (
+            {isInsidePagesUploaded && (
               <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
                 <CheckCircle className="w-4 h-4" />
                 Passport verified. Please review your personal details below.
@@ -495,22 +521,22 @@ export function EmployeeForm({
         </div>
       </RevealSection>
 
-      {/* Step 3: Personal Details - After passport validated */}
+      {/* Step 4: Personal Details - After passport data extracted */}
       <RevealSection
-        show={isPassportUploaded}
+        show={isInsidePagesUploaded && passportDataReady}
         onReveal={() => scrollToRef(personalRef)}
       >
         <div ref={personalRef}>
           <FormSection
             title="Personal Details"
             icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={3}
+            stepNumber={4}
           >
             <p className="text-sm text-gray-500 mb-4">
               These details were auto-filled from your passport. Please review and correct if needed.
             </p>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                 <CustomDropdown
                   label="Title"
                   options={TITLES.map(t => ({ value: t, label: t }))}
@@ -624,7 +650,7 @@ export function EmployeeForm({
         </div>
       </RevealSection>
 
-      {/* Step 4: Family Details - After personal details complete */}
+      {/* Step 5: Family Details - After personal details complete */}
       <RevealSection
         show={isPersonalComplete}
         onReveal={() => scrollToRef(familyRef)}
@@ -633,7 +659,7 @@ export function EmployeeForm({
           <FormSection
             title="Family Details"
             icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={4}
+            stepNumber={5}
           >
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -686,7 +712,7 @@ export function EmployeeForm({
         </div>
       </RevealSection>
 
-      {/* Step 5: Address & Contact - After family complete */}
+      {/* Step 6: Address & Contact - After family complete */}
       <RevealSection
         show={isFamilyComplete}
         onReveal={() => scrollToRef(contactRef)}
@@ -696,7 +722,7 @@ export function EmployeeForm({
           <FormSection
             title="Home Country Address"
             icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={5}
+            stepNumber={6}
           >
             <div className="space-y-4">
               <Input
@@ -858,7 +884,7 @@ export function EmployeeForm({
         </div>
       </RevealSection>
 
-      {/* Step 6: Education & More - After contact complete */}
+      {/* Step 7: Education & More - After contact complete */}
       <RevealSection
         show={isContactComplete}
         onReveal={() => scrollToRef(educationRef)}
@@ -868,7 +894,7 @@ export function EmployeeForm({
           <FormSection
             title="Education & Languages"
             icon={<GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={6}
+            stepNumber={7}
           >
             <div className="space-y-4">
               <CustomDropdown
@@ -977,7 +1003,7 @@ export function EmployeeForm({
         </div>
       </RevealSection>
 
-      {/* Step 7: Signature - After education complete */}
+      {/* Step 8: Signature - After education complete */}
       <RevealSection
         show={isEducationComplete}
         onReveal={() => scrollToRef(signatureRef)}
@@ -987,7 +1013,7 @@ export function EmployeeForm({
             <FormSection
               title="Review & Sign"
               icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-              stepNumber={7}
+              stepNumber={8}
             >
               <div className="space-y-4">
                 <p className="text-sm text-gray-600">
@@ -1012,7 +1038,7 @@ export function EmployeeForm({
                   className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
                   style={{ backgroundColor: TME_COLORS.primary }}
                 >
-                  7
+                  8
                 </span>
                 <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
                   Signature

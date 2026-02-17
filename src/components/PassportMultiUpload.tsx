@@ -5,7 +5,7 @@ import { TME_COLORS } from '@/lib/constants';
 import { compressImageForAI } from '@/lib/utils';
 import { getDocumentUrl } from '@/lib/supabase';
 import { UploadSlot } from '@/components/UploadSlot';
-import { Info } from 'lucide-react';
+import { Info, CheckCircle, ChevronDown } from 'lucide-react';
 import type { PassportPageType } from '@/lib/passport-page-validation';
 import type { EmployeeFormData } from '@/types';
 
@@ -27,16 +27,24 @@ interface PassportMultiUploadProps {
     cover?: { path: string; validated?: boolean };
     insidePages?: { path: string; validated?: boolean };
   };
+  /** When true, inside pages section is revealed (controlled by parent step logic) */
+  revealInsidePages?: boolean;
+  /** Step numbers for display in section headers */
+  coverStepNumber?: number;
+  insideStepNumber?: number;
 }
 
 export function PassportMultiUpload({
-  submissionId: _submissionId, // Used for future features
+  submissionId: _submissionId,
   onUpload,
   onExtracted,
   onPagesChange,
   initialPages,
+  revealInsidePages = true,
+  coverStepNumber,
+  insideStepNumber,
 }: PassportMultiUploadProps) {
-  void _submissionId; // Silence unused variable warning
+  void _submissionId;
   const [pages, setPages] = useState<{
     cover: PassportPage;
     insidePages: PassportPage;
@@ -64,9 +72,7 @@ export function PassportMultiUpload({
     expectedType: PassportPageType
   ): Promise<{ valid: boolean; error?: string }> => {
     try {
-      // Compress image to fit Claude API limits
       const compressedImage = await compressImageForAI(imageBase64);
-
       const response = await fetch('/api/validate-passport-page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -93,9 +99,7 @@ export function PassportMultiUpload({
 
   const extractPassportData = useCallback(async (imageBase64: string): Promise<Record<string, unknown> | null> => {
     try {
-      // Compress image to fit Claude API limits
       const compressedImage = await compressImageForAI(imageBase64);
-
       const response = await fetch('/api/extract-passport', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -124,14 +128,12 @@ export function PassportMultiUpload({
       expectedType: PassportPageType,
       file: File
     ): Promise<boolean> => {
-      // Create preview
       const reader = new FileReader();
       const preview = await new Promise<string>((resolve) => {
         reader.onload = (e) => resolve(e.target?.result as string);
         reader.readAsDataURL(file);
       });
 
-      // Set validating state
       setPages((prev) => ({
         ...prev,
         [pageKey]: {
@@ -144,7 +146,6 @@ export function PassportMultiUpload({
         },
       }));
 
-      // Validate page type
       const validation = await validatePageType(preview, expectedType);
 
       if (!validation.valid) {
@@ -160,7 +161,6 @@ export function PassportMultiUpload({
         return false;
       }
 
-      // Upload to storage
       const uploadResult = await onUpload(pageKey, file);
       if (!uploadResult) {
         setPages((prev) => ({
@@ -175,13 +175,11 @@ export function PassportMultiUpload({
         return false;
       }
 
-      // If this is the inside pages, extract passport info
       let extractedData: Record<string, unknown> | null = null;
       if (pageKey === 'insidePages') {
         extractedData = await extractPassportData(preview);
       }
 
-      // Update state with success
       const newPages = {
         ...pages,
         [pageKey]: {
@@ -221,32 +219,25 @@ export function PassportMultiUpload({
     [pages, onPagesChange]
   );
 
-  const allPagesValid = pages.cover.validated && pages.insidePages.validated;
-
   return (
-    <div className="space-y-4">
-      {/* Info Banner */}
-      <div
-        className="flex items-start gap-3 p-4 rounded-lg"
-        style={{ backgroundColor: '#EBF4FF' }}
-      >
-        <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-        <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-          <p className="font-medium">Please upload 2 passport images (passport must be open/spread):</p>
-          <ul className="mt-1 list-disc list-inside space-y-0.5">
-            <li>Passport cover spread (open passport showing front cover + back cover)</li>
-            <li>Inside pages spread (open passport showing data page + opposite page)</li>
-          </ul>
-          <p className="mt-2 text-xs text-gray-600">
-            ⚠️ Single page photos are not accepted. Passport must be spread open.
-          </p>
+    <div className="space-y-6">
+      {/* Step 2: Passport Cover */}
+      <div className="space-y-4">
+        <div
+          className="flex items-start gap-3 p-4 rounded-lg"
+          style={{ backgroundColor: '#EBF4FF' }}
+        >
+          <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+          <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+            <p className="font-medium">Upload your passport cover (open/spread showing front + back cover)</p>
+            <p className="mt-2 text-xs text-gray-600">
+              Single page photos are not accepted. Passport must be spread open.
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* Upload Slots */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <UploadSlot
-          label="Passport Cover"
+          label={coverStepNumber ? '' : 'Passport Cover'}
           description="Spread open: front + back cover visible"
           expectedType="COVER"
           file={pages.cover.file}
@@ -258,26 +249,57 @@ export function PassportMultiUpload({
           onRemove={() => handleRemove('cover')}
         />
 
-        <UploadSlot
-          label="Inside Pages"
-          description="Spread open: data page + opposite page"
-          expectedType="INSIDE_PAGES"
-          file={pages.insidePages.file}
-          preview={pages.insidePages.preview || undefined}
-          validated={pages.insidePages.validated}
-          validating={pages.insidePages.validating}
-          error={pages.insidePages.error || undefined}
-          onUpload={(file) => handleUpload('insidePages', 'INSIDE_PAGES', file)}
-          onRemove={() => handleRemove('insidePages')}
-        />
+        {pages.cover.validated && !revealInsidePages && (
+          <div className="mt-2 flex items-center gap-2 text-green-600 text-sm">
+            <CheckCircle className="w-4 h-4" />
+            Cover verified. Upload inside pages below.
+            <ChevronDown className="w-4 h-4 animate-bounce" />
+          </div>
+        )}
       </div>
 
-      {/* Status Message */}
-      {allPagesValid && (
-        <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
-          <span className="text-sm text-green-600 font-medium">
-            All passport pages validated successfully
-          </span>
+      {/* Step 3: Inside Pages - revealed after cover validates */}
+      {revealInsidePages && (
+        <div className="space-y-4">
+          {insideStepNumber && (
+            <div className="flex items-center gap-3 mb-2">
+              <span
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                style={{ backgroundColor: TME_COLORS.primary }}
+              >
+                {insideStepNumber}
+              </span>
+              <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
+                Inside Pages
+              </h2>
+            </div>
+          )}
+
+          <div
+            className="flex items-start gap-3 p-4 rounded-lg"
+            style={{ backgroundColor: '#EBF4FF' }}
+          >
+            <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+            <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+              <p className="font-medium">Upload your passport inside pages (open/spread showing data page + opposite page)</p>
+              <p className="mt-2 text-xs text-gray-600">
+                Your details will be automatically extracted from this page.
+              </p>
+            </div>
+          </div>
+
+          <UploadSlot
+            label=""
+            description="Spread open: data page + opposite page"
+            expectedType="INSIDE_PAGES"
+            file={pages.insidePages.file}
+            preview={pages.insidePages.preview || undefined}
+            validated={pages.insidePages.validated}
+            validating={pages.insidePages.validating}
+            error={pages.insidePages.error || undefined}
+            onUpload={(file) => handleUpload('insidePages', 'INSIDE_PAGES', file)}
+            onRemove={() => handleRemove('insidePages')}
+          />
         </div>
       )}
     </div>

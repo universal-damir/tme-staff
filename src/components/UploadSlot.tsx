@@ -89,12 +89,14 @@ export function UploadSlot({
 
   return (
     <div className="flex flex-col">
-      <label
-        className="block text-sm font-medium mb-2"
-        style={{ color: TME_COLORS.primary }}
-      >
-        {label}
-      </label>
+      {label && (
+        <label
+          className="block text-sm font-medium mb-2"
+          style={{ color: TME_COLORS.primary }}
+        >
+          {label}
+        </label>
+      )}
 
       <div
         className={`relative flex-1 border-2 border-dashed rounded-lg transition-all duration-200 ${getBorderColor()} ${getBgColor()}`}
