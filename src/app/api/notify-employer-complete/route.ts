@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-api-secret': process.env.STAFF_PORTAL_API_SECRET || '',
         },
         body: JSON.stringify({
           supabaseId,
