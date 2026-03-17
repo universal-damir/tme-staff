@@ -21,12 +21,25 @@ export interface PassportPageValidationResult {
  */
 
 // Prompt for COVER validation
-const COVER_VALIDATION_PROMPT = `Look at where the passport emblem/logo/text is positioned in this image.
+const COVER_VALIDATION_PROMPT = `You are validating a passport cover image. The passport MUST be photographed spread open, showing BOTH the front cover AND the back cover in a single image.
 
-If emblem/text is CENTERED in the image = single cover page only = INVALID
-If emblem/text is on ONE SIDE with the other side plain/empty = spread open passport = VALID
+Analyze the image:
 
-{"valid": true or false}`;
+VALID (spread open passport cover):
+- Two distinct halves visible side by side
+- One side has the national emblem/coat of arms/text, the other side is plain or has minor markings
+- The book spine/fold is visible in the center
+- The image shows the passport laid flat and open
+
+INVALID (these are NOT acceptable):
+- Only ONE side of the passport cover is visible (just the front or just the back)
+- The emblem/logo is centered in the image (indicating a single page, not spread open)
+- The passport data page is visible (this is the inside, not the cover)
+- Not a passport at all
+- A closed passport (not spread open)
+
+Respond with ONLY a JSON object:
+{"valid": true, "reason": "brief explanation"} or {"valid": false, "reason": "brief explanation"}`;
 
 // Prompt for INSIDE_PAGES validation
 const INSIDE_PAGES_VALIDATION_PROMPT = `Step 1: How many passport pages are visible in this image? (Count: 1 or 2)
@@ -71,7 +84,7 @@ export async function validatePassportPage(
   try {
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-sonnet-4-20250514', // Sonnet for better visual analysis
+        model: 'claude-sonnet-4-6', // Latest Sonnet for best visual analysis
         max_tokens: 256,
         messages: [
           {

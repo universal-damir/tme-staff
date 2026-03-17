@@ -36,6 +36,7 @@ interface SalaryBreakdownProps {
   transport: number | undefined;
   food?: number | undefined;
   other?: number | undefined;
+  prepayCard?: number | undefined;
   onChange: (values: {
     salary_currency: string;
     salary_total: number | undefined;
@@ -44,6 +45,7 @@ interface SalaryBreakdownProps {
     salary_transport: number | undefined;
     salary_food?: number | undefined;
     salary_other?: number | undefined;
+    salary_prepay_card?: number | undefined;
   }) => void;
   errors?: {
     currency?: string;
@@ -124,6 +126,7 @@ export function SalaryBreakdown({
   transport,
   food,
   other,
+  prepayCard,
   onChange,
   errors,
 }: SalaryBreakdownProps) {
@@ -131,7 +134,7 @@ export function SalaryBreakdown({
   const [showInfo, setShowInfo] = useState(false);
 
   // Calculate sum and discrepancy
-  const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0);
+  const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0) + (prepayCard || 0);
   const hasDiscrepancy = total !== undefined && total > 0 && Math.abs(sum - total) > 0.01;
 
   // Auto-expand if there's a discrepancy
@@ -153,6 +156,7 @@ export function SalaryBreakdown({
           salary_transport: undefined,
           salary_food: undefined,
           salary_other: undefined,
+          salary_prepay_card: undefined,
         });
         return;
       }
@@ -176,6 +180,7 @@ export function SalaryBreakdown({
         salary_transport: newTransport,
         salary_food: newFood,
         salary_other: newOther,
+        salary_prepay_card: prepayCard,
       });
     },
     [currency, onChange]
@@ -191,6 +196,7 @@ export function SalaryBreakdown({
       salary_transport: transport,
       salary_food: food,
       salary_other: other,
+      salary_prepay_card: prepayCard,
     });
   };
 
@@ -215,6 +221,7 @@ export function SalaryBreakdown({
               salary_transport: transport,
               salary_food: food,
               salary_other: other,
+              salary_prepay_card: prepayCard,
             })
           }
           options={CURRENCY_OPTIONS}
@@ -274,7 +281,7 @@ export function SalaryBreakdown({
       {/* Breakdown Fields */}
       {isExpanded && (
         <div className="space-y-4 pt-2 border-t border-gray-200">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <SalaryInput
               label={`Basic (${getPercentage(basic)})`}
               value={basic}
@@ -287,6 +294,7 @@ export function SalaryBreakdown({
                   salary_transport: transport,
                   salary_food: food,
                   salary_other: other,
+                  salary_prepay_card: prepayCard,
                 })
               }
               error={errors?.basic}
@@ -304,6 +312,7 @@ export function SalaryBreakdown({
                   salary_transport: transport,
                   salary_food: food,
                   salary_other: other,
+                  salary_prepay_card: prepayCard,
                 })
               }
               error={errors?.accommodation}
@@ -321,6 +330,7 @@ export function SalaryBreakdown({
                   salary_transport: val,
                   salary_food: food,
                   salary_other: other,
+                  salary_prepay_card: prepayCard,
                 })
               }
               error={errors?.transport}
@@ -338,6 +348,7 @@ export function SalaryBreakdown({
                   salary_transport: transport,
                   salary_food: val,
                   salary_other: other,
+                  salary_prepay_card: prepayCard,
                 })
               }
             />
@@ -354,6 +365,24 @@ export function SalaryBreakdown({
                   salary_transport: transport,
                   salary_food: food,
                   salary_other: val,
+                  salary_prepay_card: prepayCard,
+                })
+              }
+            />
+
+            <SalaryInput
+              label={`Prepaid Card (${getPercentage(prepayCard)})`}
+              value={prepayCard}
+              onChange={(val) =>
+                onChange({
+                  salary_currency: currency,
+                  salary_total: total,
+                  salary_basic: basic,
+                  salary_accommodation: accommodation,
+                  salary_transport: transport,
+                  salary_food: food,
+                  salary_other: other,
+                  salary_prepay_card: val,
                 })
               }
             />

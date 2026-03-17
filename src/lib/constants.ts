@@ -72,6 +72,40 @@ export const DEPARTMENTS = [
 export type Department = (typeof DEPARTMENTS)[number];
 
 // ===================================================================
+// WORKING LOCATIONS
+// ===================================================================
+
+export const WORKING_LOCATIONS = [
+  'JAFZA',
+  'DMCC',
+  'DAFZA',
+  'DIC',
+  'DMC',
+  'JLT',
+  'Business Bay',
+  'DIFC',
+  'Sharjah',
+  'Abu Dhabi',
+  'Other',
+] as const;
+
+export type WorkingLocation = (typeof WORKING_LOCATIONS)[number];
+
+// ===================================================================
+// SPONSOR OPTIONS
+// ===================================================================
+
+export const SPONSOR_OPTIONS = [
+  'Company',
+  'Self-sponsored',
+  'Spouse',
+  'Parent',
+  'NA',
+] as const;
+
+export type SponsorOption = (typeof SPONSOR_OPTIONS)[number];
+
+// ===================================================================
 // RELIGIONS
 // ===================================================================
 

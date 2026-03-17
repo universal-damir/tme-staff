@@ -6,6 +6,8 @@ import {
   TME_COLORS,
   JOB_TITLES,
   DEPARTMENTS,
+  WORKING_LOCATIONS,
+  SPONSOR_OPTIONS,
   WEEKLY_OFF_OPTIONS,
   LEAVE_TYPES,
 } from '@/lib/constants';
@@ -65,11 +67,15 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
       annual_leave_days: 30,
       notice_period_value: 1,
       probation_period_value: 6,
+      sponsor: 'Company',
     },
   });
 
-  const jobTitle = watch('job_title');
+  const jobTitleVisa = watch('job_title_visa');
+  const jobTitleCompany = watch('job_title_company');
   const department = watch('department');
+  const workingLocation = watch('working_location');
+  const sponsor = watch('sponsor');
   const salaryCurrency = watch('salary_currency');
   const salaryTotal = watch('salary_total');
   const salaryBasic = watch('salary_basic');
@@ -77,6 +83,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
   const salaryTransport = watch('salary_transport');
   const salaryFood = watch('salary_food');
   const salaryOther = watch('salary_other');
+  const salaryPrepayCard = watch('salary_prepay_card');
   const noticePeriodValue = watch('notice_period_value');
   const probationPeriodValue = watch('probation_period_value');
   const startingDate = watch('starting_date');
@@ -109,6 +116,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
     salary_transport: number | undefined;
     salary_food?: number | undefined;
     salary_other?: number | undefined;
+    salary_prepay_card?: number | undefined;
   }) => {
     setValue('salary_currency', values.salary_currency);
     setValue('salary_total', values.salary_total as number);
@@ -117,6 +125,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
     setValue('salary_transport', values.salary_transport as number);
     setValue('salary_food', values.salary_food);
     setValue('salary_other', values.salary_other);
+    setValue('salary_prepay_card', values.salary_prepay_card);
   };
 
   return (
@@ -126,55 +135,132 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
         title="Position Details"
         icon={<Briefcase className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <CustomDropdown
-              label="Job Title"
-              options={toDropdownOptions(JOB_TITLES)}
-              value={jobTitle || ''}
-              onChange={(val) => setValue('job_title', val)}
-              error={errors.job_title?.message}
-              required
-              searchable
-              placeholder="Select job title..."
-            />
-            {jobTitle === 'Other' && (
-              <div className="mt-2">
-                <Input
-                  label="Specify Job Title"
-                  placeholder="Enter job title"
-                  error={errors.job_title_custom?.message}
-                  {...register('job_title_custom', {
-                    required: jobTitle === 'Other' ? 'Please specify job title' : false,
-                  })}
-                />
-              </div>
-            )}
+        <div className="space-y-4">
+          {/* Job Titles Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <CustomDropdown
+                label="Job Title (Visa)"
+                options={toDropdownOptions(JOB_TITLES)}
+                value={jobTitleVisa || ''}
+                onChange={(val) => setValue('job_title_visa', val)}
+                error={errors.job_title_visa?.message}
+                required
+                searchable
+                placeholder="Select visa designation..."
+              />
+              <p className="text-xs text-gray-500 mt-1">Official designation for visa and government documents</p>
+              {jobTitleVisa === 'Other' && (
+                <div className="mt-2">
+                  <Input
+                    label="Specify Visa Job Title"
+                    placeholder="Enter visa designation"
+                    error={errors.job_title_visa_custom?.message}
+                    {...register('job_title_visa_custom', {
+                      required: jobTitleVisa === 'Other' ? 'Please specify visa job title' : false,
+                    })}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <CustomDropdown
+                label="Job Title (Company)"
+                options={toDropdownOptions(JOB_TITLES)}
+                value={jobTitleCompany || ''}
+                onChange={(val) => setValue('job_title_company', val)}
+                error={errors.job_title_company?.message}
+                required
+                searchable
+                placeholder="Select company role..."
+              />
+              <p className="text-xs text-gray-500 mt-1">Employee&apos;s actual position within the company</p>
+              {jobTitleCompany === 'Other' && (
+                <div className="mt-2">
+                  <Input
+                    label="Specify Company Job Title"
+                    placeholder="Enter company role"
+                    error={errors.job_title_company_custom?.message}
+                    {...register('job_title_company_custom', {
+                      required: jobTitleCompany === 'Other' ? 'Please specify company job title' : false,
+                    })}
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
-          <div>
-            <CustomDropdown
-              label="Department"
-              options={toDropdownOptions(DEPARTMENTS)}
-              value={department || ''}
-              onChange={(val) => setValue('department', val)}
-              error={errors.department?.message}
-              required
-              searchable
-              placeholder="Select department..."
+          {/* Department Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <CustomDropdown
+                label="Department"
+                options={toDropdownOptions(DEPARTMENTS)}
+                value={department || ''}
+                onChange={(val) => setValue('department', val)}
+                error={errors.department?.message}
+                required
+                searchable
+                placeholder="Select department..."
+              />
+              {department === 'Other' && (
+                <div className="mt-2">
+                  <Input
+                    label="Specify Department"
+                    placeholder="Enter department"
+                    error={errors.department_custom?.message}
+                    {...register('department_custom', {
+                      required: department === 'Other' ? 'Please specify department' : false,
+                    })}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Working Location, Responsible Manager, Sponsor Row */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <CustomDropdown
+                label="Working Location"
+                options={toDropdownOptions(WORKING_LOCATIONS)}
+                value={workingLocation || ''}
+                onChange={(val) => setValue('working_location', val)}
+                error={errors.working_location?.message}
+                required
+                searchable
+                placeholder="Select location..."
+              />
+              {workingLocation === 'Other' && (
+                <div className="mt-2">
+                  <Input
+                    label="Specify Location"
+                    placeholder="Enter working location"
+                    error={errors.working_location_custom?.message}
+                    {...register('working_location_custom', {
+                      required: workingLocation === 'Other' ? 'Please specify location' : false,
+                    })}
+                  />
+                </div>
+              )}
+            </div>
+
+            <Input
+              label="Responsible Manager"
+              placeholder="Enter manager name"
+              {...register('responsible_manager')}
             />
-            {department === 'Other' && (
-              <div className="mt-2">
-                <Input
-                  label="Specify Department"
-                  placeholder="Enter department"
-                  error={errors.department_custom?.message}
-                  {...register('department_custom', {
-                    required: department === 'Other' ? 'Please specify department' : false,
-                  })}
-                />
-              </div>
-            )}
+
+            <CustomDropdown
+              label="Sponsor"
+              options={toDropdownOptions(SPONSOR_OPTIONS)}
+              value={sponsor || 'Company'}
+              onChange={(val) => setValue('sponsor', val)}
+              error={errors.sponsor?.message}
+              required
+              placeholder="Select sponsor..."
+            />
           </div>
         </div>
       </FormSection>
@@ -192,6 +278,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
           transport={salaryTransport}
           food={salaryFood}
           other={salaryOther}
+          prepayCard={salaryPrepayCard}
           onChange={handleSalaryChange}
           errors={{
             total: errors.salary_total?.message,

@@ -48,7 +48,7 @@ const SORTED_BANKS = sortWithOtherLast(UAE_BANKS);
 
 // --- Step definitions for progressive reveal ---
 const STEP_LABELS = [
-  'Photo',
+  'ID Photo',
   'Passport Cover',
   'Inside Pages',
   'Personal Details',
@@ -263,7 +263,7 @@ export function EmployeeForm({
   );
 
   // --- Progressive reveal step computation ---
-  const isPhotoUploaded = !!photoDoc;
+  const isPhotoUploaded = !!(photoDoc?.validated);
   const isCoverUploaded = !!(passportPages.cover?.validated);
   const isInsidePagesUploaded = !!(passportPages.insidePages?.validated);
   const isPersonalComplete = !!(firstName && lastName && nationality);
@@ -438,7 +438,7 @@ export function EmployeeForm({
 
       {/* Step 1: Photo Upload - Always visible */}
       <FormSection
-        title="Passport Photo"
+        title="ID Photo"
         icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
         stepNumber={1}
       >
@@ -472,7 +472,7 @@ export function EmployeeForm({
         {isPhotoUploaded && (
           <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
             <CheckCircle className="w-4 h-4" />
-            Photo uploaded. Continue with passport below.
+            ID Photo uploaded. Continue with passport below.
             <ChevronDown className="w-4 h-4 animate-bounce" />
           </div>
         )}

@@ -7,10 +7,16 @@
 // ===================================================================
 
 export interface EmployerFormData {
-  job_title: string;
-  job_title_custom?: string;
+  job_title_visa: string;
+  job_title_visa_custom?: string;
+  job_title_company: string;
+  job_title_company_custom?: string;
   department: string;
   department_custom?: string;
+  working_location: string;
+  working_location_custom?: string;
+  responsible_manager?: string;
+  sponsor: string;
   salary_currency: string;
   salary_total: number;
   salary_basic: number;
@@ -18,6 +24,7 @@ export interface EmployerFormData {
   salary_transport: number;
   salary_food?: number;
   salary_other?: number;
+  salary_prepay_card?: number;
   annual_leave_days: number;
   annual_leave_type: 'calendar' | 'working';
   notice_period_value: number;
@@ -162,6 +169,9 @@ export interface StaffOnboardingSubmission {
 
   // Documents
   documents: StaffDocumentReferences | null;
+
+  // Access control
+  employee_access_token?: string;
 
   // Status
   synced_to_tme: boolean;

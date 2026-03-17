@@ -126,7 +126,7 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
         className="block text-sm font-medium mb-2"
         style={{ color: TME_COLORS.primary }}
       >
-        Photo
+        ID Photo
         <span className="text-red-500 ml-1">*</span>
       </label>
 

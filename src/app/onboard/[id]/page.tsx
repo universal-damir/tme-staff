@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import React, { useEffect, useState, useCallback, Suspense } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
 import {
   getStaffOnboarding,
@@ -13,7 +13,7 @@ import { FormProgress } from '@/components/FormProgress';
 import { EmployerForm } from '@/components/EmployerForm';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import type { StaffOnboardingSubmission, EmployerFormData, EmployeeFormData } from '@/types';
-import { Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Lock } from 'lucide-react';
 
 type PageState =
   | 'loading'
@@ -24,11 +24,29 @@ type PageState =
   | 'error'
   | 'not_found'
   | 'cancelled'
-  | 'already_complete';
+  | 'already_complete'
+  | 'token_required';
 
 export default function OnboardingPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4" style={{ color: TME_COLORS.primary }} />
+          <p className="text-gray-600">Loading your onboarding form...</p>
+        </div>
+      </div>
+    }>
+      <OnboardingPageInner />
+    </Suspense>
+  );
+}
+
+function OnboardingPageInner() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const id = params.id as string;
+  const token = searchParams.get('token');
 
   const [submission, setSubmission] = useState<StaffOnboardingSubmission | null>(null);
   const [pageState, setPageState] = useState<PageState>('loading');
@@ -64,8 +82,15 @@ export default function OnboardingPage() {
           } else {
             setPageState('already_complete');
           }
+        } else if (data.current_step === 'employee') {
+          // Token-based access: if employee_access_token exists, validate it
+          if (data.employee_access_token && token !== data.employee_access_token) {
+            setPageState('token_required');
+          } else {
+            setPageState('employee');
+          }
         } else {
-          setPageState(data.current_step as 'employer' | 'employee');
+          setPageState(data.current_step as 'employer');
         }
       } catch (err) {
         console.error('Error fetching submission:', err);
@@ -75,7 +100,7 @@ export default function OnboardingPage() {
     }
 
     fetchSubmission();
-  }, [id]);
+  }, [id, token]);
 
   // Get client IP for audit
   useEffect(() => {
@@ -125,7 +150,7 @@ export default function OnboardingPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   supabaseId: id,
-                  jobTitle: data.job_title === 'Other' ? data.job_title_custom : data.job_title,
+                  jobTitle: data.job_title_visa === 'Other' ? data.job_title_visa_custom : data.job_title_visa,
                 }),
               });
 
@@ -259,6 +284,24 @@ export default function OnboardingPage() {
           <p className="text-gray-600">
             This onboarding form has already been submitted. Thank you for completing
             your onboarding process.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Token required state (employee access without valid token)
+  if (pageState === 'token_required') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-yellow-100 mx-auto mb-6 flex items-center justify-center">
+            <Lock className="w-8 h-8 text-yellow-500" />
+          </div>
+          <h1 className="text-xl font-bold text-gray-900 mb-4">Authentication Required</h1>
+          <p className="text-gray-600">
+            Please use the link sent to your email to access this form.
+            If you haven&apos;t received the email, please contact your HR representative.
           </p>
         </div>
       </div>
