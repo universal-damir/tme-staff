@@ -5,9 +5,6 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
 import {
   getStaffOnboarding,
-  updateEmployerData,
-  updateEmployeeData,
-  updateSamePersonData,
 } from '@/lib/supabase';
 import { FormProgress } from '@/components/FormProgress';
 import { EmployerForm } from '@/components/EmployerForm';
@@ -139,33 +136,19 @@ function OnboardingPageInner() {
             employer_signature_data: signature,
           });
         } else {
-          // Regular flow - save and trigger employee email
-          const success = await updateEmployerData(id, data, signature, clientIP || undefined);
+          // Regular flow - save AND notify via server-side API (guaranteed delivery)
+          const response = await fetch('/api/submit-employer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id,
+              employerData: data,
+              signature,
+              ip: clientIP || undefined,
+            }),
+          });
 
-          if (success) {
-            // Trigger employee email via TME Portal API
-            try {
-              const notifyResponse = await fetch('/api/notify-employer-complete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  supabaseId: id,
-                  jobTitle: data.job_title_visa === 'Other' ? data.job_title_visa_custom : data.job_title_visa,
-                }),
-              });
-
-              const notifyResult = await notifyResponse.json();
-              console.log('Employee email notification result:', notifyResult);
-
-              if (!notifyResponse.ok) {
-                console.error('Failed to send employee notification:', notifyResult);
-                // Don't fail the whole flow, just log the error
-              }
-            } catch (notifyError) {
-              console.error('Error notifying TME Portal:', notifyError);
-              // Don't fail the whole flow, just log the error
-            }
-
+          if (response.ok) {
             setPageState('success');
           } else {
             setError('Failed to save form. Please try again.');
@@ -190,23 +173,22 @@ function OnboardingPageInner() {
       setError(null);
 
       try {
-        let success: boolean;
-
-        if (submission.is_same_person && employerData) {
-          // Same-person mode - save both in one go
-          success = await updateSamePersonData(
+        // Save AND notify via server-side API (guaranteed delivery)
+        const response = await fetch('/api/submit-employee', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             id,
-            employerData,
-            data,
-            submission.employer_signature_data || signature,
-            clientIP || undefined
-          );
-        } else {
-          // Regular flow - just save employee data
-          success = await updateEmployeeData(id, data, signature, clientIP || undefined);
-        }
+            employeeData: data,
+            signature,
+            ip: clientIP || undefined,
+            isSamePerson: submission.is_same_person,
+            employerData: submission.is_same_person ? employerData : undefined,
+            employerSignature: submission.is_same_person ? submission.employer_signature_data : undefined,
+          }),
+        });
 
-        if (success) {
+        if (response.ok) {
           setPageState('success');
         } else {
           setError('Failed to save form. Please try again.');
