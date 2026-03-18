@@ -31,7 +31,7 @@ export interface EmployerFormData {
   notice_period_unit: 'days' | 'weeks' | 'months';
   probation_period_value: number;
   probation_period_unit: 'days' | 'weeks' | 'months';
-  weekly_off: 'sunday' | 'saturday_sunday';
+  weekly_off: 'friday' | 'sunday' | 'saturday_sunday';
   starting_date: string; // ISO format YYYY-MM-DD
 }
 

@@ -6,7 +6,6 @@ import {
   TME_COLORS,
   JOB_TITLES,
   DEPARTMENTS,
-  WORKING_LOCATIONS,
   SPONSOR_OPTIONS,
   WEEKLY_OFF_OPTIONS,
   LEAVE_TYPES,
@@ -74,7 +73,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
   const jobTitleVisa = watch('job_title_visa');
   const jobTitleCompany = watch('job_title_company');
   const department = watch('department');
-  const workingLocation = watch('working_location');
   const sponsor = watch('sponsor');
   const salaryCurrency = watch('salary_currency');
   const salaryTotal = watch('salary_total');
@@ -84,20 +82,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
   const salaryFood = watch('salary_food');
   const salaryOther = watch('salary_other');
   const salaryPrepayCard = watch('salary_prepay_card');
-  const noticePeriodValue = watch('notice_period_value');
-  const probationPeriodValue = watch('probation_period_value');
   const startingDate = watch('starting_date');
   const annualLeaveType = watch('annual_leave_type');
-  const noticePeriodUnit = watch('notice_period_unit');
-  const probationPeriodUnit = watch('probation_period_unit');
   const weeklyOff = watch('weekly_off');
-
-  // Create dynamic time period options based on the value
-  const getTimePeriodOptions = (value: number | undefined) => [
-    { value: 'days', label: pluralize(value, 'day') },
-    { value: 'weeks', label: pluralize(value, 'week') },
-    { value: 'months', label: pluralize(value, 'month') },
-  ];
 
   const handleFormSubmit = async (data: EmployerFormData) => {
     if (!signature) {
@@ -221,30 +208,11 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
 
           {/* Working Location, Responsible Manager, Sponsor Row */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <CustomDropdown
-                label="Working Location"
-                options={toDropdownOptions(WORKING_LOCATIONS)}
-                value={workingLocation || ''}
-                onChange={(val) => setValue('working_location', val)}
-                error={errors.working_location?.message}
-                required
-                searchable
-                placeholder="Select location..."
-              />
-              {workingLocation === 'Other' && (
-                <div className="mt-2">
-                  <Input
-                    label="Specify Location"
-                    placeholder="Enter working location"
-                    error={errors.working_location_custom?.message}
-                    {...register('working_location_custom', {
-                      required: workingLocation === 'Other' ? 'Please specify location' : false,
-                    })}
-                  />
-                </div>
-              )}
-            </div>
+            <Input
+              label="Working Location"
+              placeholder="e.g. JAFZA, DMCC, Dubai..."
+              {...register('working_location')}
+            />
 
             <Input
               label="Responsible Manager"
@@ -319,58 +287,30 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
             </div>
           </div>
 
-          {/* Notice Period */}
-          <div>
-            <label
-              className="block text-sm font-medium mb-2"
-              style={{ color: TME_COLORS.primary }}
-            >
-              Notice Period
-            </label>
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                type="text"
-                inputMode="numeric"
-                placeholder="Value"
-                error={errors.notice_period_value?.message}
-                {...register('notice_period_value', {
-                  required: 'Required',
-                  min: { value: 0, message: 'Must be positive' },
-                })}
-              />
-              <CustomDropdown
-                options={getTimePeriodOptions(noticePeriodValue)}
-                value={noticePeriodUnit || 'months'}
-                onChange={(val) => setValue('notice_period_unit', val as 'days' | 'weeks' | 'months')}
-              />
-            </div>
-          </div>
-
-          {/* Probation Period */}
-          <div>
-            <label
-              className="block text-sm font-medium mb-2"
-              style={{ color: TME_COLORS.primary }}
-            >
-              Probation Period
-            </label>
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                type="text"
-                inputMode="numeric"
-                placeholder="Value"
-                error={errors.probation_period_value?.message}
-                {...register('probation_period_value', {
-                  required: 'Required',
-                  min: { value: 0, message: 'Must be positive' },
-                })}
-              />
-              <CustomDropdown
-                options={getTimePeriodOptions(probationPeriodValue)}
-                value={probationPeriodUnit || 'months'}
-                onChange={(val) => setValue('probation_period_unit', val as 'days' | 'weeks' | 'months')}
-              />
-            </div>
+          {/* Notice & Probation Period - single row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Notice Period (months)"
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 1"
+              error={errors.notice_period_value?.message}
+              {...register('notice_period_value', {
+                required: 'Required',
+                min: { value: 0, message: 'Must be positive' },
+              })}
+            />
+            <Input
+              label="Probation Period (months)"
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 6"
+              error={errors.probation_period_value?.message}
+              {...register('probation_period_value', {
+                required: 'Required',
+                min: { value: 0, message: 'Must be positive' },
+              })}
+            />
           </div>
 
           {/* Weekly Off */}
@@ -378,7 +318,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
             label="Weekly Off"
             options={WEEKLY_OFF_OPTIONS.map(opt => ({ value: opt.value, label: opt.label }))}
             value={weeklyOff || 'saturday_sunday'}
-            onChange={(val) => setValue('weekly_off', val as 'sunday' | 'saturday_sunday')}
+            onChange={(val) => setValue('weekly_off', val as 'friday' | 'sunday' | 'saturday_sunday')}
             error={errors.weekly_off?.message}
             required
           />

@@ -121,7 +121,7 @@ export function UploadSlot({
             <img
               src={preview}
               alt={label}
-              className="w-full h-32 object-cover rounded-lg"
+              className="w-full h-64 object-contain rounded-lg"
             />
 
             {/* Status Badge */}
@@ -157,7 +157,7 @@ export function UploadSlot({
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="w-full h-32 flex flex-col items-center justify-center gap-2 p-4 cursor-pointer hover:bg-gray-100 transition-colors rounded-lg"
+            className="w-full h-40 flex flex-col items-center justify-center gap-2 p-4 cursor-pointer hover:bg-gray-100 transition-colors rounded-lg"
           >
             <Upload className="w-8 h-8 text-gray-400" />
             <span className="text-xs text-gray-500 text-center">{description}</span>
@@ -173,8 +173,8 @@ export function UploadSlot({
         </p>
       )}
 
-      {/* Validated Message */}
-      {validated && !error && (
+      {/* Validated Message - only show when not currently validating */}
+      {validated && !error && !validating && (
         <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
           <CheckCircle className="w-3 h-3" />
           Page verified

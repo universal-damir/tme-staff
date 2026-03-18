@@ -510,7 +510,7 @@ export function EmployeeForm({
             {passportError && (
               <p className="mt-2 text-sm text-red-500">{passportError}</p>
             )}
-            {isInsidePagesUploaded && (
+            {isInsidePagesUploaded && passportDataReady && (
               <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
                 <CheckCircle className="w-4 h-4" />
                 Passport verified. Please review your personal details below.

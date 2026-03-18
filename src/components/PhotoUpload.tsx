@@ -156,7 +156,7 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
         // Preview area
         <div className="relative border-2 rounded-lg p-4" style={{ borderColor: isValidated ? '#22c55e' : '#e5e7eb' }}>
           <div className="flex items-start gap-4">
-            <div className="relative w-32 h-32 rounded-lg overflow-hidden bg-gray-100">
+            <div className="relative w-48 h-48 rounded-lg overflow-hidden bg-gray-100">
               {imageSrc ? (
                 <Image
                   src={imageSrc}

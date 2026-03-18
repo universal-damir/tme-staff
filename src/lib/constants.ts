@@ -415,6 +415,7 @@ export type SalaryCurrency = (typeof SALARY_CURRENCIES)[number]['value'];
 // ===================================================================
 
 export const WEEKLY_OFF_OPTIONS = [
+  { value: 'friday', label: 'Friday only' },
   { value: 'sunday', label: 'Sunday only' },
   { value: 'saturday_sunday', label: 'Saturday & Sunday' },
 ] as const;
