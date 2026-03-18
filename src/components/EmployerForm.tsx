@@ -119,7 +119,15 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
   };
 
   return (
-    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className={`space-y-6 relative ${isSubmitting ? 'pointer-events-none' : ''}`}>
+      {isSubmitting && (
+        <div className="fixed inset-0 z-50 bg-white/70 backdrop-blur-sm flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-4 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: TME_COLORS.primary }} />
+            <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Submitting your form...</p>
+          </div>
+        </div>
+      )}
       {/* Position Details */}
       <FormSection
         title="Position Details"

@@ -13,7 +13,7 @@ import {
   LANGUAGES,
   UAE_BANKS,
 } from '@/lib/constants';
-import { Input, Button, MultiSelectDropdown, CustomDropdown, PhoneInput } from '@/components/ui';
+import { Input, Button, MultiSelectDropdown, CustomDropdown, CustomDatePicker, PhoneInput } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
@@ -333,6 +333,9 @@ export function EmployeeForm({
     register('previous_nationality');
     register('languages_spoken');
     register('uae_presence');
+    register('gender');
+    register('date_of_birth');
+    register('passport_expiry');
   }, [register]);
 
   const title = watch('title');
@@ -358,6 +361,11 @@ export function EmployeeForm({
   const homeCountry = watch('home_country');
   const fatherFullName = watch('father_full_name');
   const motherFullName = watch('mother_full_name');
+  const dateOfBirth = watch('date_of_birth');
+  const passportNumber = watch('passport_number');
+  const passportExpiry = watch('passport_expiry');
+  const placeOfIssue = watch('place_of_issue');
+  const gender = watch('gender');
 
   // Derive country code from nationality for phone inputs
   const nationalityCountryCode = nationality ? nationalityToCountryCode(nationality) : undefined;
@@ -535,13 +543,30 @@ export function EmployeeForm({
     }
   };
 
-  const handlePassportExtracted = (data: Partial<EmployeeFormData> & { family_name?: string }) => {
+  const handlePassportExtracted = (data: Partial<EmployeeFormData> & {
+    family_name?: string;
+    passport_no?: string;
+    passport_issue_date?: string;
+    passport_expiry_date?: string;
+    place_of_birth?: string;
+  }) => {
     const fieldMapping: Record<string, string> = {
       family_name: 'last_name',
+      passport_no: 'passport_number',
+      passport_expiry_date: 'passport_expiry',
+      place_of_birth: 'place_of_issue',
     };
+
     Object.entries(data).forEach(([key, value]) => {
       if (value !== undefined) {
         const formField = fieldMapping[key] || key;
+        // Normalize gender to lowercase
+        if (formField === 'gender' && typeof value === 'string') {
+          setValue('gender', value.toLowerCase() as 'male' | 'female');
+          return;
+        }
+        // Skip passport_issue_date (no form field for it)
+        if (key === 'passport_issue_date') return;
         setValue(formField as keyof EmployeeFormData, value as never);
       }
     });
@@ -859,6 +884,43 @@ export function EmployeeForm({
                   error={errors.nationality?.message}
                   required
                   searchable
+                />
+                <CustomDropdown
+                  label="Gender"
+                  options={[
+                    { value: 'male', label: 'Male' },
+                    { value: 'female', label: 'Female' },
+                  ]}
+                  value={gender || ''}
+                  onChange={(val) => setValue('gender', val as 'male' | 'female')}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CustomDatePicker
+                  label="Date of Birth"
+                  value={dateOfBirth || ''}
+                  onChange={(val) => setValue('date_of_birth', val)}
+                  error={errors.date_of_birth?.message}
+                />
+                <Input
+                  label="Place of Birth / Issue"
+                  placeholder="e.g. London, Dubai..."
+                  {...register('place_of_issue')}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Passport Number"
+                  placeholder="e.g. X12345678"
+                  {...register('passport_number')}
+                />
+                <CustomDatePicker
+                  label="Passport Expiry"
+                  value={passportExpiry || ''}
+                  onChange={(val) => setValue('passport_expiry', val)}
+                  error={errors.passport_expiry?.message}
                 />
               </div>
 

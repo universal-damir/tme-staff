@@ -51,12 +51,20 @@ IMPORTANT formatting rules:
 - Convert ALL dates to DD.MM.YYYY format (e.g., 15.03.2025)
 - Convert names from ALL CAPS to Title Case (e.g., JOHN SMITH → John Smith)
 - Keep passport number in original format (usually uppercase)
-- Nationality must be the FULL country name (not code): "DEU" → "Germany", "GBR" → "United Kingdom", "IND" → "India", "USA" → "United States", "PAK" → "Pakistan", "PHL" → "Philippines", etc.
+- Nationality must be the FULL country name (not code): "DEU" → "Germany", "GBR" → "United Kingdom", "IND" → "India", "USA" → "United States", "PAK" → "Pakistan", "PHL" → "Philippines", "MNE" → "Montenegro", etc.
+
+CRITICAL - Date of Birth accuracy:
+- The date of birth is typically labeled "Date of birth" / "Date de naissance" / "Datum rodjenja" on the passport
+- Do NOT confuse it with issue date or expiry date
+- Cross-verify with the MRZ: in the MRZ, the date of birth appears as YYMMDD in the second line (positions 1-6 after the first '<' separator block)
+- If the visual date and MRZ date disagree, prefer the MRZ date as it is machine-encoded
+- Date of birth will typically be decades in the past (1950s-2000s), not a recent date
 
 Also check the MRZ (Machine Readable Zone - the two lines of characters at the bottom of the passport):
 - Verify passport number matches
+- Verify date of birth matches
 - Verify expiry date matches
-- If MRZ is readable, use it to cross-verify extracted data
+- If MRZ is readable, use it to cross-verify ALL extracted data — MRZ is more reliable than visual text
 
 Respond with a JSON object in exactly this format:
 {

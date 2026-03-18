@@ -37,8 +37,19 @@ export default function CustomDatePicker({
   const containerRef = useRef<HTMLDivElement>(null);
   const calendarRef = useRef<HTMLDivElement>(null);
   const today = new Date();
-  const [currentMonth, setCurrentMonth] = useState(today.getMonth());
-  const [currentYear, setCurrentYear] = useState(today.getFullYear());
+
+  // Parse initial month/year from value (dd.mm.yyyy) or fallback to today
+  const parseValueDate = () => {
+    if (value && /^\d{2}\.\d{2}\.\d{4}$/.test(value)) {
+      const [, mm, yyyy] = value.split('.');
+      return { month: parseInt(mm, 10) - 1, year: parseInt(yyyy, 10) };
+    }
+    return { month: today.getMonth(), year: today.getFullYear() };
+  };
+
+  const initialDate = parseValueDate();
+  const [currentMonth, setCurrentMonth] = useState(initialDate.month);
+  const [currentYear, setCurrentYear] = useState(initialDate.year);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -130,7 +141,16 @@ export default function CustomDatePicker({
       <div className="relative">
         <motion.button
           type="button"
-          onClick={() => !disabled && setIsCalendarOpen(!isCalendarOpen)}
+          onClick={() => {
+            if (disabled) return;
+            if (!isCalendarOpen) {
+              // Navigate to value's month/year when opening
+              const d = parseValueDate();
+              setCurrentMonth(d.month);
+              setCurrentYear(d.year);
+            }
+            setIsCalendarOpen(!isCalendarOpen);
+          }}
           whileHover={!disabled ? { scale: 1.01 } : undefined}
           className={`w-full px-3 py-2 rounded-lg border-2 border-gray-200 transition-all duration-200 flex items-center justify-between text-left ${
             disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'cursor-pointer bg-white'
@@ -165,6 +185,11 @@ export default function CustomDatePicker({
             onClick={(e) => {
               if (!disabled) {
                 e.stopPropagation();
+                if (!isCalendarOpen) {
+                  const d = parseValueDate();
+                  setCurrentMonth(d.month);
+                  setCurrentYear(d.year);
+                }
                 setIsCalendarOpen(!isCalendarOpen);
               }
             }}
