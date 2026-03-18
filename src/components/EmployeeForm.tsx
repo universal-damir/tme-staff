@@ -12,6 +12,7 @@ import {
   EDUCATIONAL_QUALIFICATIONS,
   LANGUAGES,
   UAE_BANKS,
+  UAE_EMIRATES,
 } from '@/lib/constants';
 import { Input, Button, MultiSelectDropdown, CustomDropdown, CustomDatePicker, PhoneInput } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
@@ -379,7 +380,7 @@ export function EmployeeForm({
   );
   const [isInUAE, setIsInUAE] = useState(
     submission.employee_data?.uae_presence === 'inside' ||
-    !!(submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
+    !!(submission.employee_data?.uae_street_address || submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
   );
 
   // Track whether passport data has been extracted/pre-filled
@@ -1135,9 +1136,10 @@ export function EmployeeForm({
                     setIsInUAE(e.target.checked);
                     setValue('uae_presence', e.target.checked ? 'inside' : 'outside');
                     if (!e.target.checked) {
-                      setValue('uae_flat_villa', '');
-                      setValue('uae_building_name', '');
-                      setValue('uae_street_name', '');
+                      setValue('uae_street_address', '');
+                      setValue('uae_city', '');
+                      setValue('uae_postal_code', '');
+                      setValue('uae_emirate', '');
                     }
                   }}
                   className="w-4 h-4 rounded border-gray-300"
@@ -1149,30 +1151,35 @@ export function EmployeeForm({
 
               {isInUAE && (
                 <div className="space-y-4 pl-6 border-l-2 border-gray-200">
+                  <Input
+                    label="Street Address"
+                    error={errors.uae_street_address?.message}
+                    required
+                    {...register('uae_street_address', {
+                      required: isInUAE ? 'Required' : false,
+                    })}
+                  />
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Input
-                      label="Flat/Villa Number"
-                      error={errors.uae_flat_villa?.message}
+                      label="City"
+                      error={errors.uae_city?.message}
                       required
-                      {...register('uae_flat_villa', {
+                      {...register('uae_city', {
                         required: isInUAE ? 'Required' : false,
                       })}
                     />
                     <Input
-                      label="Building Name"
-                      error={errors.uae_building_name?.message}
-                      required
-                      {...register('uae_building_name', {
-                        required: isInUAE ? 'Required' : false,
-                      })}
+                      label="Postal Code"
+                      error={errors.uae_postal_code?.message}
+                      {...register('uae_postal_code')}
                     />
-                    <Input
-                      label="Street Name"
-                      error={errors.uae_street_name?.message}
+                    <CustomDropdown
+                      label="Emirate"
+                      value={watch('uae_emirate') || ''}
+                      onChange={(value) => setValue('uae_emirate', value)}
+                      options={UAE_EMIRATES.map(e => ({ value: e, label: e }))}
+                      placeholder="Select emirate..."
                       required
-                      {...register('uae_street_name', {
-                        required: isInUAE ? 'Required' : false,
-                      })}
                     />
                   </div>
                 </div>

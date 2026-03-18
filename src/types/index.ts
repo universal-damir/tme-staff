@@ -74,6 +74,11 @@ export interface EmployeeFormData {
 
   // Contact - UAE
   uae_presence: 'inside' | 'outside';
+  uae_street_address?: string;
+  uae_city?: string;
+  uae_postal_code?: string;
+  uae_emirate?: string;
+  // Deprecated (kept for backwards compat)
   uae_flat_villa?: string;
   uae_building_name?: string;
   uae_street_name?: string;

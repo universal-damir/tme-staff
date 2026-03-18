@@ -507,6 +507,16 @@ export const UAE_BANKS = [
 
 export type UAEBank = (typeof UAE_BANKS)[number];
 
+export const UAE_EMIRATES = [
+  'Abu Dhabi',
+  'Ajman',
+  'Dubai',
+  'Fujairah',
+  'Ras Al Khaimah',
+  'Sharjah',
+  'Umm Al Quwain',
+] as const;
+
 // ===================================================================
 // UI CONSTANTS
 // ===================================================================
