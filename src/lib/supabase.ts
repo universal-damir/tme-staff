@@ -94,6 +94,30 @@ export async function updateEmployeeData(
 }
 
 // ===================================================================
+// AUTO-SAVE EMPLOYEE DATA (partial save without signature/completion)
+// ===================================================================
+
+export async function autoSaveEmployeeData(
+  id: string,
+  data: Partial<EmployeeFormData>
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('staff_onboarding_submissions')
+    .update({
+      employee_data: data,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error auto-saving employee data:', error);
+    return false;
+  }
+
+  return true;
+}
+
+// ===================================================================
 // UPDATE SAME-PERSON DATA (Both employer and employee in one go)
 // ===================================================================
 

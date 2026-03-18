@@ -26,10 +26,10 @@ const COVER_VALIDATION_PROMPT = `You are validating a passport cover image. The 
 Analyze the image:
 
 VALID (spread open passport cover):
-- Two distinct halves visible side by side
-- One side has the national emblem/coat of arms/text, the other side is plain or has minor markings
-- The book spine/fold is visible in the center
-- The image shows the passport laid flat and open
+- Both the front cover AND back cover are visible in a single image
+- The book spine/fold is visible between the two halves
+- The passport is laid flat and open, whether oriented horizontally (halves side by side) or vertically (halves top and bottom)
+- One half has the national emblem/coat of arms/text, the other is plain or has minor markings
 
 INVALID (these are NOT acceptable):
 - Only ONE side of the passport cover is visible (just the front or just the back)

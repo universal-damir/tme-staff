@@ -49,6 +49,7 @@ function pluralize(value: number | undefined, singular: string): string {
 export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFormProps) {
   const [signature, setSignature] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
+  const [jobTitleSameAsVisa, setJobTitleSameAsVisa] = useState(false);
 
   const {
     register,
@@ -85,6 +86,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
   const startingDate = watch('starting_date');
   const annualLeaveType = watch('annual_leave_type');
   const weeklyOff = watch('weekly_off');
+  const noticePeriodValue = watch('notice_period_value');
+  const probationPeriodValue = watch('probation_period_value');
 
   const handleFormSubmit = async (data: EmployerFormData) => {
     if (!signature) {
@@ -130,7 +133,12 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
                 label="Job Title (Visa)"
                 options={toDropdownOptions(JOB_TITLES)}
                 value={jobTitleVisa || ''}
-                onChange={(val) => setValue('job_title_visa', val)}
+                onChange={(val) => {
+                  setValue('job_title_visa', val);
+                  if (jobTitleSameAsVisa) {
+                    setValue('job_title_company', val);
+                  }
+                }}
                 error={errors.job_title_visa?.message}
                 required
                 searchable
@@ -152,18 +160,53 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
             </div>
 
             <div>
-              <CustomDropdown
-                label="Job Title (Company)"
-                options={toDropdownOptions(JOB_TITLES)}
-                value={jobTitleCompany || ''}
-                onChange={(val) => setValue('job_title_company', val)}
-                error={errors.job_title_company?.message}
-                required
-                searchable
-                placeholder="Select company role..."
-              />
-              <p className="text-xs text-gray-500 mt-1">Employee&apos;s actual position within the company</p>
-              {jobTitleCompany === 'Other' && (
+              <div className="flex items-center justify-between mb-1">
+                <label
+                  className="block text-sm font-medium"
+                  style={{ color: TME_COLORS.primary }}
+                >
+                  Job Title (Company) <span className="text-red-500 ml-1">*</span>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={jobTitleSameAsVisa}
+                    onChange={(e) => {
+                      setJobTitleSameAsVisa(e.target.checked);
+                      if (e.target.checked && jobTitleVisa) {
+                        setValue('job_title_company', jobTitleVisa);
+                        if (jobTitleVisa !== 'Other') {
+                          setValue('job_title_company_custom', '');
+                        }
+                      }
+                    }}
+                    className="rounded border-gray-300"
+                    style={{ accentColor: TME_COLORS.primary }}
+                  />
+                  Same as Visa
+                </label>
+              </div>
+              {jobTitleSameAsVisa ? (
+                <div
+                  className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 h-[42px] flex items-center text-sm"
+                  style={{ backgroundColor: '#f9fafb', color: TME_COLORS.primary }}
+                >
+                  {jobTitleVisa || <span className="text-gray-400">Select visa title first</span>}
+                </div>
+              ) : (
+                <>
+                  <CustomDropdown
+                    options={toDropdownOptions(JOB_TITLES)}
+                    value={jobTitleCompany || ''}
+                    onChange={(val) => setValue('job_title_company', val)}
+                    error={errors.job_title_company?.message}
+                    searchable
+                    placeholder="Select company role..."
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Employee&apos;s actual position within the company</p>
+                </>
+              )}
+              {!jobTitleSameAsVisa && jobTitleCompany === 'Other' && (
                 <div className="mt-2">
                   <Input
                     label="Specify Company Job Title"
@@ -178,7 +221,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
             </div>
           </div>
 
-          {/* Department Row */}
+          {/* Department + Sponsor Row */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <CustomDropdown
@@ -204,10 +247,20 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
                 </div>
               )}
             </div>
+
+            <CustomDropdown
+              label="Sponsor"
+              options={toDropdownOptions(SPONSOR_OPTIONS)}
+              value={sponsor || 'Company'}
+              onChange={(val) => setValue('sponsor', val)}
+              error={errors.sponsor?.message}
+              required
+              placeholder="Select sponsor..."
+            />
           </div>
 
-          {/* Working Location, Responsible Manager, Sponsor Row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Working Location + Responsible Manager Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input
               label="Working Location"
               placeholder="e.g. JAFZA, DMCC, Dubai..."
@@ -218,16 +271,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
               label="Responsible Manager"
               placeholder="Enter manager name"
               {...register('responsible_manager')}
-            />
-
-            <CustomDropdown
-              label="Sponsor"
-              options={toDropdownOptions(SPONSOR_OPTIONS)}
-              value={sponsor || 'Company'}
-              onChange={(val) => setValue('sponsor', val)}
-              error={errors.sponsor?.message}
-              required
-              placeholder="Select sponsor..."
             />
           </div>
         </div>
@@ -259,78 +302,104 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
         title="Leave & Terms"
         icon={<Calendar className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
-        <div className="space-y-6">
-          {/* Annual Leave */}
-          <div>
-            <label
-              className="block text-sm font-medium mb-2"
-              style={{ color: TME_COLORS.primary }}
-            >
-              Annual Leave
-            </label>
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                type="text"
-                inputMode="numeric"
-                placeholder="Days"
-                error={errors.annual_leave_days?.message}
-                {...register('annual_leave_days', {
-                  required: 'Required',
-                  min: { value: 0, message: 'Must be positive' },
-                })}
-              />
-              <CustomDropdown
-                options={LEAVE_TYPES.map(opt => ({ value: opt.value, label: opt.label }))}
-                value={annualLeaveType || 'calendar'}
-                onChange={(val) => setValue('annual_leave_type', val as 'calendar' | 'working')}
-              />
+        <div className="space-y-4">
+          {/* Row 1: Starting Date | Weekly Off */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <CustomDatePicker
+              label="Starting Date"
+              value={startingDate || ''}
+              onChange={(val) => setValue('starting_date', val)}
+              error={errors.starting_date?.message}
+              required
+            />
+
+            <CustomDropdown
+              label="Weekly Off"
+              options={WEEKLY_OFF_OPTIONS.map(opt => ({ value: opt.value, label: opt.label }))}
+              value={weeklyOff || 'saturday_sunday'}
+              onChange={(val) => setValue('weekly_off', val as 'friday' | 'sunday' | 'saturday_sunday')}
+              error={errors.weekly_off?.message}
+              required
+            />
+          </div>
+
+          {/* Row 2: Annual Leave | Notice & Probation */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label
+                className="block text-sm font-medium mb-1"
+                style={{ color: TME_COLORS.primary }}
+              >
+                Annual Leave
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="w-20 flex-shrink-0">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="30"
+                    error={errors.annual_leave_days?.message}
+                    {...register('annual_leave_days', {
+                      required: 'Required',
+                      pattern: { value: /^\d+$/, message: 'Enter a number' },
+                    })}
+                  />
+                </div>
+                <div className="flex-1">
+                  <CustomDropdown
+                    options={LEAVE_TYPES.map(opt => ({ value: opt.value, label: opt.label }))}
+                    value={annualLeaveType || 'calendar'}
+                    onChange={(val) => setValue('annual_leave_type', val as 'calendar' | 'working')}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-between gap-4">
+              <div>
+                <label className="block text-sm mb-1">
+                  <span className="font-medium" style={{ color: TME_COLORS.primary }}>Notice Period</span>
+                  {' '}
+                  <span className="text-gray-400">({pluralize(Number(noticePeriodValue), 'month')})</span>
+                </label>
+                <div className="w-20">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="1"
+                    error={errors.notice_period_value?.message}
+                    {...register('notice_period_value', {
+                      required: 'Required',
+                      pattern: { value: /^\d+$/, message: 'Enter a number' },
+                    })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1">
+                  <span className="font-medium" style={{ color: TME_COLORS.primary }}>Probation</span>
+                  {' '}
+                  <span className="text-gray-400">({pluralize(Number(probationPeriodValue), 'month')})</span>
+                </label>
+                <div className="w-20">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="6"
+                    error={errors.probation_period_value?.message}
+                    {...register('probation_period_value', {
+                      required: 'Required',
+                      pattern: { value: /^\d+$/, message: 'Enter a number' },
+                    })}
+                  />
+                </div>
+              </div>
             </div>
           </div>
-
-          {/* Notice & Probation Period - single row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              label="Notice Period (months)"
-              type="text"
-              inputMode="numeric"
-              placeholder="e.g. 1"
-              error={errors.notice_period_value?.message}
-              {...register('notice_period_value', {
-                required: 'Required',
-                min: { value: 0, message: 'Must be positive' },
-              })}
-            />
-            <Input
-              label="Probation Period (months)"
-              type="text"
-              inputMode="numeric"
-              placeholder="e.g. 6"
-              error={errors.probation_period_value?.message}
-              {...register('probation_period_value', {
-                required: 'Required',
-                min: { value: 0, message: 'Must be positive' },
-              })}
-            />
-          </div>
-
-          {/* Weekly Off */}
-          <CustomDropdown
-            label="Weekly Off"
-            options={WEEKLY_OFF_OPTIONS.map(opt => ({ value: opt.value, label: opt.label }))}
-            value={weeklyOff || 'saturday_sunday'}
-            onChange={(val) => setValue('weekly_off', val as 'friday' | 'sunday' | 'saturday_sunday')}
-            error={errors.weekly_off?.message}
-            required
-          />
-
-          {/* Starting Date */}
-          <CustomDatePicker
-            label="Starting Date"
-            value={startingDate || ''}
-            onChange={(val) => setValue('starting_date', val)}
-            error={errors.starting_date?.message}
-            required
-          />
         </div>
       </FormSection>
 

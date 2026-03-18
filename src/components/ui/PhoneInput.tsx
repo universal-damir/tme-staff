@@ -105,6 +105,13 @@ export function PhoneInput({
     return () => setIsMounted(false);
   }, []);
 
+  // Respond to defaultCountry prop changes (only if user hasn't entered a number)
+  useEffect(() => {
+    if (!lockedCountry && defaultCountry && !inputValue) {
+      setSelectedCountry(defaultCountry);
+    }
+  }, [defaultCountry, lockedCountry, inputValue]);
+
   // Sync input value with external value
   useEffect(() => {
     if (value) {
@@ -114,8 +121,9 @@ export function PhoneInput({
           if (parsed.country) {
             setSelectedCountry(parsed.country);
           }
-          // Show national number without country code
-          setInputValue(parsed.nationalNumber || '');
+          // Format national number for display
+          const raw = parsed.nationalNumber || '';
+          setInputValue(formatNationalNumber(raw, parsed.country || selectedCountry));
         }
       } catch {
         // If parsing fails, just use the value as-is
@@ -189,6 +197,21 @@ export function PhoneInput({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
+  // Format national number for display using AsYouType
+  const formatNationalNumber = (raw: string, country: Country): string => {
+    if (!raw) return '';
+    try {
+      const callingCode = getCountryCallingCode(country);
+      const formatter = new AsYouType(country);
+      const formatted = formatter.input(`+${callingCode}${raw}`);
+      // Strip country code prefix to get formatted national portion
+      const prefixPattern = new RegExp(`^\\+${callingCode}\\s*`);
+      return formatted.replace(prefixPattern, '');
+    } catch {
+      return raw;
+    }
+  };
+
   // Handle input change
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value.replace(/\D/g, '');
@@ -202,19 +225,12 @@ export function PhoneInput({
       return;
     }
 
-    setInputValue(raw);
+    // Format for display
+    setInputValue(formatNationalNumber(raw, selectedCountry));
 
-    // Build full number
+    // Build full E.164 number
     const callingCode = getCountryCallingCode(selectedCountry);
     const fullNumber = raw ? `+${callingCode}${raw}` : '';
-
-    // Format as user types
-    try {
-      const formatter = new AsYouType(selectedCountry);
-      formatter.input(fullNumber);
-    } catch {
-      // Ignore formatting errors
-    }
 
     onChange(fullNumber || undefined);
   };
@@ -237,7 +253,7 @@ export function PhoneInput({
   // Validation
   const fullValue = value || '';
   const expectedLength = getExpectedLength(selectedCountry);
-  const currentLength = inputValue.length;
+  const currentLength = inputValue.replace(/\D/g, '').length;
 
   // Determine validation state
   let validationState: 'none' | 'too_short' | 'valid' | 'invalid' = 'none';

@@ -180,7 +180,7 @@ export function SalaryBreakdown({
         salary_transport: newTransport,
         salary_food: newFood,
         salary_other: newOther,
-        salary_prepay_card: prepayCard,
+        salary_prepay_card: 0,
       });
     },
     [currency, onChange]
@@ -208,7 +208,7 @@ export function SalaryBreakdown({
   return (
     <div className="space-y-4">
       {/* Currency and Total */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4">
         <CustomDropdown
           label="Currency"
           value={currency}
@@ -229,16 +229,14 @@ export function SalaryBreakdown({
           required
         />
 
-        <div className="md:col-span-2">
-          <SalaryInput
-            label="Monthly Salary (Total)"
-            value={total}
-            onChange={handleTotalChange}
-            placeholder="Enter total monthly salary"
-            error={errors?.total}
-            required
-          />
-        </div>
+        <SalaryInput
+          label="Monthly Salary (Total)"
+          value={total}
+          onChange={handleTotalChange}
+          placeholder="Enter total monthly salary"
+          error={errors?.total}
+          required
+        />
       </div>
 
       {/* Info Toggle */}
@@ -281,7 +279,7 @@ export function SalaryBreakdown({
       {/* Breakdown Fields */}
       {isExpanded && (
         <div className="space-y-4 pt-2 border-t border-gray-200">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <SalaryInput
               label={`Basic (${getPercentage(basic)})`}
               value={basic}

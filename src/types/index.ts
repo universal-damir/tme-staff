@@ -87,6 +87,7 @@ export interface EmployeeFormData {
 
   // Education
   educational_qualification: string;
+  educational_qualification_custom?: string;
   languages_spoken: string[];
 
   // Bank

@@ -16,10 +16,11 @@ import {
 import { Input, Button, MultiSelectDropdown, CustomDropdown, PhoneInput } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
-import { PassportMultiUpload } from '@/components/PassportMultiUpload';
+import { UploadSlot } from '@/components/UploadSlot';
 import type { EmployeeFormData, EmployeeFormProps, PassportPageReference } from '@/types';
-import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey } from '@/lib/supabase';
-import { calculateFullName } from '@/lib/utils';
+import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
+import { calculateFullName, compressImageForAI } from '@/lib/utils';
+import { nationalityToCountryCode } from '@/lib/country-utils';
 import {
   User,
   Users,
@@ -31,6 +32,9 @@ import {
   Camera,
   CheckCircle,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Info,
 } from 'lucide-react';
 
 // Sort lists alphabetically (with "Other" at the end)
@@ -49,9 +53,8 @@ const SORTED_BANKS = sortWithOtherLast(UAE_BANKS);
 // --- Step definitions for progressive reveal ---
 const STEP_LABELS = [
   'ID Photo',
-  'Passport Cover',
-  'Inside Pages',
-  'Personal Details',
+  'Passport OUTSIDE',
+  'Passport INSIDE',
   'Family Details',
   'Address & Contact',
   'Education & More',
@@ -87,26 +90,122 @@ function FormSection({ title, icon, children, stepNumber }: FormSectionProps) {
   );
 }
 
+// --- Step navigation buttons (Back + Continue) ---
+function StepNavButtons({
+  enabled,
+  onContinue,
+  onBack,
+  showBack = true,
+  label,
+}: {
+  enabled: boolean;
+  onContinue: () => void;
+  onBack?: () => void;
+  showBack?: boolean;
+  label?: string;
+}) {
+  return (
+    <div className={`flex ${showBack && onBack ? 'justify-between' : 'justify-end'} mt-4`}>
+      {showBack && onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border-2 hover:bg-gray-50"
+          style={{ color: TME_COLORS.primary, borderColor: TME_COLORS.primary }}
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Back
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onContinue}
+        disabled={!enabled}
+        className={`px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-all duration-200 flex items-center gap-2 ${
+          enabled ? 'hover:opacity-90 cursor-pointer' : 'opacity-40 cursor-not-allowed'
+        }`}
+        style={{ backgroundColor: TME_COLORS.primary }}
+      >
+        {label || 'Continue'}
+        <ChevronRight className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 // --- Sticky Step Progress Bar ---
-function StepProgress({ currentStep, totalSteps }: { currentStep: number; totalSteps: number }) {
+function StepProgress({
+  currentStep,
+  viewingStep,
+  totalSteps,
+  onStepClick,
+}: {
+  currentStep: number;
+  viewingStep: number;
+  totalSteps: number;
+  onStepClick: (step: number) => void;
+}) {
   return (
     <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-sm mb-2">
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: TME_COLORS.primary }}>
-          Step {currentStep} of {totalSteps}
-        </span>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onStepClick(Math.max(1, viewingStep - 1))}
+            disabled={viewingStep <= 1}
+            className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
+          </button>
+          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: TME_COLORS.primary }}>
+            Step {viewingStep} of {totalSteps}
+          </span>
+          <button
+            type="button"
+            onClick={() => onStepClick(Math.min(currentStep, viewingStep + 1))}
+            disabled={viewingStep >= currentStep}
+            className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <ChevronRight className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
+          </button>
+        </div>
         <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: `${TME_COLORS.primary}15`, color: TME_COLORS.primary }}>
-          {STEP_LABELS[currentStep - 1] || ''}
+          {STEP_LABELS[viewingStep - 1] || ''}
         </span>
       </div>
-      <div className="w-full bg-gray-200 rounded-full h-1.5">
-        <motion.div
-          className="h-1.5 rounded-full"
-          style={{ backgroundColor: TME_COLORS.primary }}
-          initial={{ width: 0 }}
-          animate={{ width: `${(currentStep / totalSteps) * 100}%` }}
-          transition={{ duration: 0.5, ease: 'easeOut' }}
-        />
+      {/* Clickable step dots */}
+      <div className="flex items-center gap-1.5 mb-2">
+        {Array.from({ length: totalSteps }, (_, i) => i + 1).map((step) => {
+          const isCompleted = step < currentStep;
+          const isCurrent = step === currentStep;
+          const isViewing = step === viewingStep;
+          const isClickable = step <= currentStep;
+          return (
+            <button
+              key={step}
+              type="button"
+              onClick={() => isClickable && onStepClick(step)}
+              disabled={!isClickable}
+              className={`h-2 flex-1 rounded-full transition-all duration-200 ${
+                isViewing
+                  ? ''
+                  : isCompleted
+                  ? 'bg-green-400'
+                  : isCurrent
+                  ? ''
+                  : 'bg-gray-200'
+              } ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
+              style={
+                isViewing
+                  ? { backgroundColor: TME_COLORS.primary }
+                  : isCurrent && !isViewing
+                  ? { backgroundColor: `${TME_COLORS.primary}60` }
+                  : undefined
+              }
+              title={STEP_LABELS[step - 1]}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -169,6 +268,22 @@ export function EmployeeForm({
     insidePages?: PassportPageReference;
   }>(submission.documents?.passportPages || {});
 
+  // Passport upload UI state (preview, validating, error — separate from persisted data)
+  const initCover = submission.documents?.passportPages?.cover;
+  const initInside = submission.documents?.passportPages?.insidePages;
+  const [coverUI, setCoverUI] = useState({
+    preview: initCover?.path ? getDocumentUrl(initCover.path) : null as string | null,
+    validating: false,
+    error: null as string | null,
+    file: null as File | null,
+  });
+  const [insideUI, setInsideUI] = useState({
+    preview: initInside?.path ? getDocumentUrl(initInside.path) : null as string | null,
+    validating: false,
+    error: null as string | null,
+    file: null as File | null,
+  });
+
   // Refs to track latest values (avoids stale closure issues in callbacks)
   const photoDocRef = React.useRef(photoDoc);
   const passportPagesRef = React.useRef(passportPages);
@@ -176,7 +291,6 @@ export function EmployeeForm({
   // Section refs for auto-scrolling
   const passportCoverRef = useRef<HTMLDivElement>(null);
   const passportInsideRef = useRef<HTMLDivElement>(null);
-  const personalRef = useRef<HTMLDivElement>(null);
   const familyRef = useRef<HTMLDivElement>(null);
   const contactRef = useRef<HTMLDivElement>(null);
   const educationRef = useRef<HTMLDivElement>(null);
@@ -196,6 +310,7 @@ export function EmployeeForm({
     handleSubmit,
     watch,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<EmployeeFormData>({
     defaultValues: submission.employee_data || {
@@ -244,6 +359,9 @@ export function EmployeeForm({
   const fatherFullName = watch('father_full_name');
   const motherFullName = watch('mother_full_name');
 
+  // Derive country code from nationality for phone inputs
+  const nationalityCountryCode = nationality ? nationalityToCountryCode(nationality) : undefined;
+
   // New checkbox states for nationality and address
   const [hasOtherNationality, setHasOtherNationality] = useState(
     !!submission.employee_data?.other_nationality
@@ -269,22 +387,53 @@ export function EmployeeForm({
   const isPersonalComplete = !!(firstName && lastName && nationality);
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
   const isContactComplete = !!(homeStreetAddress && homeCity && homeCountry && personalEmail);
-  const isEducationComplete = !!(educationalQualification && languagesSpoken.length > 0);
+  const educationalQualificationCustom = watch('educational_qualification_custom');
+  const isEducationComplete = !!(
+    educationalQualification &&
+    (educationalQualification !== 'Other' || educationalQualificationCustom) &&
+    languagesSpoken.length > 0
+  );
 
   // Compute the highest unlocked step (1-indexed, 8 steps total)
   const computeCurrentStep = useCallback(() => {
     if (!isPhotoUploaded) return 1;
     if (!isCoverUploaded) return 2;
-    if (!isInsidePagesUploaded) return 3;
-    if (!isPersonalComplete) return 4;
-    if (!isFamilyComplete) return 5;
-    if (!isContactComplete) return 6;
-    if (!isEducationComplete) return 7;
-    return 8;
-  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, isPersonalComplete, isFamilyComplete, isContactComplete, isEducationComplete]);
+    if (!isInsidePagesUploaded || !passportDataReady || !isPersonalComplete) return 3;
+    if (!isFamilyComplete) return 4;
+    if (!isContactComplete) return 5;
+    if (!isEducationComplete) return 6;
+    return 7;
+  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, passportDataReady, isPersonalComplete, isFamilyComplete, isContactComplete, isEducationComplete]);
 
   const currentStep = computeCurrentStep();
   const totalSteps = STEP_LABELS.length;
+  const [viewingStep, setViewingStep] = useState(currentStep);
+
+  // No auto-advance — user controls navigation via "Continue" button or arrows
+
+  // Auto-save form data when step advances (persists across refresh)
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // Debounce auto-save to avoid excessive writes
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      if (currentStep > 2) {
+        autoSaveEmployeeData(submission.id, getValues());
+      }
+    }, 1000);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, viewingStep]);
+
+  // Pre-fill Home Country from nationality
+  useEffect(() => {
+    if (nationality && !homeCountry) {
+      setValue('home_country', nationality);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nationality]);
 
   // Auto-scroll to newly revealed section
   const scrollToRef = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
@@ -350,74 +499,148 @@ export function EmployeeForm({
     return null;
   };
 
-  const handlePassportPageUpload = async (pageType: string, file: File): Promise<{ path: string } | null> => {
-    const pageKey = pageType as PassportPageKey;
-    const result = await uploadPassportPage(submission.id, pageKey, file);
-    if (result) {
-      const newPage: PassportPageReference = {
-        path: result.path,
-        filename: result.filename,
-        validated: true,
-      };
-      const updatedPages = {
-        ...passportPagesRef.current,
-        [pageKey]: newPage,
-      };
-      setPassportPages(updatedPages);
-      passportPagesRef.current = updatedPages;
-      setPassportError(null);
-      await updateDocumentReferences(submission.id, {
-        photo: photoDocRef.current,
-        passportPages: updatedPages,
+  // Passport validation helper
+  const validatePassportPageType = async (imageBase64: string, expectedType: 'COVER' | 'INSIDE_PAGES') => {
+    try {
+      const compressedImage = await compressImageForAI(imageBase64);
+      const response = await fetch('/api/validate-passport-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: compressedImage, expectedType }),
       });
-      return { path: result.path };
+      if (!response.ok) throw new Error('Validation failed');
+      const result = await response.json();
+      return { valid: result.matches as boolean, error: result.errorMessage as string | undefined };
+    } catch {
+      return { valid: false, error: 'Unable to validate page. Please try again.' };
     }
-    return null;
   };
 
-  const handlePassportPagesChange = async (pages: {
-    cover: { storagePath: string | null; validated: boolean; extractedData?: Record<string, unknown> };
-    insidePages: { storagePath: string | null; validated: boolean; extractedData?: Record<string, unknown> };
-  }) => {
-    const updatedPages: typeof passportPages = {};
-    if (pages.cover.storagePath && pages.cover.validated) {
-      updatedPages.cover = {
-        path: pages.cover.storagePath,
-        filename: pages.cover.storagePath.split('/').pop() || '',
-        validated: true,
-      };
+  // Passport data extraction helper
+  const extractPassportData = async (imageBase64: string) => {
+    try {
+      const compressedImage = await compressImageForAI(imageBase64);
+      const response = await fetch('/api/extract-passport', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: compressedImage }),
+      });
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) return result.data as Partial<EmployeeFormData>;
+      }
+      return null;
+    } catch {
+      return null;
     }
-    if (pages.insidePages.storagePath && pages.insidePages.validated) {
-      updatedPages.insidePages = {
-        path: pages.insidePages.storagePath,
-        filename: pages.insidePages.storagePath.split('/').pop() || '',
-        validated: true,
-        extracted_data: pages.insidePages.extractedData,
-      };
-    }
-    setPassportPages(updatedPages);
-    passportPagesRef.current = updatedPages;
-    // Persist to Supabase (handles both adds and removals)
-    await updateDocumentReferences(submission.id, {
-      photo: photoDocRef.current,
-      passportPages: updatedPages,
-    });
   };
 
   const handlePassportExtracted = (data: Partial<EmployeeFormData> & { family_name?: string }) => {
     const fieldMapping: Record<string, string> = {
       family_name: 'last_name',
     };
-
     Object.entries(data).forEach(([key, value]) => {
       if (value !== undefined) {
         const formField = fieldMapping[key] || key;
         setValue(formField as keyof EmployeeFormData, value as never);
       }
     });
-
-    // Mark passport data as ready so personal details section can appear
     setPassportDataReady(true);
+
+    // Auto-save extracted data immediately (use setTimeout to let setValue propagate)
+    setTimeout(() => {
+      autoSaveEmployeeData(submission.id, getValues());
+    }, 100);
+  };
+
+  // Cover upload handler
+  const handleCoverUpload = async (file: File): Promise<boolean> => {
+    const reader = new FileReader();
+    const preview = await new Promise<string>((resolve) => {
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+
+    setCoverUI({ preview, validating: true, error: null, file });
+
+    const validation = await validatePassportPageType(preview, 'COVER');
+    if (!validation.valid) {
+      setCoverUI({ preview, validating: false, error: validation.error || 'Not a valid passport cover', file });
+      return false;
+    }
+
+    const result = await uploadPassportPage(submission.id, 'cover', file);
+    if (!result) {
+      setCoverUI({ preview, validating: false, error: 'Failed to upload file', file });
+      return false;
+    }
+
+    setCoverUI({ preview, validating: false, error: null, file });
+    const newPage: PassportPageReference = { path: result.path, filename: result.filename, validated: true };
+    const updatedPages = { ...passportPagesRef.current, cover: newPage };
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    setPassportError(null);
+    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+    return true;
+  };
+
+  // Inside pages upload handler
+  const handleInsideUpload = async (file: File): Promise<boolean> => {
+    const reader = new FileReader();
+    const preview = await new Promise<string>((resolve) => {
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+
+    setInsideUI({ preview, validating: true, error: null, file });
+
+    const validation = await validatePassportPageType(preview, 'INSIDE_PAGES');
+    if (!validation.valid) {
+      setInsideUI({ preview, validating: false, error: validation.error || 'Not a valid inside page', file });
+      return false;
+    }
+
+    const result = await uploadPassportPage(submission.id, 'insidePages', file);
+    if (!result) {
+      setInsideUI({ preview, validating: false, error: 'Failed to upload file', file });
+      return false;
+    }
+
+    setInsideUI({ preview, validating: false, error: null, file });
+    const newPage: PassportPageReference = { path: result.path, filename: result.filename, validated: true };
+    const updatedPages = { ...passportPagesRef.current, insidePages: newPage };
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    setPassportError(null);
+    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+
+    // Extract passport data
+    const extracted = await extractPassportData(preview);
+    if (extracted) {
+      handlePassportExtracted(extracted);
+    }
+    return true;
+  };
+
+  // Remove handlers
+  const handleCoverRemove = async () => {
+    setCoverUI({ preview: null, validating: false, error: null, file: null });
+    const updatedPages = { ...passportPagesRef.current };
+    delete updatedPages.cover;
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+  };
+
+  const handleInsideRemove = async () => {
+    setInsideUI({ preview: null, validating: false, error: null, file: null });
+    const updatedPages = { ...passportPagesRef.current };
+    delete updatedPages.insidePages;
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    setPassportDataReady(false);
+    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
   };
 
   // Fallback: if inside pages are uploaded but extraction didn't fire (API error),
@@ -432,105 +655,162 @@ export function EmployeeForm({
   }, [isInsidePagesUploaded, passportDataReady]);
 
   return (
-    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className={`space-y-6 relative ${isSubmitting ? 'pointer-events-none' : ''}`}>
+      {/* Submitting overlay */}
+      {isSubmitting && (
+        <div className="fixed inset-0 z-50 bg-white/70 backdrop-blur-sm flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-4 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: TME_COLORS.primary }} />
+            <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Submitting your form...</p>
+          </div>
+        </div>
+      )}
       {/* Step Progress */}
-      <StepProgress currentStep={currentStep} totalSteps={totalSteps} />
+      <StepProgress
+        currentStep={currentStep}
+        viewingStep={viewingStep}
+        totalSteps={totalSteps}
+        onStepClick={setViewingStep}
+      />
 
-      {/* Step 1: Photo Upload - Always visible */}
-      <FormSection
-        title="ID Photo"
-        icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-        stepNumber={1}
-      >
-        <PhotoUpload
-          value={photoDoc}
-          onUpload={handlePhotoUpload}
-          onValidated={async (validated, validationErrors) => {
-            const currentPhotoDoc = photoDocRef.current;
-            if (currentPhotoDoc) {
-              const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
-              setPhotoDoc(updatedDoc);
-              photoDocRef.current = updatedDoc;
+      {/* Step 1: Photo Upload */}
+      <RevealSection show={viewingStep === 1 || viewingStep === 7}>
+        <FormSection
+          title="ID Photo"
+          icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          stepNumber={1}
+        >
+          <PhotoUpload
+            value={photoDoc}
+            onUpload={handlePhotoUpload}
+            onValidated={async (validated, validationErrors) => {
+              const currentPhotoDoc = photoDocRef.current;
+              if (currentPhotoDoc) {
+                const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
+                setPhotoDoc(updatedDoc);
+                photoDocRef.current = updatedDoc;
+                await updateDocumentReferences(submission.id, {
+                  photo: updatedDoc,
+                  passportPages: passportPagesRef.current,
+                });
+              }
+              if (photoError) setPhotoError(null);
+            }}
+            onRemove={async () => {
+              setPhotoDoc(undefined);
+              photoDocRef.current = undefined;
               await updateDocumentReferences(submission.id, {
-                photo: updatedDoc,
+                photo: undefined,
                 passportPages: passportPagesRef.current,
               });
-            }
-            if (photoError) setPhotoError(null);
-          }}
-          onRemove={async () => {
-            setPhotoDoc(undefined);
-            photoDocRef.current = undefined;
-            // Persist removal to Supabase
-            await updateDocumentReferences(submission.id, {
-              photo: undefined,
-              passportPages: passportPagesRef.current,
-            });
-          }}
-          error={photoError || undefined}
-        />
-        {isPhotoUploaded && (
-          <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
-            <CheckCircle className="w-4 h-4" />
-            ID Photo uploaded. Continue with passport below.
-            <ChevronDown className="w-4 h-4 animate-bounce" />
-          </div>
-        )}
-      </FormSection>
+            }}
+            error={photoError || undefined}
+          />
+          {isPhotoUploaded && viewingStep === 7 && (
+            <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
+              <CheckCircle className="w-4 h-4" />
+              ID Photo uploaded.
+            </div>
+          )}
+          {viewingStep === 1 && (
+            <StepNavButtons enabled={isPhotoUploaded} onContinue={() => setViewingStep(2)} showBack={false} />
+          )}
+        </FormSection>
+      </RevealSection>
 
-      {/* Steps 2-3: Passport Pages - After photo uploaded */}
+      {/* Step 2: Passport Cover */}
       <RevealSection
-        show={isPhotoUploaded}
-        onReveal={() => scrollToRef(passportCoverRef)}
+        show={viewingStep === 2 || viewingStep === 7}
+        onReveal={viewingStep !== 7 ? () => scrollToRef(passportCoverRef) : undefined}
       >
         <div ref={passportCoverRef}>
           <FormSection
-            title="Passport Cover"
+            title="Passport Cover (OUTSIDE)"
             icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
             stepNumber={2}
           >
-            <PassportMultiUpload
-              submissionId={submission.id}
-              onUpload={handlePassportPageUpload}
-              onExtracted={handlePassportExtracted}
-              onPagesChange={handlePassportPagesChange}
-              initialPages={submission.documents?.passportPages ? {
-                cover: submission.documents.passportPages.cover ? {
-                  path: submission.documents.passportPages.cover.path,
-                  validated: submission.documents.passportPages.cover.validated,
-                } : undefined,
-                insidePages: submission.documents.passportPages.insidePages ? {
-                  path: submission.documents.passportPages.insidePages.path,
-                  validated: submission.documents.passportPages.insidePages.validated,
-                } : undefined,
-              } : undefined}
-              revealInsidePages={isCoverUploaded}
-              insideStepNumber={3}
-            />
+            <div className="space-y-4">
+              <div
+                className="flex items-start gap-3 p-4 rounded-lg"
+                style={{ backgroundColor: '#EBF4FF' }}
+              >
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <p className="font-medium">Upload your passport cover (open/spread showing front + back cover)</p>
+                  <p className="mt-2 text-xs text-gray-600">
+                    Single page photos are not accepted. Passport must be spread open.
+                  </p>
+                </div>
+              </div>
+
+              <UploadSlot
+                label="Passport Cover"
+                description="Spread open: front + back cover visible"
+                expectedType="COVER"
+                file={coverUI.file}
+                preview={coverUI.preview || undefined}
+                validated={!!passportPages.cover?.validated}
+                validating={coverUI.validating}
+                error={coverUI.error || undefined}
+                onUpload={handleCoverUpload}
+                onRemove={handleCoverRemove}
+              />
+            </div>
             {passportError && (
               <p className="mt-2 text-sm text-red-500">{passportError}</p>
             )}
-            {isInsidePagesUploaded && passportDataReady && (
-              <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
-                <CheckCircle className="w-4 h-4" />
-                Passport verified. Please review your personal details below.
-                <ChevronDown className="w-4 h-4 animate-bounce" />
-              </div>
+            {viewingStep === 2 && (
+              <StepNavButtons enabled={isCoverUploaded} onContinue={() => setViewingStep(3)} onBack={() => setViewingStep(1)} />
             )}
           </FormSection>
         </div>
       </RevealSection>
 
-      {/* Step 4: Personal Details - After passport data extracted */}
+      {/* Step 3: Inside Pages + Personal Details */}
       <RevealSection
-        show={isInsidePagesUploaded && passportDataReady}
-        onReveal={() => scrollToRef(personalRef)}
+        show={viewingStep === 3 || viewingStep === 7}
+        onReveal={viewingStep !== 7 ? () => scrollToRef(passportInsideRef) : undefined}
       >
-        <div ref={personalRef}>
+        <div ref={passportInsideRef} className="space-y-6">
+          <FormSection
+            title="Passport Data (INSIDE)"
+            icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            stepNumber={3}
+          >
+            <div className="space-y-4">
+              <div
+                className="flex items-start gap-3 p-4 rounded-lg"
+                style={{ backgroundColor: '#EBF4FF' }}
+              >
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <p className="font-medium">Upload your passport inside pages (open/spread showing data page + opposite page)</p>
+                  <p className="mt-2 text-xs text-gray-600">
+                    Your details will be automatically extracted from this page.
+                  </p>
+                </div>
+              </div>
+
+              <UploadSlot
+                label=""
+                description="Spread open: data page + opposite page"
+                expectedType="INSIDE_PAGES"
+                file={insideUI.file}
+                preview={insideUI.preview || undefined}
+                validated={!!passportPages.insidePages?.validated}
+                validating={insideUI.validating}
+                error={insideUI.error || undefined}
+                onUpload={handleInsideUpload}
+                onRemove={handleInsideRemove}
+              />
+            </div>
+          </FormSection>
+
+          {/* Personal Details — merged into step 3 */}
+          {passportDataReady && (
           <FormSection
             title="Personal Details"
             icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={4}
           >
             <p className="text-sm text-gray-500 mb-4">
               These details were auto-filled from your passport. Please review and correct if needed.
@@ -647,19 +927,27 @@ export function EmployeeForm({
               </div>
             </div>
           </FormSection>
+          )}
+          {viewingStep === 3 && (
+            <StepNavButtons
+              enabled={isInsidePagesUploaded && passportDataReady && isPersonalComplete}
+              onContinue={() => setViewingStep(4)}
+              onBack={() => setViewingStep(2)}
+            />
+          )}
         </div>
       </RevealSection>
 
-      {/* Step 5: Family Details - After personal details complete */}
+      {/* Step 4: Family Details */}
       <RevealSection
-        show={isPersonalComplete}
-        onReveal={() => scrollToRef(familyRef)}
+        show={viewingStep === 4 || viewingStep === 7}
+        onReveal={viewingStep !== 7 ? () => scrollToRef(familyRef) : undefined}
       >
         <div ref={familyRef}>
           <FormSection
             title="Family Details"
             icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={5}
+            stepNumber={4}
           >
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -708,21 +996,24 @@ export function EmployeeForm({
                 />
               )}
             </div>
+            {viewingStep === 4 && (
+              <StepNavButtons enabled={isFamilyComplete} onContinue={() => setViewingStep(5)} onBack={() => setViewingStep(3)} />
+            )}
           </FormSection>
         </div>
       </RevealSection>
 
-      {/* Step 6: Address & Contact - After family complete */}
+      {/* Step 5: Address & Contact */}
       <RevealSection
-        show={isFamilyComplete}
-        onReveal={() => scrollToRef(contactRef)}
+        show={viewingStep === 5 || viewingStep === 7}
+        onReveal={viewingStep !== 7 ? () => scrollToRef(contactRef) : undefined}
       >
         <div ref={contactRef} className="space-y-6">
           {/* Home Country Address */}
           <FormSection
             title="Home Country Address"
             icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={6}
+            stepNumber={5}
           >
             <div className="space-y-4">
               <Input
@@ -763,7 +1054,7 @@ export function EmployeeForm({
                 label="Home Telephone"
                 value={homeTelephone}
                 onChange={(value) => setValue('home_telephone', value || '')}
-                defaultCountry="AE"
+                defaultCountry={nationalityCountryCode || 'AE'}
               />
             </div>
           </FormSection>
@@ -876,35 +1167,54 @@ export function EmployeeForm({
                   label="International Mobile"
                   value={mobileInternational}
                   onChange={(value) => setValue('mobile_international', value || '')}
-                  defaultCountry="AE"
+                  defaultCountry={nationalityCountryCode || 'AE'}
                 />
               </div>
             </div>
           </FormSection>
+          {viewingStep === 5 && (
+            <StepNavButtons enabled={isContactComplete} onContinue={() => setViewingStep(6)} onBack={() => setViewingStep(4)} />
+          )}
         </div>
       </RevealSection>
 
-      {/* Step 7: Education & More - After contact complete */}
+      {/* Step 6: Education & More */}
       <RevealSection
-        show={isContactComplete}
-        onReveal={() => scrollToRef(educationRef)}
+        show={viewingStep === 6 || viewingStep === 7}
+        onReveal={viewingStep !== 7 ? () => scrollToRef(educationRef) : undefined}
       >
         <div ref={educationRef} className="space-y-6">
           {/* Education & Languages */}
           <FormSection
             title="Education & Languages"
             icon={<GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={7}
+            stepNumber={6}
           >
             <div className="space-y-4">
               <CustomDropdown
                 label="Educational Qualification"
                 options={EDUCATIONAL_QUALIFICATIONS.map(e => ({ value: e, label: e }))}
                 value={educationalQualification || ''}
-                onChange={(val) => setValue('educational_qualification', val)}
+                onChange={(val) => {
+                  setValue('educational_qualification', val);
+                  if (val !== 'Other') {
+                    setValue('educational_qualification_custom', undefined);
+                  }
+                }}
                 error={errors.educational_qualification?.message}
                 required
               />
+
+              {educationalQualification === 'Other' && (
+                <Input
+                  label="Please specify qualification"
+                  error={errors.educational_qualification_custom?.message}
+                  required
+                  {...register('educational_qualification_custom', {
+                    required: educationalQualification === 'Other' ? 'Please specify your qualification' : false,
+                  })}
+                />
+              )}
 
               <MultiSelectDropdown
                 label="Languages Spoken"
@@ -1000,12 +1310,15 @@ export function EmployeeForm({
               {...register('other_information')}
             />
           </div>
+          {viewingStep === 6 && (
+            <StepNavButtons enabled={isEducationComplete} onContinue={() => setViewingStep(7)} onBack={() => setViewingStep(5)} label="Review & Sign" />
+          )}
         </div>
       </RevealSection>
 
-      {/* Step 8: Signature - After education complete */}
+      {/* Step 7: Review & Sign */}
       <RevealSection
-        show={isEducationComplete}
+        show={viewingStep === 7}
         onReveal={() => scrollToRef(signatureRef)}
       >
         <div ref={signatureRef}>
@@ -1013,7 +1326,7 @@ export function EmployeeForm({
             <FormSection
               title="Review & Sign"
               icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-              stepNumber={8}
+              stepNumber={7}
             >
               <div className="space-y-4">
                 <p className="text-sm text-gray-600">
@@ -1038,7 +1351,7 @@ export function EmployeeForm({
                   className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
                   style={{ backgroundColor: TME_COLORS.primary }}
                 >
-                  8
+                  7
                 </span>
                 <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
                   Signature

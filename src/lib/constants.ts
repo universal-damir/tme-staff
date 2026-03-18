@@ -176,7 +176,6 @@ export const LANGUAGES = [
   'Turkish',
   'Pashto',
   'Dutch',
-  'Other',
 ] as const;
 
 export type Language = (typeof LANGUAGES)[number];
