@@ -319,6 +319,8 @@ export function EmployeeForm({
       has_uae_bank: false,
       uae_presence: 'inside',
       languages_spoken: ['English'],
+      // Merge pre-fill data from TME Portal (renewals) — overrides defaults, but saved data overrides prefill
+      ...submission.prefill_employee_data,
     },
   });
 

@@ -68,6 +68,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
       notice_period_value: 1,
       probation_period_value: 6,
       sponsor: 'Company',
+      // Merge pre-fill data from TME Portal (renewals) — overrides defaults, but saved data overrides prefill
+      ...submission.prefill_employer_data,
     },
   });
 

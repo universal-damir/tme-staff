@@ -161,6 +161,11 @@ export interface StaffOnboardingSubmission {
   staff_name?: string;
   staff_email?: string;
 
+  // Pre-fill data (from TME Portal for renewals)
+  prefill_employer_data: Partial<EmployerFormData> | null;
+  prefill_employee_data: Partial<EmployeeFormData> | null;
+  onboarding_type: 'new_hire' | 'renewal';
+
   // Employer section
   employer_data: EmployerFormData | null;
   employer_signature_data: string | null;
