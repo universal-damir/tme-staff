@@ -475,6 +475,8 @@ export const SALARY_BREAKDOWN_EXPLANATION =
 
 // ===================================================================
 // BANK OPTIONS (Common banks in UAE)
+// @deprecated — Use uae-bank-directory.ts for IBAN-based auto-derivation.
+// Kept for backwards compat with any code that still references it.
 // ===================================================================
 
 export const UAE_BANKS = [

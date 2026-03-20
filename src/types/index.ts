@@ -102,6 +102,7 @@ export interface EmployeeFormData {
   bank_swift?: string;
   bank_account_name?: string;
   bank_iban?: string;
+  bank_routing_code?: string;
 
   // Other
   other_information?: string;

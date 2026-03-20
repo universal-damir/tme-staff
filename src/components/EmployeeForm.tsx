@@ -11,9 +11,9 @@ import {
   MARITAL_STATUS_OPTIONS,
   EDUCATIONAL_QUALIFICATIONS,
   LANGUAGES,
-  UAE_BANKS,
   UAE_EMIRATES,
 } from '@/lib/constants';
+import { lookupBankFromIban, isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
 import { Input, Button, MultiSelectDropdown, CustomDropdown, CustomDatePicker, PhoneInput } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
@@ -50,7 +50,6 @@ const sortWithOtherLast = (items: readonly string[]) =>
 const SORTED_LANGUAGES = sortWithOtherLast(LANGUAGES);
 const SORTED_NATIONALITIES = sortWithOtherLast(NATIONALITIES);
 const SORTED_RELIGIONS = sortWithOtherLast(RELIGIONS);
-const SORTED_BANKS = sortWithOtherLast(UAE_BANKS);
 
 // --- Step definitions for progressive reveal ---
 const STEP_LABELS = [
@@ -260,6 +259,14 @@ export function EmployeeForm({
     reuseEmployerSignature ? submission.employer_signature_data : null
   );
   const [signatureError, setSignatureError] = useState<string | null>(null);
+  const [bankLookupResult, setBankLookupResult] = useState<{
+    found: boolean;
+    isUae: boolean;
+    isInternational: boolean;
+    bankName?: string;
+    swift?: string;
+    routingCode?: string;
+  } | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [passportError, setPassportError] = useState<string | null>(null);
   const [photoDoc, setPhotoDoc] = useState(submission.documents?.photo);
@@ -340,7 +347,6 @@ export function EmployeeForm({
     register('religion');
     register('marital_status');
     register('educational_qualification');
-    register('bank_name');
     register('other_nationality');
     register('previous_nationality');
     register('languages_spoken');
@@ -355,9 +361,9 @@ export function EmployeeForm({
   const religion = watch('religion');
   const maritalStatus = watch('marital_status');
   const educationalQualification = watch('educational_qualification');
-  const bankName = watch('bank_name');
   const sameEmails = watch('same_emails');
   const hasUAEBank = watch('has_uae_bank');
+  const bankIban = watch('bank_iban');
   const firstName = watch('first_name');
   const middleName = watch('middle_name');
   const lastName = watch('last_name');
@@ -380,6 +386,48 @@ export function EmployeeForm({
 
   // Derive country code from nationality for phone inputs
   const nationalityCountryCode = nationality ? nationalityToCountryCode(nationality) : undefined;
+
+  // Auto-prefill account name from employee name
+  useEffect(() => {
+    if (hasUAEBank && firstName && lastName) {
+      const currentAccountName = watch('bank_account_name');
+      if (!currentAccountName) {
+        setValue('bank_account_name', `${firstName} ${lastName}`.trim());
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasUAEBank, firstName, lastName]);
+
+  // IBAN auto-derivation: detect bank from IBAN and auto-populate fields
+  useEffect(() => {
+    if (!bankIban) {
+      setBankLookupResult(null);
+      return;
+    }
+    const clean = bankIban.replace(/\s/g, '').toUpperCase();
+    if (clean.length < 2) {
+      setBankLookupResult(null);
+      return;
+    }
+
+    if (isUaeIban(clean)) {
+      const bankInfo = lookupBankFromIban(clean);
+      if (bankInfo) {
+        setBankLookupResult({ found: true, isUae: true, isInternational: false, bankName: bankInfo.name, swift: bankInfo.swift11, routingCode: bankInfo.routingCode });
+        setValue('bank_name', bankInfo.name);
+        setValue('bank_swift', bankInfo.swift11);
+        setValue('bank_routing_code', bankInfo.routingCode);
+      } else {
+        setBankLookupResult({ found: false, isUae: true, isInternational: false });
+      }
+    } else if (/^[A-Z]{2}/.test(clean) && !clean.startsWith('AE')) {
+      // International IBAN
+      setBankLookupResult({ found: false, isUae: false, isInternational: true });
+    } else {
+      setBankLookupResult(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankIban]);
 
   // New checkbox states for nationality and address
   const [hasOtherNationality, setHasOtherNationality] = useState(
@@ -1440,53 +1488,112 @@ export function EmployeeForm({
                   {...register('has_uae_bank')}
                   className="rounded"
                 />
-                <span className="text-sm text-gray-700">I have a UAE bank account</span>
+                <span className="text-sm text-gray-700">I have a bank account</span>
               </label>
 
               {hasUAEBank && (
                 <div className="space-y-4 pt-4 border-t border-gray-200">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <CustomDropdown
-                      label="Bank Name"
-                      options={SORTED_BANKS.map(b => ({ value: b, label: b }))}
-                      value={bankName || ''}
-                      onChange={(val) => setValue('bank_name', val)}
-                      error={errors.bank_name?.message}
-                      required
-                      searchable
-                    />
-                    <Input
-                      label="Branch"
-                      {...register('bank_branch')}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Input
-                      label="Account Name"
-                      error={errors.bank_account_name?.message}
-                      required
-                      {...register('bank_account_name', {
-                        required: hasUAEBank ? 'Required' : false,
-                      })}
-                    />
-                    <Input
-                      label="SWIFT Code"
-                      {...register('bank_swift')}
-                    />
-                  </div>
-
                   <Input
                     label="IBAN"
-                    placeholder="AE..."
+                    placeholder="AExx xxx xxxx xxxx xxxx xxxx"
                     error={errors.bank_iban?.message}
                     required
-                    {...register('bank_iban', {
+                    value={(() => {
+                      const c = (bankIban || '').replace(/\s/g, '').toUpperCase();
+                      if (c.length <= 4) return c;
+                      if (c.length <= 7) return `${c.slice(0, 4)} ${c.slice(4)}`;
+                      // AExx xxx xxxx xxxx xxxx xxxx
+                      let out = `${c.slice(0, 4)} ${c.slice(4, 7)}`;
+                      for (let i = 7; i < c.length; i += 4) {
+                        out += ` ${c.slice(i, i + 4)}`;
+                      }
+                      return out;
+                    })()}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\s/g, '').toUpperCase();
+                      setValue('bank_iban', raw, { shouldValidate: true });
+                    }}
+                    ref={undefined}
+                  />
+                  {/* Hidden field for validation */}
+                  <input type="hidden" {...register('bank_iban', {
+                    required: hasUAEBank ? 'Required' : false,
+                    validate: (value) => {
+                      if (!value) return true;
+                      const result = validateIbanFormat(value);
+                      return result.valid || result.message;
+                    },
+                  })} />
+
+                  {/* UAE IBAN — bank found: show green info card */}
+                  {bankLookupResult?.found && bankLookupResult.isUae && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircle className="w-4 h-4 text-emerald-600" />
+                        <span className="text-sm font-medium text-emerald-800">Bank identified from IBAN</span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-emerald-900">
+                        <div><span className="font-medium">Bank:</span> {bankLookupResult.bankName}</div>
+                        <div><span className="font-medium">SWIFT:</span> {bankLookupResult.swift}</div>
+                        <div><span className="font-medium">Routing Code:</span> {bankLookupResult.routingCode}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* UAE IBAN — bank code not recognized: warning + manual fields */}
+                  {bankLookupResult?.isUae && !bankLookupResult.found && (
+                    <>
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <div className="flex items-center gap-2">
+                          <Info className="w-4 h-4 text-amber-600" />
+                          <span className="text-sm text-amber-800">Bank not recognized from IBAN. Please enter details manually.</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Input
+                          label="Bank Name"
+                          required
+                          {...register('bank_name', { required: 'Required' })}
+                          error={errors.bank_name?.message}
+                        />
+                        <Input
+                          label="SWIFT Code"
+                          {...register('bank_swift')}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {/* International IBAN — show manual Bank Name + SWIFT fields */}
+                  {bankLookupResult?.isInternational && (
+                    <>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <div className="flex items-center gap-2">
+                          <Info className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm text-blue-800">International IBAN detected. Please enter bank details.</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Input
+                          label="Bank Name"
+                          required
+                          {...register('bank_name', { required: 'Required' })}
+                          error={errors.bank_name?.message}
+                        />
+                        <Input
+                          label="SWIFT Code"
+                          {...register('bank_swift')}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <Input
+                    label="Account Name"
+                    error={errors.bank_account_name?.message}
+                    required
+                    {...register('bank_account_name', {
                       required: hasUAEBank ? 'Required' : false,
-                      pattern: {
-                        value: /^AE\d{21}$/i,
-                        message: 'Invalid UAE IBAN format',
-                      },
                     })}
                   />
                 </div>
