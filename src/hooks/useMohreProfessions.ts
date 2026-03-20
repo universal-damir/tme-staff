@@ -10,13 +10,11 @@ interface DropdownOption {
 
 /**
  * Fetches MOHRE professions from the proxy API for use in job title dropdowns.
- * Falls back to hardcoded JOB_TITLES if API fails.
- * Always appends "Other" as the last option.
+ * Falls back to hardcoded JOB_TITLES only if API fails.
+ * Starts empty (loading) so the dropdown doesn't flash the short list.
  */
 export function useMohreProfessions() {
-  const [professions, setProfessions] = useState<DropdownOption[]>(() => {
-    return [...JOB_TITLES].map((t) => ({ value: t, label: t }));
-  });
+  const [professions, setProfessions] = useState<DropdownOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -39,7 +37,10 @@ export function useMohreProfessions() {
           setProfessions(options);
         }
       } catch {
-        // Keep hardcoded fallback on error
+        // API failed — fall back to hardcoded list
+        if (!cancelled) {
+          setProfessions([...JOB_TITLES].map((t) => ({ value: t, label: t })));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

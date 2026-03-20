@@ -46,7 +46,7 @@ function pluralize(value: number | undefined, singular: string): string {
 }
 
 export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFormProps) {
-  const { professions: jobTitleOptions } = useMohreProfessions();
+  const { professions: jobTitleOptions, loading: jobTitlesLoading } = useMohreProfessions();
   const [signature, setSignature] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
   const [jobTitleSameAsVisa, setJobTitleSameAsVisa] = useState(false);
@@ -151,7 +151,17 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
                 error={errors.job_title_visa?.message}
                 required
                 searchable
+                loading={jobTitlesLoading}
                 placeholder="Select visa designation..."
+                onCustomEntry={(text) => {
+                  setValue('job_title_visa', 'Other');
+                  setValue('job_title_visa_custom', text);
+                  if (jobTitleSameAsVisa) {
+                    setValue('job_title_company', 'Other');
+                    setValue('job_title_company_custom', text);
+                  }
+                }}
+                customEntryHint="This title may not be available in the authority's approved visa job list. Our team will verify and inform you. You can use this title without restriction for your company job description."
               />
               <p className="text-xs text-gray-500 mt-1">Official designation for visa and government documents</p>
               {jobTitleVisa === 'Other' && (
@@ -184,7 +194,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
                       setJobTitleSameAsVisa(e.target.checked);
                       if (e.target.checked && jobTitleVisa) {
                         setValue('job_title_company', jobTitleVisa);
-                        if (jobTitleVisa !== 'Other') {
+                        if (jobTitleVisa === 'Other') {
+                          setValue('job_title_company_custom', watch('job_title_visa_custom') || '');
+                        } else {
                           setValue('job_title_company_custom', '');
                         }
                       }
@@ -200,7 +212,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
                   className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 h-[42px] flex items-center text-sm"
                   style={{ backgroundColor: '#f9fafb', color: TME_COLORS.primary }}
                 >
-                  {jobTitleVisa || <span className="text-gray-400">Select visa title first</span>}
+                  {jobTitleVisa === 'Other' ? (watch('job_title_visa_custom') || 'Other') : jobTitleVisa || <span className="text-gray-400">Select visa title first</span>}
                 </div>
               ) : (
                 <>
@@ -210,7 +222,13 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
                     onChange={(val) => setValue('job_title_company', val)}
                     error={errors.job_title_company?.message}
                     searchable
+                    loading={jobTitlesLoading}
                     placeholder="Select company role..."
+                    onCustomEntry={(text) => {
+                      setValue('job_title_company', 'Other');
+                      setValue('job_title_company_custom', text);
+                    }}
+                    customEntryHint="You can use any title for your internal company designation."
                   />
                   <p className="text-xs text-gray-500 mt-1">Employee&apos;s actual position within the company</p>
                 </>

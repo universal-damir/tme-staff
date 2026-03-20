@@ -21,6 +21,11 @@ interface CustomDropdownProps {
   disabled?: boolean;
   searchable?: boolean;
   formatBrackets?: boolean;
+  loading?: boolean;
+  /** When set, shows a "use custom" option when search has no matches. Callback receives the typed text. */
+  onCustomEntry?: (text: string) => void;
+  /** Guidance text shown below the custom entry option */
+  customEntryHint?: string;
 }
 
 export default function CustomDropdown({
@@ -34,6 +39,9 @@ export default function CustomDropdown({
   disabled = false,
   searchable = false,
   formatBrackets = false,
+  loading = false,
+  onCustomEntry,
+  customEntryHint,
 }: CustomDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -389,8 +397,32 @@ export default function CustomDropdown({
                   {option.label}
                 </motion.div>
               ))
+            ) : loading ? (
+              <div className="px-3 py-4 text-center text-gray-400 text-sm">
+                Loading...
+              </div>
+            ) : onCustomEntry && searchTerm.trim() ? (
+              <div className="px-3 py-2">
+                <motion.div
+                  onClick={() => {
+                    onCustomEntry(searchTerm.trim());
+                    setIsOpen(false);
+                    setSearchTerm('');
+                  }}
+                  whileHover={{ backgroundColor: `${TME_COLORS.primary}10` }}
+                  className="px-3 py-2 cursor-pointer rounded-lg text-sm font-medium"
+                  style={{ color: TME_COLORS.primary }}
+                >
+                  Use &ldquo;{searchTerm.trim()}&rdquo;
+                </motion.div>
+                {customEntryHint && (
+                  <p className="px-3 py-2 text-xs text-gray-400 leading-relaxed">
+                    {customEntryHint}
+                  </p>
+                )}
+              </div>
             ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+              <div className="px-3 py-4 text-center text-gray-400 text-sm">
                 No options found
               </div>
             )}
