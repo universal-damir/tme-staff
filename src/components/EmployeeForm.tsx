@@ -398,6 +398,7 @@ export function EmployeeForm({
     // If form already has employee data with a first name, data was previously extracted
     !!(submission.employee_data?.first_name)
   );
+  const [extractingPassport, setExtractingPassport] = useState(false);
 
   // --- Progressive reveal step computation ---
   const isPhotoUploaded = !!(photoDoc?.validated);
@@ -655,10 +656,15 @@ export function EmployeeForm({
     setPassportError(null);
     await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
 
-    // Extract passport data
+    // Extract passport data — show extracting state so user knows it's working
+    setExtractingPassport(true);
     const extracted = await extractPassportData(preview);
+    setExtractingPassport(false);
     if (extracted) {
       handlePassportExtracted(extracted);
+    } else {
+      // Extraction failed — let user fill manually
+      setPassportDataReady(true);
     }
     return true;
   };
@@ -720,7 +726,10 @@ export function EmployeeForm({
           const d = extractResult.data;
           if (d.father_name) setValue('father_full_name', d.father_name);
           if (d.mother_name) setValue('mother_full_name', d.mother_name);
-          if (d.spouse_name) setValue('spouse_name', d.spouse_name);
+          if (d.spouse_name) {
+            setValue('marital_status', 'Married');
+            setValue('spouse_name', d.spouse_name);
+          }
           if (d.address_street) setValue('home_street_address', d.address_street);
           if (d.address_city) setValue('home_city', d.address_city);
           if (d.address_pin) setValue('home_postal_code', d.address_pin);
@@ -745,16 +754,13 @@ export function EmployeeForm({
     await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
   };
 
-  // Fallback: if inside pages are uploaded but extraction didn't fire (API error),
-  // show personal details after a delay so user can fill manually
+  // Fallback: if inside pages are uploaded but extraction hasn't run yet
+  // (e.g. page reload with saved data), unlock the form
   useEffect(() => {
-    if (isInsidePagesUploaded && !passportDataReady) {
-      const timer = setTimeout(() => {
-        setPassportDataReady(true);
-      }, 5000); // 5s fallback
-      return () => clearTimeout(timer);
+    if (isInsidePagesUploaded && !passportDataReady && !extractingPassport) {
+      setPassportDataReady(true);
     }
-  }, [isInsidePagesUploaded, passportDataReady]);
+  }, [isInsidePagesUploaded, passportDataReady, extractingPassport]);
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className={`space-y-6 relative ${isSubmitting ? 'pointer-events-none' : ''}`}>
@@ -909,6 +915,19 @@ export function EmployeeForm({
               />
             </div>
           </FormSection>
+
+          {/* Extracting passport data indicator */}
+          {extractingPassport && (
+            <div className="rounded-xl border-2 border-blue-100 bg-blue-50/50 p-6">
+              <div className="flex items-center gap-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent" />
+                <div>
+                  <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Reading passport data...</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Extracting your details from the passport. This may take a few seconds.</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Personal Details — merged into step 3 */}
           {passportDataReady && (
