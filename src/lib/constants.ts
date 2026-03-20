@@ -7,6 +7,7 @@
 // JOB TITLES
 // ===================================================================
 
+/** @deprecated Use useMohreProfessions() hook instead. Kept as fallback. */
 export const JOB_TITLES = [
   'Accountant',
   'Admin Assistant',

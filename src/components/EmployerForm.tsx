@@ -4,12 +4,12 @@ import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
   TME_COLORS,
-  JOB_TITLES,
   DEPARTMENTS,
   SPONSOR_OPTIONS,
   WEEKLY_OFF_OPTIONS,
   LEAVE_TYPES,
 } from '@/lib/constants';
+import { useMohreProfessions } from '@/hooks/useMohreProfessions';
 import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/components/ui';
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
@@ -47,6 +47,7 @@ function pluralize(value: number | undefined, singular: string): string {
 }
 
 export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFormProps) {
+  const { professions: jobTitleOptions } = useMohreProfessions();
   const [signature, setSignature] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
   const [jobTitleSameAsVisa, setJobTitleSameAsVisa] = useState(false);
@@ -141,7 +142,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
             <div>
               <CustomDropdown
                 label="Job Title (Visa)"
-                options={toDropdownOptions(JOB_TITLES)}
+                options={jobTitleOptions}
                 value={jobTitleVisa || ''}
                 onChange={(val) => {
                   setValue('job_title_visa', val);
@@ -206,7 +207,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
               ) : (
                 <>
                   <CustomDropdown
-                    options={toDropdownOptions(JOB_TITLES)}
+                    options={jobTitleOptions}
                     value={jobTitleCompany || ''}
                     onChange={(val) => setValue('job_title_company', val)}
                     error={errors.job_title_company?.message}
