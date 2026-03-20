@@ -370,7 +370,7 @@ export function SalaryBreakdown({
 
             <SalaryInput
               label={`Prepaid Card (${getPercentage(prepayCard)})`}
-              value={prepayCard}
+              value={prepayCard ?? 0}
               onChange={(val) =>
                 onChange({
                   salary_currency: currency,
@@ -387,24 +387,32 @@ export function SalaryBreakdown({
           </div>
 
           {/* Discrepancy Warning */}
-          {hasDiscrepancy && (
-            <div className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="flex items-center gap-2 text-red-600">
-                <AlertTriangle className="w-5 h-5" />
-                <span className="text-sm">
-                  Sum ({currency} {formatNumber(sum)}) does not match total ({currency} {formatNumber(total)})
-                </span>
+          {hasDiscrepancy && (() => {
+            const difference = sum - (total || 0);
+            return (
+              <div className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                  <div>
+                    <span className="text-sm">
+                      Sum ({currency} {formatNumber(sum)}) does not match total ({currency} {formatNumber(total)})
+                    </span>
+                    <span className="block text-xs mt-0.5 font-medium">
+                      Difference: {currency} {difference > 0 ? '+' : ''}{formatNumber(difference)}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSetTotalFromSum}
+                  className="px-3 py-1 text-sm font-medium text-white rounded flex-shrink-0"
+                  style={{ backgroundColor: TME_COLORS.primary }}
+                >
+                  Set Total to {currency} {formatNumber(sum)}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleSetTotalFromSum}
-                className="px-3 py-1 text-sm font-medium text-white rounded"
-                style={{ backgroundColor: TME_COLORS.primary }}
-              >
-                Set Total to {currency} {formatNumber(sum)}
-              </button>
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
     </div>

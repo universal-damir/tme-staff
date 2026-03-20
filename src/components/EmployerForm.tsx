@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
   TME_COLORS,
-  DEPARTMENTS,
   SPONSOR_OPTIONS,
   WEEKLY_OFF_OPTIONS,
   LEAVE_TYPES,
@@ -76,7 +75,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
 
   const jobTitleVisa = watch('job_title_visa');
   const jobTitleCompany = watch('job_title_company');
-  const department = watch('department');
   const sponsor = watch('sponsor');
   const salaryCurrency = watch('salary_currency');
   const salaryTotal = watch('salary_total');
@@ -234,30 +232,11 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
 
           {/* Department + Sponsor Row */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <CustomDropdown
-                label="Department"
-                options={toDropdownOptions(DEPARTMENTS)}
-                value={department || ''}
-                onChange={(val) => setValue('department', val)}
-                error={errors.department?.message}
-                required
-                searchable
-                placeholder="Select department..."
-              />
-              {department === 'Other' && (
-                <div className="mt-2">
-                  <Input
-                    label="Specify Department"
-                    placeholder="Enter department"
-                    error={errors.department_custom?.message}
-                    {...register('department_custom', {
-                      required: department === 'Other' ? 'Please specify department' : false,
-                    })}
-                  />
-                </div>
-              )}
-            </div>
+            <Input
+              label="Department"
+              placeholder="e.g. Finance, Operations, IT..."
+              {...register('department')}
+            />
 
             <CustomDropdown
               label="Sponsor"
@@ -328,7 +307,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
               label="Weekly Off"
               options={WEEKLY_OFF_OPTIONS.map(opt => ({ value: opt.value, label: opt.label }))}
               value={weeklyOff || 'saturday_sunday'}
-              onChange={(val) => setValue('weekly_off', val as 'friday' | 'sunday' | 'saturday_sunday')}
+              onChange={(val) => setValue('weekly_off', val as 'sunday' | 'saturday_sunday')}
               error={errors.weekly_off?.message}
               required
             />

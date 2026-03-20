@@ -47,6 +47,7 @@ export type JobTitle = (typeof JOB_TITLES)[number];
 
 // ===================================================================
 // DEPARTMENTS
+// @deprecated — Department is now a free-text field. Kept for backward compat.
 // ===================================================================
 
 export const DEPARTMENTS = [
@@ -415,9 +416,8 @@ export type SalaryCurrency = (typeof SALARY_CURRENCIES)[number]['value'];
 // ===================================================================
 
 export const WEEKLY_OFF_OPTIONS = [
-  { value: 'friday', label: 'Friday only' },
-  { value: 'sunday', label: 'Sunday only' },
   { value: 'saturday_sunday', label: 'Saturday & Sunday' },
+  { value: 'sunday', label: 'Sunday only' },
 ] as const;
 
 // ===================================================================

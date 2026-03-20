@@ -22,6 +22,7 @@ import type { EmployeeFormData, EmployeeFormProps, PassportPageReference } from 
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
 import { calculateFullName, compressImageForAI } from '@/lib/utils';
 import { nationalityToCountryCode } from '@/lib/country-utils';
+import { SampleImageToggle } from '@/components/SampleImageToggle';
 import {
   User,
   Users,
@@ -267,6 +268,7 @@ export function EmployeeForm({
   const [passportPages, setPassportPages] = useState<{
     cover?: PassportPageReference;
     insidePages?: PassportPageReference;
+    additionalPage?: PassportPageReference;
   }>(submission.documents?.passportPages || {});
 
   // Passport upload UI state (preview, validating, error — separate from persisted data)
@@ -280,6 +282,13 @@ export function EmployeeForm({
   });
   const [insideUI, setInsideUI] = useState({
     preview: initInside?.path ? getDocumentUrl(initInside.path) : null as string | null,
+    validating: false,
+    error: null as string | null,
+    file: null as File | null,
+  });
+  const initAdditional = submission.documents?.passportPages?.additionalPage;
+  const [additionalPageUI, setAdditionalPageUI] = useState({
+    preview: initAdditional?.path ? getDocumentUrl(initAdditional.path) : null as string | null,
     validating: false,
     error: null as string | null,
     file: null as File | null,
@@ -356,7 +365,6 @@ export function EmployeeForm({
   const otherNationality = watch('other_nationality');
   const previousNationality = watch('previous_nationality');
   const mobileUae = watch('mobile_uae');
-  const mobileInternational = watch('mobile_international');
   const homeTelephone = watch('home_telephone');
   const personalEmail = watch('personal_email');
   const homeStreetAddress = watch('home_street_address');
@@ -395,6 +403,9 @@ export function EmployeeForm({
   const isPhotoUploaded = !!(photoDoc?.validated);
   const isCoverUploaded = !!(passportPages.cover?.validated);
   const isInsidePagesUploaded = !!(passportPages.insidePages?.validated);
+  const isAdditionalPageUploaded = !!(passportPages.additionalPage?.validated);
+  const isIndianNationality = nationality === 'Indian' || nationality === 'India';
+  const requiresAdditionalPage = isIndianNationality && isInsidePagesUploaded && passportDataReady;
   const isPersonalComplete = !!(firstName && lastName && nationality);
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
   const isContactComplete = !!(homeStreetAddress && homeCity && homeCountry && personalEmail);
@@ -410,11 +421,12 @@ export function EmployeeForm({
     if (!isPhotoUploaded) return 1;
     if (!isCoverUploaded) return 2;
     if (!isInsidePagesUploaded || !passportDataReady || !isPersonalComplete) return 3;
+    if (requiresAdditionalPage && !isAdditionalPageUploaded) return 3;
     if (!isFamilyComplete) return 4;
     if (!isContactComplete) return 5;
     if (!isEducationComplete) return 6;
     return 7;
-  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, passportDataReady, isPersonalComplete, isFamilyComplete, isContactComplete, isEducationComplete]);
+  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, isAdditionalPageUploaded, requiresAdditionalPage, passportDataReady, isPersonalComplete, isFamilyComplete, isContactComplete, isEducationComplete]);
 
   const currentStep = computeCurrentStep();
   const totalSteps = STEP_LABELS.length;
@@ -671,6 +683,68 @@ export function EmployeeForm({
     await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
   };
 
+  // Indian passport additional page handlers
+  const handleAdditionalPageUpload = async (file: File): Promise<boolean> => {
+    const reader = new FileReader();
+    const preview = await new Promise<string>((resolve) => {
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+
+    setAdditionalPageUI({ preview, validating: true, error: null, file });
+
+    const result = await uploadPassportPage(submission.id, 'additionalPage', file);
+    if (!result) {
+      setAdditionalPageUI({ preview, validating: false, error: 'Failed to upload file', file });
+      return false;
+    }
+
+    setAdditionalPageUI({ preview, validating: false, error: null, file });
+    const newPage: PassportPageReference = { path: result.path, filename: result.filename, validated: true };
+    const updatedPages = { ...passportPagesRef.current, additionalPage: newPage };
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+
+    // Extract data from additional page
+    try {
+      const compressedImage = await compressImageForAI(preview);
+      const response = await fetch('/api/extract-passport-additional', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: compressedImage }),
+      });
+      if (response.ok) {
+        const extractResult = await response.json();
+        if (extractResult.success && extractResult.data) {
+          const d = extractResult.data;
+          if (d.father_name) setValue('father_full_name', d.father_name);
+          if (d.mother_name) setValue('mother_full_name', d.mother_name);
+          if (d.spouse_name) setValue('spouse_name', d.spouse_name);
+          if (d.address_street) setValue('home_street_address', d.address_street);
+          if (d.address_city) setValue('home_city', d.address_city);
+          if (d.address_pin) setValue('home_postal_code', d.address_pin);
+          if (d.address_country) setValue('home_country', d.address_country);
+          // Auto-save after extraction
+          setTimeout(() => autoSaveEmployeeData(submission.id, getValues()), 100);
+        }
+      }
+    } catch (err) {
+      console.error('Additional page extraction error:', err);
+    }
+
+    return true;
+  };
+
+  const handleAdditionalPageRemove = async () => {
+    setAdditionalPageUI({ preview: null, validating: false, error: null, file: null });
+    const updatedPages = { ...passportPagesRef.current };
+    delete updatedPages.additionalPage;
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+  };
+
   // Fallback: if inside pages are uploaded but extraction didn't fire (API error),
   // show personal details after a delay so user can fill manually
   useEffect(() => {
@@ -768,6 +842,7 @@ export function EmployeeForm({
                   <p className="mt-2 text-xs text-gray-600">
                     Single page photos are not accepted. Passport must be spread open.
                   </p>
+                  <SampleImageToggle imageSrc="/samples/passport-cover-example.png" altText="Example passport cover spread" label="See example photo" />
                 </div>
               </div>
 
@@ -816,6 +891,7 @@ export function EmployeeForm({
                   <p className="mt-2 text-xs text-gray-600">
                     Your details will be automatically extracted from this page.
                   </p>
+                  <SampleImageToggle imageSrc="/samples/passport-inside-example.png" altText="Example passport inside pages spread" label="See example photo" />
                 </div>
               </div>
 
@@ -993,9 +1069,52 @@ export function EmployeeForm({
             </div>
           </FormSection>
           )}
+          {/* Indian Passport Additional Page */}
+          {requiresAdditionalPage && (
+            <FormSection
+              title="Indian Passport — Additional Page"
+              icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            >
+              <div className="space-y-4">
+                <div
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: '#EBF4FF' }}
+                >
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Upload the last page of your Indian passport</p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      This page contains your parents&apos; names, spouse name, and address. These details will be automatically extracted.
+                    </p>
+                    <SampleImageToggle imageSrc="/samples/passport-additional-example.png" altText="Example Indian passport additional page" label="See example photo" />
+                  </div>
+                </div>
+
+                <UploadSlot
+                  label=""
+                  description="Last page with parents' names and address"
+                  expectedType="INSIDE_PAGES"
+                  file={additionalPageUI.file}
+                  preview={additionalPageUI.preview || undefined}
+                  validated={!!passportPages.additionalPage?.validated}
+                  validating={additionalPageUI.validating}
+                  error={additionalPageUI.error || undefined}
+                  onUpload={handleAdditionalPageUpload}
+                  onRemove={handleAdditionalPageRemove}
+                />
+
+                {isAdditionalPageUploaded && (
+                  <div className="flex items-center gap-2 text-green-600 text-sm">
+                    <CheckCircle className="w-4 h-4" />
+                    Additional page uploaded. Family details and address will be pre-filled.
+                  </div>
+                )}
+              </div>
+            </FormSection>
+          )}
           {viewingStep === 3 && (
             <StepNavButtons
-              enabled={isInsidePagesUploaded && passportDataReady && isPersonalComplete}
+              enabled={isInsidePagesUploaded && passportDataReady && isPersonalComplete && (!requiresAdditionalPage || isAdditionalPageUploaded)}
               onContinue={() => setViewingStep(4)}
               onBack={() => setViewingStep(2)}
             />
@@ -1184,62 +1303,51 @@ export function EmployeeForm({
                       required
                     />
                   </div>
+                  <PhoneInput
+                    label="Telephone"
+                    value={mobileUae}
+                    onChange={(value) => setValue('mobile_uae', value || '')}
+                    country="AE"
+                  />
                 </div>
               )}
             </div>
           </FormSection>
 
-          {/* Email & Phone */}
+          {/* Email */}
           <FormSection
-            title="Email & Phone"
+            title="Email"
             icon={<Mail className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
           >
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Personal Email"
+                type="email"
+                error={errors.personal_email?.message}
+                required
+                {...register('personal_email', {
+                  required: 'Required',
+                  pattern: {
+                    value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                    message: 'Invalid email format',
+                  },
+                })}
+              />
+              <div>
                 <Input
-                  label="Personal Email"
+                  label="Company Email"
                   type="email"
-                  error={errors.personal_email?.message}
-                  required
-                  {...register('personal_email', {
-                    required: 'Required',
-                    pattern: {
-                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                      message: 'Invalid email format',
-                    },
-                  })}
+                  disabled={sameEmails}
+                  {...register('company_email')}
                 />
-                <div>
-                  <Input
-                    label="Company Email"
-                    type="email"
-                    disabled={sameEmails}
-                    {...register('company_email')}
+                <label className="flex items-center gap-2 mt-2 text-sm text-gray-600">
+                  <input
+                    type="checkbox"
+                    {...register('same_emails')}
+                    className="rounded"
                   />
-                  <label className="flex items-center gap-2 mt-2 text-sm text-gray-600">
-                    <input
-                      type="checkbox"
-                      {...register('same_emails')}
-                      className="rounded"
-                    />
-                    Same as personal email
-                  </label>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <PhoneInput
-                  label="UAE Mobile"
-                  value={mobileUae}
-                  onChange={(value) => setValue('mobile_uae', value || '')}
-                  country="AE"
-                />
-                <PhoneInput
-                  label="International Mobile"
-                  value={mobileInternational}
-                  onChange={(value) => setValue('mobile_international', value || '')}
-                  defaultCountry={nationalityCountryCode || 'AE'}
-                />
+                  Same as personal email
+                </label>
               </div>
             </div>
           </FormSection>
