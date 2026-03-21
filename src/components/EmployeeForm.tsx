@@ -826,7 +826,7 @@ export function EmployeeForm({
         currentStep={currentStep}
         viewingStep={viewingStep}
         totalSteps={totalSteps}
-        onStepClick={setViewingStep}
+        onStepClick={(step) => { setViewingStep(step); if (step === 7) window.scrollTo({ top: 0, behavior: 'smooth' }); }}
       />
 
       {/* Step 1: Photo Upload */}
@@ -1616,7 +1616,7 @@ export function EmployeeForm({
             />
           </div>
           {viewingStep === 6 && (
-            <StepNavButtons enabled={isEducationComplete} onContinue={() => setViewingStep(7)} onBack={() => setViewingStep(5)} label="Review & Sign" />
+            <StepNavButtons enabled={isEducationComplete} onContinue={() => { setViewingStep(7); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onBack={() => setViewingStep(5)} label="Review & Sign" />
           )}
         </div>
       </RevealSection>
