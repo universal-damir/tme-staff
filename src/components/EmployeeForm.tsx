@@ -977,8 +977,8 @@ export function EmployeeForm({
             </div>
           )}
 
-          {/* Personal Details — merged into step 3 */}
-          {passportDataReady && (
+          {/* Personal Details — merged into step 3, hidden while extracting */}
+          {passportDataReady && !extractingPassport && (
           <FormSection
             title="Personal Details"
             icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
