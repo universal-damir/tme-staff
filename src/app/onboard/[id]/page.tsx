@@ -372,7 +372,7 @@ function OnboardingPageInner() {
           </h1>
           {submission.staff_name && (
             <p className="text-gray-600">
-              Welcome, <span className="font-medium">{submission.staff_name}</span>
+              <span className="font-medium">{submission.staff_name}</span>
             </p>
           )}
         </div>
