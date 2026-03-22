@@ -24,6 +24,26 @@ type PageState =
   | 'already_complete'
   | 'token_required';
 
+function RedirectTimer() {
+  const [seconds, setSeconds] = useState(5);
+  useEffect(() => {
+    const timer = setInterval(() => setSeconds(s => s - 1), 1000);
+    const redirect = setTimeout(() => {
+      window.location.href = 'https://tme-services.com';
+    }, 5000);
+    return () => { clearInterval(timer); clearTimeout(redirect); };
+  }, []);
+  return (
+    <a
+      href="https://tme-services.com"
+      className="inline-block mt-4 text-sm hover:underline"
+      style={{ color: TME_COLORS.primary }}
+    >
+      Redirecting to TME Services in {seconds > 0 ? seconds : 0}s...
+    </a>
+  );
+}
+
 export default function OnboardingPage() {
   return (
     <Suspense fallback={
@@ -39,6 +59,8 @@ export default function OnboardingPage() {
   );
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function OnboardingPageInner() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -46,7 +68,9 @@ function OnboardingPageInner() {
   const token = searchParams.get('token');
 
   const [submission, setSubmission] = useState<StaffOnboardingSubmission | null>(null);
-  const [pageState, setPageState] = useState<PageState>('loading');
+  const [pageState, setPageState] = useState<PageState>(
+    UUID_REGEX.test(id) ? 'loading' : 'not_found'
+  );
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [clientIP, setClientIP] = useState<string | null>(null);
@@ -57,6 +81,8 @@ function OnboardingPageInner() {
 
   // Fetch submission data
   useEffect(() => {
+    if (!UUID_REGEX.test(id)) return;
+
     async function fetchSubmission() {
       try {
         const data = await getStaffOnboarding(id);
@@ -226,10 +252,10 @@ function OnboardingPageInner() {
           <div className="w-16 h-16 rounded-full bg-red-100 mx-auto mb-6 flex items-center justify-center">
             <XCircle className="w-8 h-8 text-red-500" />
           </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Form Not Found</h1>
+          <h1 className="text-xl font-bold text-gray-900 mb-4">Link Invalid</h1>
           <p className="text-gray-600">
-            This onboarding link is invalid or has expired. Please contact your HR
-            representative for a new link.
+            This link is invalid or has expired. If you believe this is an error,
+            please contact your HR representative.
           </p>
         </div>
       </div>
@@ -290,7 +316,7 @@ function OnboardingPageInner() {
     );
   }
 
-  // Success state
+  // Success state — auto-redirect to TME website after 5 seconds
   if (pageState === 'success') {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
@@ -306,7 +332,8 @@ function OnboardingPageInner() {
               ? 'The employer section has been completed. An email has been sent to the employee to complete their section.'
               : 'Your onboarding form has been submitted successfully.'}
           </p>
-          <p className="text-sm text-gray-400">You can close this window.</p>
+          <p className="text-sm text-gray-400">You will be redirected shortly...</p>
+          <RedirectTimer />
         </div>
       </div>
     );

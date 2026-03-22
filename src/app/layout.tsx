@@ -10,6 +10,9 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "TME Staff Onboarding",
   description: "Complete your staff onboarding process",
+  icons: {
+    icon: '/favicon.ico',
+  },
   robots: {
     index: false,
     follow: false,
