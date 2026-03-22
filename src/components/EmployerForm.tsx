@@ -129,6 +129,14 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
           </div>
         </div>
       )}
+      {jobTitlesLoading && (
+        <div className="absolute inset-0 z-40 bg-white/80 backdrop-blur-[2px] rounded-xl flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-4 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: TME_COLORS.primary }} />
+            <p className="text-sm font-medium text-gray-500">Loading form data...</p>
+          </div>
+        </div>
+      )}
       {/* Position Details */}
       <FormSection
         title="Position Details"

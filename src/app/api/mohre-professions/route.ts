@@ -12,12 +12,18 @@ const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-service
 
 export async function GET() {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
     const response = await fetch(`${TME_PORTAL_URL}/api/mohre-professions`, {
       headers: {
         'x-api-secret': process.env.STAFF_PORTAL_API_SECRET || '',
       },
-      cache: 'no-store', // Always fetch fresh from portal
+      cache: 'no-store',
+      signal: controller.signal,
     });
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       throw new Error(`Portal responded with ${response.status}`);
