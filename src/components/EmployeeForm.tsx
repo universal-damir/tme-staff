@@ -1349,7 +1349,7 @@ export function EmployeeForm({
                   />
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Input
-                      label="City"
+                      label="Area"
                       error={errors.uae_city?.message}
                       required
                       {...register('uae_city', {
