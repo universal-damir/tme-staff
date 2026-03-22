@@ -1675,7 +1675,7 @@ export function EmployeeForm({
               loading={isSubmitting}
               size="lg"
             >
-              Submit Onboarding Form
+              {submission.onboarding_type === 'renewal' ? 'Submit Renewal Form' : 'Submit Onboarding Form'}
             </Button>
           </div>
         </div>

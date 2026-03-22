@@ -50,7 +50,7 @@ export default function OnboardingPage() {
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4" style={{ color: TME_COLORS.primary }} />
-          <p className="text-gray-600">Loading your onboarding form...</p>
+          <p className="text-gray-600">Loading your form...</p>
         </div>
       </div>
     }>
@@ -238,7 +238,7 @@ function OnboardingPageInner() {
             className="w-12 h-12 animate-spin mx-auto mb-4"
             style={{ color: TME_COLORS.primary }}
           />
-          <p className="text-gray-600">Loading your onboarding form...</p>
+          <p className="text-gray-600">Loading your form...</p>
         </div>
       </div>
     );
@@ -272,7 +272,7 @@ function OnboardingPageInner() {
           </div>
           <h1 className="text-xl font-bold text-gray-900 mb-4">Form Cancelled</h1>
           <p className="text-gray-600">
-            This onboarding form has been cancelled. Please contact your HR
+            This form has been cancelled. Please contact your HR
             representative for more information.
           </p>
         </div>
@@ -290,8 +290,8 @@ function OnboardingPageInner() {
           </div>
           <h1 className="text-xl font-bold text-gray-900 mb-4">Already Completed</h1>
           <p className="text-gray-600">
-            This onboarding form has already been submitted. Thank you for completing
-            your onboarding process.
+            This form has already been submitted. Thank you for completing
+            the process.
           </p>
         </div>
       </div>
@@ -327,10 +327,10 @@ function OnboardingPageInner() {
           <h1 className="text-2xl font-bold text-gray-900 mb-4">Thank You!</h1>
           <p className="text-gray-600 mb-6">
             {submission?.is_same_person
-              ? 'Your onboarding form has been submitted successfully.'
+              ? 'Your form has been submitted successfully.'
               : pageState === 'success' && submission?.current_step === 'employer'
               ? 'The employer section has been completed. An email has been sent to the employee to complete their section.'
-              : 'Your onboarding form has been submitted successfully.'}
+              : 'Your form has been submitted successfully.'}
           </p>
           <p className="text-sm text-gray-400">You will be redirected shortly...</p>
           <RedirectTimer />
@@ -357,6 +357,8 @@ function OnboardingPageInner() {
   // Form states
   if (!submission) return null;
 
+  const isRenewal = submission.onboarding_type === 'renewal';
+
   return (
     <main className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-3xl mx-auto">
@@ -366,7 +368,7 @@ function OnboardingPageInner() {
             className="text-2xl md:text-3xl font-bold mb-2"
             style={{ color: TME_COLORS.primary }}
           >
-            Staff Onboarding
+            {isRenewal ? 'Staff Renewal' : 'Staff Onboarding'}
           </h1>
           {submission.staff_name && (
             <p className="text-gray-600">
@@ -413,7 +415,7 @@ function OnboardingPageInner() {
 
         {/* Footer */}
         <div className="mt-12 text-center text-sm text-gray-400">
-          <p>TME Services - Staff Onboarding Portal</p>
+          <p>TME Services - Staff {isRenewal ? 'Renewal' : 'Onboarding'} Portal</p>
           <p className="mt-1">
             Need help?{' '}
             <a
