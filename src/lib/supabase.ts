@@ -161,7 +161,7 @@ export async function updateSamePersonData(
 
 export async function uploadDocument(
   submissionId: string,
-  type: 'photo' | 'passport' | 'eid',
+  type: 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional',
   file: File
 ): Promise<{ path: string; filename: string } | null> {
   const timestamp = Date.now();

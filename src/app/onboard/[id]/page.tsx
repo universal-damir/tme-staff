@@ -399,6 +399,7 @@ function OnboardingPageInner() {
               submission={submission}
               onSubmit={handleEmployerSubmit}
               isSubmitting={isSubmitting}
+              isRenewal={isRenewal}
             />
           )}
 

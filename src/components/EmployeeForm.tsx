@@ -18,6 +18,7 @@ import { Input, Button, MultiSelectDropdown, CustomDropdown, CustomDatePicker, P
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
+import { FileUploadSlot } from '@/components/FileUploadSlot';
 import type { EmployeeFormData, EmployeeFormProps, PassportPageReference } from '@/types';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
 import { calculateFullName, compressImageForAI } from '@/lib/utils';
@@ -278,6 +279,18 @@ export function EmployeeForm({
     additionalPage?: PassportPageReference;
   }>(submission.documents?.passportPages || {});
 
+  // Education document uploads
+  const [degreeDoc, setDegreeDoc] = useState(submission.documents?.degree_attested);
+  const [transcriptDoc, setTranscriptDoc] = useState(submission.documents?.transcript_of_records);
+  const [educationAdditionalDoc, setEducationAdditionalDoc] = useState(submission.documents?.education_additional);
+  const [showAdditionalEducation, setShowAdditionalEducation] = useState(!!submission.documents?.education_additional);
+  const degreeDocRef = React.useRef(degreeDoc);
+  const transcriptDocRef = React.useRef(transcriptDoc);
+  const educationAdditionalDocRef = React.useRef(educationAdditionalDoc);
+  React.useEffect(() => { degreeDocRef.current = degreeDoc; }, [degreeDoc]);
+  React.useEffect(() => { transcriptDocRef.current = transcriptDoc; }, [transcriptDoc]);
+  React.useEffect(() => { educationAdditionalDocRef.current = educationAdditionalDoc; }, [educationAdditionalDoc]);
+
   // Passport upload UI state (preview, validating, error — separate from persisted data)
   const initCover = submission.documents?.passportPages?.cover;
   const initInside = submission.documents?.passportPages?.insidePages;
@@ -353,6 +366,7 @@ export function EmployeeForm({
     register('uae_presence');
     register('gender');
     register('date_of_birth');
+    register('passport_issue_date');
     register('passport_expiry');
   }, [register]);
 
@@ -380,6 +394,7 @@ export function EmployeeForm({
   const motherFullName = watch('mother_full_name');
   const dateOfBirth = watch('date_of_birth');
   const passportNumber = watch('passport_number');
+  const passportIssueDate = watch('passport_issue_date');
   const passportExpiry = watch('passport_expiry');
   const placeOfIssue = watch('place_of_issue');
   const gender = watch('gender');
@@ -555,6 +570,15 @@ export function EmployeeForm({
     await onSubmit(data, signatureToUse);
   };
 
+  // Helper to build full document references including education docs
+  const buildDocRefs = (overrides?: { photo?: typeof photoDoc; passportPages?: typeof passportPages }) => ({
+    photo: overrides?.photo ?? photoDocRef.current,
+    passportPages: overrides?.passportPages ?? passportPagesRef.current,
+    degree_attested: degreeDocRef.current,
+    transcript_of_records: transcriptDocRef.current,
+    education_additional: educationAdditionalDocRef.current,
+  });
+
   const handlePhotoUpload = async (file: File) => {
     const result = await uploadDocument(submission.id, 'photo', file);
     if (result) {
@@ -562,10 +586,7 @@ export function EmployeeForm({
       setPhotoDoc(newDoc);
       photoDocRef.current = newDoc;
       setPhotoError(null);
-      await updateDocumentReferences(submission.id, {
-        photo: newDoc,
-        passportPages: passportPagesRef.current,
-      });
+      await updateDocumentReferences(submission.id, buildDocRefs({ photo: newDoc }));
       return result;
     }
     return null;
@@ -617,6 +638,7 @@ export function EmployeeForm({
     const fieldMapping: Record<string, string> = {
       family_name: 'last_name',
       passport_no: 'passport_number',
+      passport_issue_date: 'passport_issue_date',
       passport_expiry_date: 'passport_expiry',
       place_of_birth: 'place_of_issue',
     };
@@ -629,8 +651,6 @@ export function EmployeeForm({
           setValue('gender', value.toLowerCase() as 'male' | 'female');
           return;
         }
-        // Skip passport_issue_date (no form field for it)
-        if (key === 'passport_issue_date') return;
         setValue(formField as keyof EmployeeFormData, value as never);
       }
     });
@@ -670,7 +690,7 @@ export function EmployeeForm({
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     setPassportError(null);
-    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
     return true;
   };
 
@@ -702,7 +722,7 @@ export function EmployeeForm({
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     setPassportError(null);
-    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
 
     // Extract passport data — show extracting state so user knows it's working
     setExtractingPassport(true);
@@ -710,6 +730,15 @@ export function EmployeeForm({
     setExtractingPassport(false);
     if (extracted) {
       handlePassportExtracted(extracted);
+      // Store extracted data in passport page reference so tme-portal sync can read passport_issue_date etc.
+      const updatedInsidePage: PassportPageReference = {
+        ...passportPagesRef.current.insidePages!,
+        extracted_data: extracted as Record<string, unknown>,
+      };
+      const updatedPagesWithData = { ...passportPagesRef.current, insidePages: updatedInsidePage };
+      setPassportPages(updatedPagesWithData);
+      passportPagesRef.current = updatedPagesWithData;
+      await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPagesWithData }));
     } else {
       // Extraction failed — let user fill manually
       setPassportDataReady(true);
@@ -724,7 +753,7 @@ export function EmployeeForm({
     delete updatedPages.cover;
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
-    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
   };
 
   const handleInsideRemove = async () => {
@@ -734,7 +763,7 @@ export function EmployeeForm({
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     setPassportDataReady(false);
-    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
   };
 
   // Indian passport additional page handlers
@@ -758,7 +787,7 @@ export function EmployeeForm({
     const updatedPages = { ...passportPagesRef.current, additionalPage: newPage };
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
-    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
 
     // Extract data from additional page
     try {
@@ -799,7 +828,7 @@ export function EmployeeForm({
     delete updatedPages.additionalPage;
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
-    await updateDocumentReferences(submission.id, { photo: photoDocRef.current, passportPages: updatedPages });
+    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
   };
 
   // Fallback: if inside pages are uploaded but extraction hasn't run yet
@@ -845,20 +874,14 @@ export function EmployeeForm({
                 const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
                 setPhotoDoc(updatedDoc);
                 photoDocRef.current = updatedDoc;
-                await updateDocumentReferences(submission.id, {
-                  photo: updatedDoc,
-                  passportPages: passportPagesRef.current,
-                });
+                await updateDocumentReferences(submission.id, buildDocRefs({ photo: updatedDoc }));
               }
               if (photoError) setPhotoError(null);
             }}
             onRemove={async () => {
               setPhotoDoc(undefined);
               photoDocRef.current = undefined;
-              await updateDocumentReferences(submission.id, {
-                photo: undefined,
-                passportPages: passportPagesRef.current,
-              });
+              await updateDocumentReferences(submission.id, buildDocRefs({ photo: undefined }));
             }}
             error={photoError || undefined}
           />
@@ -1014,12 +1037,33 @@ export function EmployeeForm({
                 />
               </div>
 
-              <Input
-                label="Full Name"
-                value={calculateFullName(firstName || '', middleName, lastName || '')}
-                disabled
-                helperText="Auto-calculated from name fields"
-              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Full Name"
+                  value={calculateFullName(firstName || '', middleName, lastName || '')}
+                  disabled
+                  helperText="Auto-calculated from name fields"
+                />
+                <Input
+                  label="Passport Number"
+                  placeholder="e.g. X12345678"
+                  {...register('passport_number')}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CustomDatePicker
+                  label="Passport Issue Date"
+                  value={passportIssueDate || ''}
+                  onChange={(val) => setValue('passport_issue_date', val)}
+                />
+                <CustomDatePicker
+                  label="Passport Expiry"
+                  value={passportExpiry || ''}
+                  onChange={(val) => setValue('passport_expiry', val)}
+                  error={errors.passport_expiry?.message}
+                />
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <CustomDropdown
@@ -1053,20 +1097,6 @@ export function EmployeeForm({
                   label="Place of Birth / Issue"
                   placeholder="e.g. London, Dubai..."
                   {...register('place_of_issue')}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Passport Number"
-                  placeholder="e.g. X12345678"
-                  {...register('passport_number')}
-                />
-                <CustomDatePicker
-                  label="Passport Expiry"
-                  value={passportExpiry || ''}
-                  onChange={(val) => setValue('passport_expiry', val)}
-                  error={errors.passport_expiry?.message}
                 />
               </div>
 
@@ -1473,6 +1503,95 @@ export function EmployeeForm({
                 customPlaceholder="Add another language..."
                 error={errors.languages_spoken?.message}
               />
+
+              {/* Education document uploads */}
+              {educationalQualification && (
+                <div className="space-y-3 pt-4 border-t border-gray-200">
+                  {/* Show "highly recommended" warning for Vocational Certificate and above */}
+                  {!['Primary School', 'Secondary School / High School'].includes(educationalQualification) && (
+                    <div className="flex items-center gap-2">
+                      <Info className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                      <span className="text-sm text-amber-700 font-medium">
+                        Highly recommended: Please upload your translated and attested academic documents
+                      </span>
+                    </div>
+                  )}
+                  <FileUploadSlot
+                    label="Translated & Attested Degree"
+                    description="PDF or image of your attested degree certificate"
+                    uploaded={!!degreeDoc}
+                    filename={degreeDoc?.filename}
+                    onUpload={async (file) => {
+                      const result = await uploadDocument(submission.id, 'degree_attested', file);
+                      if (result) {
+                        setDegreeDoc(result);
+                        degreeDocRef.current = result;
+                        await updateDocumentReferences(submission.id, buildDocRefs());
+                      }
+                      return result;
+                    }}
+                    onRemove={async () => {
+                      setDegreeDoc(undefined);
+                      degreeDocRef.current = undefined;
+                      await updateDocumentReferences(submission.id, buildDocRefs());
+                    }}
+                  />
+                  <FileUploadSlot
+                    label="Transcript of Records"
+                    description="PDF or image of your academic transcript"
+                    uploaded={!!transcriptDoc}
+                    filename={transcriptDoc?.filename}
+                    onUpload={async (file) => {
+                      const result = await uploadDocument(submission.id, 'transcript_of_records', file);
+                      if (result) {
+                        setTranscriptDoc(result);
+                        transcriptDocRef.current = result;
+                        await updateDocumentReferences(submission.id, buildDocRefs());
+                      }
+                      return result;
+                    }}
+                    onRemove={async () => {
+                      setTranscriptDoc(undefined);
+                      transcriptDocRef.current = undefined;
+                      await updateDocumentReferences(submission.id, buildDocRefs());
+                    }}
+                  />
+
+                  {/* Additional education document */}
+                  {showAdditionalEducation ? (
+                    <FileUploadSlot
+                      label="Additional Education Document"
+                      description="Any other education-related document"
+                      uploaded={!!educationAdditionalDoc}
+                      filename={educationAdditionalDoc?.filename}
+                      onUpload={async (file) => {
+                        const result = await uploadDocument(submission.id, 'education_additional', file);
+                        if (result) {
+                          setEducationAdditionalDoc(result);
+                          educationAdditionalDocRef.current = result;
+                          await updateDocumentReferences(submission.id, buildDocRefs());
+                        }
+                        return result;
+                      }}
+                      onRemove={async () => {
+                        setEducationAdditionalDoc(undefined);
+                        educationAdditionalDocRef.current = undefined;
+                        setShowAdditionalEducation(false);
+                        await updateDocumentReferences(submission.id, buildDocRefs());
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowAdditionalEducation(true)}
+                      className="flex items-center gap-1.5 text-sm font-medium transition-colors hover:underline"
+                      style={{ color: TME_COLORS.primary }}
+                    >
+                      + Add additional education document
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </FormSection>
 
@@ -1482,14 +1601,40 @@ export function EmployeeForm({
             icon={<Building2 className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
           >
             <div className="space-y-4">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  {...register('has_uae_bank')}
-                  className="rounded"
-                />
-                <span className="text-sm text-gray-700">I have a bank account</span>
-              </label>
+              <div className="space-y-2">
+                <label
+                  className="flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all duration-200"
+                  style={{
+                    borderColor: hasUAEBank === true ? TME_COLORS.primary : '#e5e7eb',
+                    backgroundColor: hasUAEBank === true ? '#f0f4ff' : 'transparent',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="bank_status"
+                    checked={hasUAEBank === true}
+                    onChange={() => setValue('has_uae_bank', true)}
+                    className="accent-[#243F7B]"
+                  />
+                  <span className="text-sm text-gray-700">I have a UAE bank account</span>
+                </label>
+                <label
+                  className="flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all duration-200"
+                  style={{
+                    borderColor: hasUAEBank === false ? TME_COLORS.primary : '#e5e7eb',
+                    backgroundColor: hasUAEBank === false ? '#f0f4ff' : 'transparent',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="bank_status"
+                    checked={hasUAEBank === false}
+                    onChange={() => setValue('has_uae_bank', false)}
+                    className="accent-[#243F7B]"
+                  />
+                  <span className="text-sm text-gray-700">I do not have a UAE bank account</span>
+                </label>
+              </div>
 
               {hasUAEBank && (
                 <div className="space-y-4 pt-4 border-t border-gray-200">

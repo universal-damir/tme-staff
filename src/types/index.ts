@@ -52,6 +52,7 @@ export interface EmployeeFormData {
   previous_nationality?: string;
   date_of_birth?: string; // ISO format
   passport_number?: string;
+  passport_issue_date?: string; // ISO format
   passport_expiry?: string; // ISO format
   place_of_issue?: string;
   gender?: 'male' | 'female';
@@ -143,6 +144,18 @@ export interface StaffDocumentReferences {
     path: string;
     filename: string;
   };
+  degree_attested?: {
+    path: string;
+    filename: string;
+  };
+  transcript_of_records?: {
+    path: string;
+    filename: string;
+  };
+  education_additional?: {
+    path: string;
+    filename: string;
+  };
 }
 
 // ===================================================================
@@ -203,6 +216,7 @@ export interface EmployerFormProps {
   submission: StaffOnboardingSubmission;
   onSubmit: (data: EmployerFormData, signature: string) => Promise<void>;
   isSubmitting: boolean;
+  isRenewal?: boolean;
 }
 
 export interface EmployeeFormProps {

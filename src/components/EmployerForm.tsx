@@ -45,7 +45,7 @@ function pluralize(value: number | undefined, singular: string): string {
   return value === 1 ? singular : singular + 's';
 }
 
-export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFormProps) {
+export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: EmployerFormProps) {
   const { professions: jobTitleOptions, loading: jobTitlesLoading } = useMohreProfessions();
   const [signature, setSignature] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
@@ -327,6 +327,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting }: EmployerFor
               onChange={(val) => setValue('starting_date', val)}
               error={errors.starting_date?.message}
               required
+              disabled={isRenewal}
             />
 
             <CustomDropdown
