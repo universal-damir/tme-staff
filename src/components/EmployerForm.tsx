@@ -407,8 +407,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
             </div>
           )}
 
-          {/* All in one row: Weekly Off | Notice | Probation | Annual Leave */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Row 1: Weekly Off | Annual Leave */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <CustomDropdown
               label="Weekly Off"
               options={WEEKLY_OFF_OPTIONS.map(opt => ({ value: opt.value, label: opt.label }))}
@@ -418,6 +418,40 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               required
             />
 
+            <div>
+              <label
+                className="block text-sm font-medium mb-1"
+                style={{ color: TME_COLORS.primary }}
+              >
+                Annual Leave
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="w-20 flex-shrink-0">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="30"
+                    error={errors.annual_leave_days?.message}
+                    {...register('annual_leave_days', {
+                      required: 'Required',
+                      pattern: { value: /^\d+$/, message: 'Enter a number' },
+                    })}
+                  />
+                </div>
+                <div className="flex-1">
+                  <CustomDropdown
+                    options={LEAVE_TYPES.map(opt => ({ value: opt.value, label: opt.label }))}
+                    value={annualLeaveType || 'calendar'}
+                    onChange={(val) => setValue('annual_leave_type', val as 'calendar' | 'working')}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: Notice Period | Probation */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm mb-1">
                 <span className="font-medium" style={{ color: TME_COLORS.primary }}>Notice Period</span>
@@ -457,37 +491,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
                     pattern: { value: /^\d+$/, message: 'Enter a number' },
                   })}
                 />
-              </div>
-            </div>
-
-            <div>
-              <label
-                className="block text-sm font-medium mb-1"
-                style={{ color: TME_COLORS.primary }}
-              >
-                Annual Leave
-              </label>
-              <div className="flex items-center gap-2">
-                <div className="w-20 flex-shrink-0">
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    placeholder="30"
-                    error={errors.annual_leave_days?.message}
-                    {...register('annual_leave_days', {
-                      required: 'Required',
-                      pattern: { value: /^\d+$/, message: 'Enter a number' },
-                    })}
-                  />
-                </div>
-                <div className="flex-1">
-                  <CustomDropdown
-                    options={LEAVE_TYPES.map(opt => ({ value: opt.value, label: opt.label }))}
-                    value={annualLeaveType || 'calendar'}
-                    onChange={(val) => setValue('annual_leave_type', val as 'calendar' | 'working')}
-                  />
-                </div>
               </div>
             </div>
           </div>
