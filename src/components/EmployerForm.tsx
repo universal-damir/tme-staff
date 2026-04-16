@@ -13,7 +13,7 @@ import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/compo
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
-import { Briefcase, Banknote, Calendar, FileSignature } from 'lucide-react';
+import { Briefcase, Banknote, Calendar, FileSignature, Copy } from 'lucide-react';
 
 // Convert string array to dropdown options format
 const toDropdownOptions = (items: readonly string[]) =>
@@ -84,6 +84,14 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const salaryFood = watch('salary_food');
   const salaryOther = watch('salary_other');
   const salaryPrepayCard = watch('salary_prepay_card');
+  const payrollCurrency = watch('payroll_salary_currency');
+  const payrollTotal = watch('payroll_salary_total');
+  const payrollBasic = watch('payroll_salary_basic');
+  const payrollAccommodation = watch('payroll_salary_accommodation');
+  const payrollTransport = watch('payroll_salary_transport');
+  const payrollFood = watch('payroll_salary_food');
+  const payrollOther = watch('payroll_salary_other');
+  const payrollPrepayCard = watch('payroll_salary_prepay_card');
   const startingDate = watch('starting_date');
   const annualLeaveType = watch('annual_leave_type');
   const weeklyOff = watch('weekly_off');
@@ -117,6 +125,38 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('salary_food', values.salary_food);
     setValue('salary_other', values.salary_other);
     setValue('salary_prepay_card', values.salary_prepay_card);
+  };
+
+  // Remap SalaryBreakdown's salary_* keys to payroll_salary_* form fields
+  const handlePayrollSalaryChange = (values: {
+    salary_currency: string;
+    salary_total: number | undefined;
+    salary_basic: number | undefined;
+    salary_accommodation: number | undefined;
+    salary_transport: number | undefined;
+    salary_food?: number | undefined;
+    salary_other?: number | undefined;
+    salary_prepay_card?: number | undefined;
+  }) => {
+    setValue('payroll_salary_currency', values.salary_currency);
+    setValue('payroll_salary_total', values.salary_total);
+    setValue('payroll_salary_basic', values.salary_basic);
+    setValue('payroll_salary_accommodation', values.salary_accommodation);
+    setValue('payroll_salary_transport', values.salary_transport);
+    setValue('payroll_salary_food', values.salary_food);
+    setValue('payroll_salary_other', values.salary_other);
+    setValue('payroll_salary_prepay_card', values.salary_prepay_card);
+  };
+
+  const handleMatchContractToPayroll = () => {
+    setValue('payroll_salary_currency', salaryCurrency || 'AED');
+    setValue('payroll_salary_total', salaryTotal);
+    setValue('payroll_salary_basic', salaryBasic);
+    setValue('payroll_salary_accommodation', salaryAccommodation);
+    setValue('payroll_salary_transport', salaryTransport);
+    setValue('payroll_salary_food', salaryFood);
+    setValue('payroll_salary_other', salaryOther);
+    setValue('payroll_salary_prepay_card', salaryPrepayCard);
   };
 
   return (
@@ -292,9 +332,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         </div>
       </FormSection>
 
-      {/* Compensation */}
+      {/* Salary Contract */}
       <FormSection
-        title="Compensation"
+        title="Salary Contract"
         icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
         <SalaryBreakdown
@@ -311,6 +351,41 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
             total: errors.salary_total?.message,
           }}
         />
+      </FormSection>
+
+      {/* Salary Payroll */}
+      <FormSection
+        title="Salary Payroll"
+        icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500">
+            The payroll salary is what is actually paid monthly. It may differ from the contract salary.
+          </p>
+          {salaryTotal && (
+            <button
+              type="button"
+              onClick={handleMatchContractToPayroll}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors hover:opacity-90"
+              style={{ backgroundColor: '#D2BC99', color: '#243F7B' }}
+            >
+              <Copy className="w-3 h-3" />
+              Match Contract
+            </button>
+          )}
+          <SalaryBreakdown
+            currency={payrollCurrency || salaryCurrency || 'AED'}
+            total={payrollTotal}
+            basic={payrollBasic}
+            accommodation={payrollAccommodation}
+            transport={payrollTransport}
+            food={payrollFood}
+            other={payrollOther}
+            prepayCard={payrollPrepayCard}
+            onChange={handlePayrollSalaryChange}
+            errors={{}}
+          />
+        </div>
       </FormSection>
 
       {/* Leave & Terms */}

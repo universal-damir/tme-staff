@@ -25,6 +25,14 @@ export interface EmployerFormData {
   salary_food?: number;
   salary_other?: number;
   salary_prepay_card?: number;
+  payroll_salary_currency?: string;
+  payroll_salary_total?: number;
+  payroll_salary_basic?: number;
+  payroll_salary_accommodation?: number;
+  payroll_salary_transport?: number;
+  payroll_salary_food?: number;
+  payroll_salary_other?: number;
+  payroll_salary_prepay_card?: number;
   annual_leave_days: number;
   annual_leave_type: 'calendar' | 'working';
   notice_period_value: number;
