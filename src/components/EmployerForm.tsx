@@ -394,17 +394,21 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         icon={<Calendar className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
         <div className="space-y-4">
-          {/* Row 1: Starting Date | Weekly Off */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <CustomDatePicker
-              label="Starting Date"
-              value={startingDate || ''}
-              onChange={(val) => setValue('starting_date', val)}
-              error={errors.starting_date?.message}
-              required
-              disabled={isRenewal}
-            />
+          {/* Starting Date — only for new hires */}
+          {!isRenewal && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <CustomDatePicker
+                label="Starting Date"
+                value={startingDate || ''}
+                onChange={(val) => setValue('starting_date', val)}
+                error={errors.starting_date?.message}
+                required
+              />
+            </div>
+          )}
 
+          {/* All in one row: Weekly Off | Notice | Probation | Annual Leave */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <CustomDropdown
               label="Weekly Off"
               options={WEEKLY_OFF_OPTIONS.map(opt => ({ value: opt.value, label: opt.label }))}
@@ -413,10 +417,49 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               error={errors.weekly_off?.message}
               required
             />
-          </div>
 
-          {/* Row 2: Annual Leave | Notice & Probation */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm mb-1">
+                <span className="font-medium" style={{ color: TME_COLORS.primary }}>Notice Period</span>
+                {' '}
+                <span className="text-gray-400">({pluralize(Number(noticePeriodValue), 'month')})</span>
+              </label>
+              <div className="w-20">
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="1"
+                  error={errors.notice_period_value?.message}
+                  {...register('notice_period_value', {
+                    required: 'Required',
+                    pattern: { value: /^\d+$/, message: 'Enter a number' },
+                  })}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1">
+                <span className="font-medium" style={{ color: TME_COLORS.primary }}>Probation</span>
+                {' '}
+                <span className="text-gray-400">({pluralize(Number(probationPeriodValue), 'month')})</span>
+              </label>
+              <div className="w-20">
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="6"
+                  error={errors.probation_period_value?.message}
+                  {...register('probation_period_value', {
+                    required: 'Required',
+                    pattern: { value: /^\d+$/, message: 'Enter a number' },
+                  })}
+                />
+              </div>
+            </div>
+
             <div>
               <label
                 className="block text-sm font-medium mb-1"
@@ -443,50 +486,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
                     options={LEAVE_TYPES.map(opt => ({ value: opt.value, label: opt.label }))}
                     value={annualLeaveType || 'calendar'}
                     onChange={(val) => setValue('annual_leave_type', val as 'calendar' | 'working')}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-between gap-4">
-              <div>
-                <label className="block text-sm mb-1">
-                  <span className="font-medium" style={{ color: TME_COLORS.primary }}>Notice Period</span>
-                  {' '}
-                  <span className="text-gray-400">({pluralize(Number(noticePeriodValue), 'month')})</span>
-                </label>
-                <div className="w-20">
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    placeholder="1"
-                    error={errors.notice_period_value?.message}
-                    {...register('notice_period_value', {
-                      required: 'Required',
-                      pattern: { value: /^\d+$/, message: 'Enter a number' },
-                    })}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm mb-1">
-                  <span className="font-medium" style={{ color: TME_COLORS.primary }}>Probation</span>
-                  {' '}
-                  <span className="text-gray-400">({pluralize(Number(probationPeriodValue), 'month')})</span>
-                </label>
-                <div className="w-20">
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    placeholder="6"
-                    error={errors.probation_period_value?.message}
-                    {...register('probation_period_value', {
-                      required: 'Required',
-                      pattern: { value: /^\d+$/, message: 'Enter a number' },
-                    })}
                   />
                 </div>
               </div>
