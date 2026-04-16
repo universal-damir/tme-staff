@@ -204,6 +204,9 @@ export interface StaffOnboardingSubmission {
   // Documents
   documents: StaffDocumentReferences | null;
 
+  // Existing documents from portal (for renewals — passport confirmation)
+  existing_documents?: Record<string, { path: string; publicUrl: string; filename: string }> | null;
+
   // Access control
   employee_access_token?: string;
 

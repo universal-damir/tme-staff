@@ -226,7 +226,8 @@ function RevealSection({ show, children, onReveal }: { show: boolean; children: 
   useEffect(() => {
     if (show && !hasBeenShown.current) {
       hasBeenShown.current = true;
-      // Delay scroll to allow animation to start
+      // Delay scroll to allow animation to start — but only if onReveal is provided
+      // (onReveal is set to undefined for step 7 / review mode to prevent scroll conflicts)
       if (onReveal) {
         setTimeout(onReveal, 200);
       }
@@ -278,6 +279,13 @@ export function EmployeeForm({
     insidePages?: PassportPageReference;
     additionalPage?: PassportPageReference;
   }>(submission.documents?.passportPages || {});
+
+  // Renewal passport confirmation
+  const isRenewal = submission.onboarding_type === 'renewal';
+  const existingDocs = submission.existing_documents;
+  const hasExistingPassport = !!(existingDocs?.passport_cover || existingDocs?.passport_inside);
+  const [passportConfirmed, setPassportConfirmed] = useState(false);
+  const [passportChanged, setPassportChanged] = useState(false);
 
   // Education document uploads
   const [degreeDoc, setDegreeDoc] = useState(submission.documents?.degree_attested);
@@ -546,9 +554,10 @@ export function EmployeeForm({
     }
     setPhotoError(null);
 
-    // Validate all passport pages are uploaded
+    // Validate all passport pages are uploaded (skip for renewals where passport was confirmed unchanged)
+    const passportSkipped = isRenewal && hasExistingPassport && passportConfirmed && !passportChanged;
     const pagesUploaded = passportPages.cover && passportPages.insidePages;
-    if (!pagesUploaded) {
+    if (!pagesUploaded && !passportSkipped) {
       setPassportError('Please upload both passport images');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -855,7 +864,7 @@ export function EmployeeForm({
         currentStep={currentStep}
         viewingStep={viewingStep}
         totalSteps={totalSteps}
-        onStepClick={(step) => { setViewingStep(step); if (step === 7) window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+        onStepClick={(step) => { setViewingStep(step); if (step === 7) { window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); } }}
       />
 
       {/* Step 1: Photo Upload */}
@@ -897,9 +906,108 @@ export function EmployeeForm({
         </FormSection>
       </RevealSection>
 
+      {/* Renewal: Existing Passport Confirmation (shown before passport upload steps) */}
+      {isRenewal && hasExistingPassport && (viewingStep === 2 || viewingStep === 7) && !passportChanged && (
+        <div className="bg-white rounded-xl p-6 shadow-sm mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />
+            <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
+              Your Current Passport
+            </h2>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            Below are your passport documents on file. Please review and confirm they are still valid.
+          </p>
+
+          {/* Display existing passport images */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+            {existingDocs?.passport_cover && (
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Passport Cover</label>
+                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={existingDocs.passport_cover.publicUrl}
+                    alt="Passport Cover"
+                    className="w-full h-auto max-h-64 object-contain"
+                  />
+                </div>
+              </div>
+            )}
+            {existingDocs?.passport_inside && (
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Passport Data Page</label>
+                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={existingDocs.passport_inside.publicUrl}
+                    alt="Passport Data Page"
+                    className="w-full h-auto max-h-64 object-contain"
+                  />
+                </div>
+              </div>
+            )}
+            {existingDocs?.passport_additional && (
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Additional Page</label>
+                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={existingDocs.passport_additional.publicUrl}
+                    alt="Additional Page"
+                    className="w-full h-auto max-h-64 object-contain"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Confirmation checkboxes */}
+          <div className="space-y-3 border-t border-gray-200 pt-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={passportConfirmed}
+                onChange={(e) => setPassportConfirmed(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#243F7B] focus:ring-[#243F7B]"
+              />
+              <div>
+                <span className="text-sm font-medium text-gray-800">I confirm my passport is the same as shown above</span>
+                <p className="text-xs text-gray-500 mt-0.5">My passport has not been renewed, replaced, or lost since the last submission.</p>
+              </div>
+            </label>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center justify-between mt-5">
+            <button
+              type="button"
+              onClick={() => setPassportChanged(true)}
+              className="text-sm text-red-600 hover:text-red-700 font-medium underline"
+            >
+              My passport has changed — I need to upload new pages
+            </button>
+            {passportConfirmed && (
+              <button
+                type="button"
+                onClick={() => {
+                  // Skip passport upload steps, go to step 4 (Family Details)
+                  setViewingStep(4);
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white text-sm"
+                style={{ backgroundColor: TME_COLORS.primary }}
+              >
+                Continue
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Step 2: Passport Cover */}
       <RevealSection
-        show={viewingStep === 2 || viewingStep === 7}
+        show={(viewingStep === 2 || viewingStep === 7) && (!isRenewal || !hasExistingPassport || passportChanged)}
         onReveal={viewingStep !== 7 ? () => scrollToRef(passportCoverRef) : undefined}
       >
         <div ref={passportCoverRef}>
@@ -948,7 +1056,7 @@ export function EmployeeForm({
 
       {/* Step 3: Inside Pages + Personal Details */}
       <RevealSection
-        show={viewingStep === 3 || viewingStep === 7}
+        show={(viewingStep === 3 || viewingStep === 7) && (!isRenewal || !hasExistingPassport || passportChanged)}
         onReveal={viewingStep !== 7 ? () => scrollToRef(passportInsideRef) : undefined}
       >
         <div ref={passportInsideRef} className="space-y-6">
@@ -1761,7 +1869,7 @@ export function EmployeeForm({
             />
           </div>
           {viewingStep === 6 && (
-            <StepNavButtons enabled={isEducationComplete} onContinue={() => { setViewingStep(7); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onBack={() => setViewingStep(5)} label="Review & Sign" />
+            <StepNavButtons enabled={isEducationComplete} onContinue={() => { setViewingStep(7); window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); }} onBack={() => setViewingStep(5)} label="Review & Sign" />
           )}
         </div>
       </RevealSection>
