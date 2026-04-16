@@ -41,6 +41,10 @@ export interface EmployerFormData {
   probation_period_unit: 'days' | 'weeks' | 'months';
   weekly_off: 'sunday' | 'saturday_sunday';
   starting_date: string; // ISO format YYYY-MM-DD
+
+  // UAE Visa Status (employer indicates applicant's current visa situation)
+  applicant_in_uae?: boolean;
+  visa_category?: 'tourist_visa' | 'visa_on_arrival' | 'employment_visa' | 'immigration_cancellation' | 'other_na';
 }
 
 // ===================================================================
@@ -113,6 +117,12 @@ export interface EmployeeFormData {
   bank_iban?: string;
   bank_routing_code?: string;
 
+  // Emirates ID (previously held)
+  has_previous_eid?: boolean;
+  eid_number?: string;
+  eid_issue_date?: string;   // ISO format
+  eid_expiry_date?: string;  // ISO format
+
   // Other
   other_information?: string;
 }
@@ -151,6 +161,44 @@ export interface StaffDocumentReferences {
   eid?: {
     path: string;
     filename: string;
+  };
+  // DMCC Job Offer Letter (employer uploads)
+  job_offer_letter?: {
+    path: string;
+    filename: string;
+  };
+  // Visa document (based on employer's visa category selection)
+  visa_document?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    visa_category?: string;
+  };
+  // Emirates ID (front + back, employee uploads)
+  eid_front?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    extracted_data?: Record<string, unknown>;
+  };
+  eid_back?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    extracted_data?: Record<string, unknown>;
+  };
+  // Pakistani National ID (front + back, for Pakistani nationals)
+  pakistan_id_front?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    extracted_data?: Record<string, unknown>;
+  };
+  pakistan_id_back?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    extracted_data?: Record<string, unknown>;
   };
   degree_attested?: {
     path: string;

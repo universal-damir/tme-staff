@@ -38,6 +38,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
+  CreditCard,
+  FileText,
 } from 'lucide-react';
 
 // Sort lists alphabetically (with "Other" at the end)
@@ -57,11 +59,21 @@ const STEP_LABELS = [
   'ID Photo',
   'Passport OUTSIDE',
   'Passport INSIDE',
+  'Identity & Visa Documents',
   'Family Details',
   'Address & Contact',
   'Education & More',
   'Review & Sign',
 ];
+
+// Visa category labels for display
+const VISA_CATEGORY_LABELS: Record<string, string> = {
+  tourist_visa: 'Tourist Visa',
+  visa_on_arrival: 'Visa on Arrival',
+  employment_visa: 'Employment Visa',
+  immigration_cancellation: 'Immigration Cancellation document',
+  other_na: 'visa or immigration document',
+};
 
 interface FormSectionProps {
   title: string;
@@ -299,6 +311,54 @@ export function EmployeeForm({
   React.useEffect(() => { transcriptDocRef.current = transcriptDoc; }, [transcriptDoc]);
   React.useEffect(() => { educationAdditionalDocRef.current = educationAdditionalDoc; }, [educationAdditionalDoc]);
 
+  // Emirates ID state (optional — previously held EID)
+  const [hasPreviousEid, setHasPreviousEid] = useState(
+    !!(submission.employee_data?.has_previous_eid) || !!(submission.documents?.eid_front)
+  );
+  const [eidFrontDoc, setEidFrontDoc] = useState(submission.documents?.eid_front);
+  const [eidBackDoc, setEidBackDoc] = useState(submission.documents?.eid_back);
+  const [eidFrontUI, setEidFrontUI] = useState({
+    preview: submission.documents?.eid_front?.path ? getDocumentUrl(submission.documents.eid_front.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const [eidBackUI, setEidBackUI] = useState({
+    preview: submission.documents?.eid_back?.path ? getDocumentUrl(submission.documents.eid_back.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const eidFrontDocRef = React.useRef(eidFrontDoc);
+  const eidBackDocRef = React.useRef(eidBackDoc);
+  React.useEffect(() => { eidFrontDocRef.current = eidFrontDoc; }, [eidFrontDoc]);
+  React.useEffect(() => { eidBackDocRef.current = eidBackDoc; }, [eidBackDoc]);
+
+  // Pakistani National ID state (conditional on Pakistani nationality)
+  const [pakistanIdFrontDoc, setPakistanIdFrontDoc] = useState(submission.documents?.pakistan_id_front);
+  const [pakistanIdBackDoc, setPakistanIdBackDoc] = useState(submission.documents?.pakistan_id_back);
+  const [pakistanIdFrontUI, setPakistanIdFrontUI] = useState({
+    preview: submission.documents?.pakistan_id_front?.path ? getDocumentUrl(submission.documents.pakistan_id_front.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const [pakistanIdBackUI, setPakistanIdBackUI] = useState({
+    preview: submission.documents?.pakistan_id_back?.path ? getDocumentUrl(submission.documents.pakistan_id_back.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const pakistanIdFrontDocRef = React.useRef(pakistanIdFrontDoc);
+  const pakistanIdBackDocRef = React.useRef(pakistanIdBackDoc);
+  React.useEffect(() => { pakistanIdFrontDocRef.current = pakistanIdFrontDoc; }, [pakistanIdFrontDoc]);
+  React.useEffect(() => { pakistanIdBackDocRef.current = pakistanIdBackDoc; }, [pakistanIdBackDoc]);
+
+  // Visa document state (conditional on employer's visa category)
+  const [visaDoc, setVisaDoc] = useState(submission.documents?.visa_document);
+  const [visaDocUI, setVisaDocUI] = useState({
+    preview: null as string | null, validating: false, error: null as string | null, file: null as File | null,
+  });
+  const visaDocRef = React.useRef(visaDoc);
+  React.useEffect(() => { visaDocRef.current = visaDoc; }, [visaDoc]);
+
+  // Read employer's visa status answers
+  const employerVisaInUAE = submission.employer_data?.applicant_in_uae || false;
+  const employerVisaCategory = submission.employer_data?.visa_category;
+  const visaDocumentRequired = employerVisaInUAE && employerVisaCategory && employerVisaCategory !== 'visa_on_arrival';
+
   // Passport upload UI state (preview, validating, error — separate from persisted data)
   const initCover = submission.documents?.passportPages?.cover;
   const initInside = submission.documents?.passportPages?.insidePages;
@@ -329,6 +389,7 @@ export function EmployeeForm({
   // Section refs for auto-scrolling
   const passportCoverRef = useRef<HTMLDivElement>(null);
   const passportInsideRef = useRef<HTMLDivElement>(null);
+  const identityDocsRef = useRef<HTMLDivElement>(null);
   const familyRef = useRef<HTMLDivElement>(null);
   const contactRef = useRef<HTMLDivElement>(null);
   const educationRef = useRef<HTMLDivElement>(null);
@@ -376,6 +437,10 @@ export function EmployeeForm({
     register('date_of_birth');
     register('passport_issue_date');
     register('passport_expiry');
+    register('has_previous_eid');
+    register('eid_number');
+    register('eid_issue_date');
+    register('eid_expiry_date');
   }, [register]);
 
   const title = watch('title');
@@ -477,6 +542,7 @@ export function EmployeeForm({
   const isInsidePagesUploaded = !!(passportPages.insidePages?.validated);
   const isAdditionalPageUploaded = !!(passportPages.additionalPage?.validated);
   const isIndianNationality = nationality === 'Indian' || nationality === 'India';
+  const isPakistaniNationality = nationality === 'Pakistani' || nationality === 'Pakistan';
   const requiresAdditionalPage = isIndianNationality && isInsidePagesUploaded && passportDataReady;
   const isPersonalComplete = !!(firstName && lastName && nationality);
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
@@ -488,17 +554,22 @@ export function EmployeeForm({
     languagesSpoken.length > 0
   );
 
+  // Step 4 (Identity & Visa Documents) completion check
+  const isVisaDocUploaded = !!visaDoc;
+  const isStep4Complete = !visaDocumentRequired || isVisaDocUploaded;
+
   // Compute the highest unlocked step (1-indexed, 8 steps total)
   const computeCurrentStep = useCallback(() => {
     if (!isPhotoUploaded) return 1;
     if (!isCoverUploaded) return 2;
     if (!isInsidePagesUploaded || !passportDataReady || !isPersonalComplete) return 3;
     if (requiresAdditionalPage && !isAdditionalPageUploaded) return 3;
-    if (!isFamilyComplete) return 4;
-    if (!isContactComplete) return 5;
-    if (!isEducationComplete) return 6;
-    return 7;
-  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, isAdditionalPageUploaded, requiresAdditionalPage, passportDataReady, isPersonalComplete, isFamilyComplete, isContactComplete, isEducationComplete]);
+    if (!isStep4Complete) return 4;
+    if (!isFamilyComplete) return 5;
+    if (!isContactComplete) return 6;
+    if (!isEducationComplete) return 7;
+    return 8;
+  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, isAdditionalPageUploaded, requiresAdditionalPage, passportDataReady, isPersonalComplete, isStep4Complete, isFamilyComplete, isContactComplete, isEducationComplete]);
 
   const currentStep = computeCurrentStep();
   const totalSteps = STEP_LABELS.length;
@@ -579,13 +650,20 @@ export function EmployeeForm({
     await onSubmit(data, signatureToUse);
   };
 
-  // Helper to build full document references including education docs
+  // Helper to build full document references including education docs + new identity docs
+  // IMPORTANT: spread existing submission.documents first to preserve employer-uploaded docs (e.g. job_offer_letter)
   const buildDocRefs = (overrides?: { photo?: typeof photoDoc; passportPages?: typeof passportPages }) => ({
+    ...submission.documents,
     photo: overrides?.photo ?? photoDocRef.current,
     passportPages: overrides?.passportPages ?? passportPagesRef.current,
     degree_attested: degreeDocRef.current,
     transcript_of_records: transcriptDocRef.current,
     education_additional: educationAdditionalDocRef.current,
+    eid_front: eidFrontDocRef.current,
+    eid_back: eidBackDocRef.current,
+    pakistan_id_front: pakistanIdFrontDocRef.current,
+    pakistan_id_back: pakistanIdBackDocRef.current,
+    visa_document: visaDocRef.current,
   });
 
   const handlePhotoUpload = async (file: File) => {
@@ -864,11 +942,11 @@ export function EmployeeForm({
         currentStep={currentStep}
         viewingStep={viewingStep}
         totalSteps={totalSteps}
-        onStepClick={(step) => { setViewingStep(step); if (step === 7) { window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); } }}
+        onStepClick={(step) => { setViewingStep(step); if (step === 8) { window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); } }}
       />
 
       {/* Step 1: Photo Upload */}
-      <RevealSection show={viewingStep === 1 || viewingStep === 7}>
+      <RevealSection show={viewingStep === 1 || viewingStep === 8}>
         <FormSection
           title="ID Photo"
           icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -894,7 +972,7 @@ export function EmployeeForm({
             }}
             error={photoError || undefined}
           />
-          {isPhotoUploaded && viewingStep === 7 && (
+          {isPhotoUploaded && viewingStep === 8 && (
             <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
               <CheckCircle className="w-4 h-4" />
               ID Photo uploaded.
@@ -907,7 +985,7 @@ export function EmployeeForm({
       </RevealSection>
 
       {/* Renewal: Existing Passport Confirmation (shown before passport upload steps) */}
-      {isRenewal && hasExistingPassport && (viewingStep === 2 || viewingStep === 7) && !passportChanged && (
+      {isRenewal && hasExistingPassport && (viewingStep === 2 || viewingStep === 8) && !passportChanged && (
         <div className="bg-white rounded-xl p-6 shadow-sm mb-6">
           <div className="flex items-center gap-3 mb-4">
             <Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />
@@ -991,7 +1069,7 @@ export function EmployeeForm({
               <button
                 type="button"
                 onClick={() => {
-                  // Skip passport upload steps, go to step 4 (Family Details)
+                  // Skip passport upload steps, go to step 4 (Identity & Visa) or 5 (Family)
                   setViewingStep(4);
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white text-sm"
@@ -1007,8 +1085,8 @@ export function EmployeeForm({
 
       {/* Step 2: Passport Cover */}
       <RevealSection
-        show={(viewingStep === 2 || viewingStep === 7) && (!isRenewal || !hasExistingPassport || passportChanged)}
-        onReveal={viewingStep !== 7 ? () => scrollToRef(passportCoverRef) : undefined}
+        show={(viewingStep === 2 || viewingStep === 8) && (!isRenewal || !hasExistingPassport || passportChanged)}
+        onReveal={viewingStep !== 8 ? () => scrollToRef(passportCoverRef) : undefined}
       >
         <div ref={passportCoverRef}>
           <FormSection
@@ -1056,8 +1134,8 @@ export function EmployeeForm({
 
       {/* Step 3: Inside Pages + Personal Details */}
       <RevealSection
-        show={(viewingStep === 3 || viewingStep === 7) && (!isRenewal || !hasExistingPassport || passportChanged)}
-        onReveal={viewingStep !== 7 ? () => scrollToRef(passportInsideRef) : undefined}
+        show={(viewingStep === 3 || viewingStep === 8) && (!isRenewal || !hasExistingPassport || passportChanged)}
+        onReveal={viewingStep !== 8 ? () => scrollToRef(passportInsideRef) : undefined}
       >
         <div ref={passportInsideRef} className="space-y-6">
           <FormSection
@@ -1317,6 +1395,197 @@ export function EmployeeForm({
               </div>
             </FormSection>
           )}
+          {/* Pakistani National ID — conditional on Pakistani nationality */}
+          {isPakistaniNationality && isInsidePagesUploaded && passportDataReady && (
+            <FormSection
+              title="Pakistani National ID (CNIC/NICOP)"
+              icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            >
+              <div className="space-y-4">
+                <div
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: '#EBF4FF' }}
+                >
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Pakistani nationals are required to provide a copy of their National ID Card (CNIC/NICOP) with chip</p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Please upload the front and back of your Pakistan National Identity Card. Your details will be automatically extracted.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Sample images above upload areas */}
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="text-center">
+                    <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                    <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 object-contain" />
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                    <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 object-contain" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
+                  {/* Front */}
+                  <div className="flex flex-col">
+                    <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                      <UploadSlot
+                        label=""
+                        description="Front of Pakistan ID"
+                        expectedType="INSIDE_PAGES"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        maxSizeMB={10}
+                        file={pakistanIdFrontUI.file}
+                        preview={pakistanIdFrontUI.preview || undefined}
+                        validated={!!pakistanIdFrontDoc?.validated}
+                        validating={pakistanIdFrontUI.validating}
+                        error={pakistanIdFrontUI.error || undefined}
+                        onUpload={async (file) => {
+                          const reader = new FileReader();
+                          const preview = await new Promise<string>((resolve) => {
+                            reader.onload = (e) => resolve(e.target?.result as string);
+                            reader.readAsDataURL(file);
+                          });
+                          setPakistanIdFrontUI({ preview, validating: true, error: null, file });
+
+                          // Validate + extract via AI first
+                          try {
+                            const compressedImage = await compressImageForAI(preview);
+                            const response = await fetch('/api/extract-pakistan-id', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ image: compressedImage, side: 'front' }),
+                            });
+                            if (response.ok) {
+                              const extractResult = await response.json();
+                              if (!extractResult.success) {
+                                setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
+                                return false;
+                              }
+                              if (extractResult.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
+                            } else {
+                              setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+                              return false;
+                            }
+                          } catch (err) {
+                            console.error('Pakistan ID front validation error:', err);
+                            setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+                            return false;
+                          }
+
+                          const result = await uploadDocument(submission.id, 'pakistan_id_front', file);
+                          if (!result) {
+                            setPakistanIdFrontUI({ preview, validating: false, error: 'Failed to upload', file });
+                            return false;
+                          }
+
+                          const newDoc = { ...result, validated: true };
+                          setPakistanIdFrontDoc(newDoc);
+                          pakistanIdFrontDocRef.current = newDoc;
+                          setPakistanIdFrontUI({ preview, validating: false, error: null, file });
+                          await updateDocumentReferences(submission.id, buildDocRefs());
+                          return true;
+                        }}
+                        onRemove={async () => {
+                          setPakistanIdFrontUI({ preview: null, validating: false, error: null, file: null });
+                          setPakistanIdFrontDoc(undefined);
+                          pakistanIdFrontDocRef.current = undefined;
+                          await updateDocumentReferences(submission.id, buildDocRefs());
+                        }}
+                      />
+                  </div>
+
+                  {/* Back */}
+                  <div className="flex flex-col">
+                    <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                      <UploadSlot
+                        label=""
+                        description="Back of Pakistan ID"
+                        expectedType="INSIDE_PAGES"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        maxSizeMB={10}
+                        file={pakistanIdBackUI.file}
+                        preview={pakistanIdBackUI.preview || undefined}
+                        validated={!!pakistanIdBackDoc?.validated}
+                        validating={pakistanIdBackUI.validating}
+                        error={pakistanIdBackUI.error || undefined}
+                        onUpload={async (file) => {
+                          const reader = new FileReader();
+                          const preview = await new Promise<string>((resolve) => {
+                            reader.onload = (e) => resolve(e.target?.result as string);
+                            reader.readAsDataURL(file);
+                          });
+                          setPakistanIdBackUI({ preview, validating: true, error: null, file });
+
+                          // Validate + extract via AI first
+                          try {
+                            const compressedImage = await compressImageForAI(preview);
+                            const response = await fetch('/api/extract-pakistan-id', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ image: compressedImage, side: 'back' }),
+                            });
+                            if (response.ok) {
+                              const extractResult = await response.json();
+                              if (!extractResult.success) {
+                                setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
+                                return false;
+                              }
+                              // Extract address from back and auto-fill home address
+                              if (extractResult.data?.address) {
+                                if (!getValues('home_street_address')) setValue('home_street_address', String(extractResult.data.address));
+                                setValue('home_country', 'Pakistan');
+                                if (extractResult.data.address_city && !getValues('home_city')) {
+                                  setValue('home_city', String(extractResult.data.address_city));
+                                }
+                                setTimeout(() => autoSaveEmployeeData(submission.id, getValues()), 100);
+                              }
+                            }
+                          } catch (err) {
+                            console.error('Pakistan ID back validation error:', err);
+                          }
+
+                          const result = await uploadDocument(submission.id, 'pakistan_id_back', file);
+                          if (!result) {
+                            setPakistanIdBackUI({ preview, validating: false, error: 'Failed to upload', file });
+                            return false;
+                          }
+
+                          const newDoc = { ...result, validated: true };
+                          setPakistanIdBackDoc(newDoc);
+                          pakistanIdBackDocRef.current = newDoc;
+                          setPakistanIdBackUI({ preview, validating: false, error: null, file });
+                          await updateDocumentReferences(submission.id, buildDocRefs());
+                          return true;
+                        }}
+                        onRemove={async () => {
+                          setPakistanIdBackUI({ preview: null, validating: false, error: null, file: null });
+                          setPakistanIdBackDoc(undefined);
+                          pakistanIdBackDocRef.current = undefined;
+                          await updateDocumentReferences(submission.id, buildDocRefs());
+                        }}
+                      />
+                  </div>
+                </div>
+
+                {pakistanIdFrontDoc?.validated && pakistanIdBackDoc?.validated && (
+                  <div className="flex items-center gap-2 text-green-600 text-sm">
+                    <CheckCircle className="w-4 h-4" />
+                    Pakistan National ID uploaded (front and back).
+                  </div>
+                )}
+              </div>
+            </FormSection>
+          )}
+
           {viewingStep === 3 && (
             <StepNavButtons
               enabled={isInsidePagesUploaded && passportDataReady && isPersonalComplete && (!requiresAdditionalPage || isAdditionalPageUploaded)}
@@ -1327,16 +1596,386 @@ export function EmployeeForm({
         </div>
       </RevealSection>
 
-      {/* Step 4: Family Details */}
+      {/* Step 4: Identity & Visa Documents (NEW) */}
       <RevealSection
-        show={viewingStep === 4 || viewingStep === 7}
-        onReveal={viewingStep !== 7 ? () => scrollToRef(familyRef) : undefined}
+        show={viewingStep === 4 || viewingStep === 8}
+        onReveal={viewingStep !== 8 ? () => scrollToRef(identityDocsRef) : undefined}
+      >
+        <div ref={identityDocsRef} className="space-y-6">
+          {/* Emirates ID subsection (optional) */}
+          <FormSection
+            title="Previously Held Emirates ID"
+            icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            stepNumber={4}
+          >
+            <div className="space-y-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hasPreviousEid}
+                  onChange={(e) => {
+                    setHasPreviousEid(e.target.checked);
+                    setValue('has_previous_eid', e.target.checked);
+                    if (!e.target.checked) {
+                      setValue('eid_number', undefined);
+                      setValue('eid_issue_date', undefined);
+                      setValue('eid_expiry_date', undefined);
+                    }
+                  }}
+                  className="w-4 h-4 rounded border-gray-300"
+                  style={{ accentColor: TME_COLORS.primary }}
+                />
+                <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                  Do you have a copy of your previously held Emirates ID?
+                </span>
+              </label>
+
+              {hasPreviousEid && (
+                <div className="space-y-4 pl-6 border-l-2 border-gray-200">
+                  <div
+                    className="flex items-start gap-3 p-4 rounded-lg"
+                    style={{ backgroundColor: '#EBF4FF' }}
+                  >
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <p className="font-medium">Upload the front and back of your previously held Emirates ID</p>
+                      <p className="mt-1 text-xs text-gray-600">
+                        This can be an expired ID. We will extract the ID number and dates automatically. It does not matter if it is expired.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Sample images — shown together above upload areas */}
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="text-center">
+                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                      <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/samples/eid-front-example.png" alt="Example Emirates ID front" className="h-32 sm:h-40 object-contain" />
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                      <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/samples/eid-back-example.png" alt="Example Emirates ID back" className="h-32 sm:h-40 object-contain" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
+                    {/* EID Front */}
+                    <div className="flex flex-col">
+                      <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                        <UploadSlot
+                          label=""
+                          description="Front of Emirates ID"
+                          expectedType="INSIDE_PAGES"
+                          accept="image/jpeg,image/png,image/webp,application/pdf"
+                          maxSizeMB={10}
+                          file={eidFrontUI.file}
+                          preview={eidFrontUI.preview || undefined}
+                          validated={!!eidFrontDoc?.validated}
+                          validating={eidFrontUI.validating}
+                          error={eidFrontUI.error || undefined}
+                          onUpload={async (file) => {
+                            const reader = new FileReader();
+                            const preview = await new Promise<string>((resolve) => {
+                              reader.onload = (e) => resolve(e.target?.result as string);
+                              reader.readAsDataURL(file);
+                            });
+                            setEidFrontUI({ preview, validating: true, error: null, file });
+
+                            // Validate + extract via AI first (before uploading)
+                            let extractedData: Record<string, unknown> | null = null;
+                            try {
+                              const compressedImage = await compressImageForAI(preview);
+                              const response = await fetch('/api/extract-eid', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ image: compressedImage, side: 'front' }),
+                              });
+                              if (response.ok) {
+                                const extractResult = await response.json();
+                                if (extractResult.success && extractResult.data) {
+                                  // Validate: must have at least an EID number to be a real Emirates ID
+                                  if (!extractResult.data.emirates_id_number) {
+                                    setEidFrontUI({ preview, validating: false, error: 'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID.', file });
+                                    return false;
+                                  }
+                                  extractedData = extractResult.data;
+                                } else {
+                                  setEidFrontUI({ preview, validating: false, error: 'Could not read this document. Please upload a clear photo of the front of your Emirates ID card.', file });
+                                  return false;
+                                }
+                              } else {
+                                setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+                                return false;
+                              }
+                            } catch (err) {
+                              console.error('EID front validation error:', err);
+                              setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+                              return false;
+                            }
+
+                            // Document is valid — now upload
+                            const result = await uploadDocument(submission.id, 'eid_front', file);
+                            if (!result) {
+                              setEidFrontUI({ preview, validating: false, error: 'Failed to upload', file });
+                              return false;
+                            }
+
+                            setEidFrontUI({ preview, validating: false, error: null, file });
+                            const newDoc = { ...result, validated: true, extracted_data: extractedData || undefined };
+                            setEidFrontDoc(newDoc);
+                            eidFrontDocRef.current = newDoc;
+
+                            // Auto-fill form fields from extracted data
+                            if (extractedData) {
+                              const d = extractedData;
+                              if (d.emirates_id_number) setValue('eid_number', d.emirates_id_number as string);
+                              if (d.issue_date) setValue('eid_issue_date', d.issue_date as string);
+                              if (d.expiry_date) setValue('eid_expiry_date', d.expiry_date as string);
+                              setTimeout(() => autoSaveEmployeeData(submission.id, getValues()), 100);
+                            }
+
+                            await updateDocumentReferences(submission.id, buildDocRefs());
+                            return true;
+                          }}
+                          onRemove={async () => {
+                            setEidFrontUI({ preview: null, validating: false, error: null, file: null });
+                            setEidFrontDoc(undefined);
+                            eidFrontDocRef.current = undefined;
+                            setValue('eid_number', undefined);
+                            setValue('eid_issue_date', undefined);
+                            setValue('eid_expiry_date', undefined);
+                            await updateDocumentReferences(submission.id, buildDocRefs());
+                          }}
+                        />
+                    </div>
+
+                    {/* EID Back */}
+                    <div className="flex flex-col">
+                      <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                        <UploadSlot
+                          label=""
+                          description="Back of Emirates ID"
+                          expectedType="INSIDE_PAGES"
+                          accept="image/jpeg,image/png,image/webp,application/pdf"
+                          maxSizeMB={10}
+                          file={eidBackUI.file}
+                          preview={eidBackUI.preview || undefined}
+                          validated={!!eidBackDoc?.validated}
+                          validating={eidBackUI.validating}
+                          error={eidBackUI.error || undefined}
+                          onUpload={async (file) => {
+                            const reader = new FileReader();
+                            const preview = await new Promise<string>((resolve) => {
+                              reader.onload = (e) => resolve(e.target?.result as string);
+                              reader.readAsDataURL(file);
+                            });
+                            setEidBackUI({ preview, validating: true, error: null, file });
+
+                            // Validate via AI first
+                            try {
+                              const compressedImage = await compressImageForAI(preview);
+                              const response = await fetch('/api/extract-eid', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ image: compressedImage, side: 'back' }),
+                              });
+                              if (response.ok) {
+                                const extractResult = await response.json();
+                                if (!extractResult.success) {
+                                  setEidBackUI({ preview, validating: false, error: 'This does not appear to be the back of an Emirates ID card. Please upload a clear photo of the back.', file });
+                                  return false;
+                                }
+                              }
+                            } catch (err) {
+                              console.error('EID back validation error:', err);
+                              // Non-blocking — allow upload if validation service is unavailable
+                            }
+
+                            const result = await uploadDocument(submission.id, 'eid_back', file);
+                            if (!result) {
+                              setEidBackUI({ preview, validating: false, error: 'Failed to upload', file });
+                              return false;
+                            }
+
+                            setEidBackUI({ preview, validating: false, error: null, file });
+                            const newDoc = { ...result, validated: true };
+                            setEidBackDoc(newDoc);
+                            eidBackDocRef.current = newDoc;
+                            await updateDocumentReferences(submission.id, buildDocRefs());
+                            return true;
+                          }}
+                          onRemove={async () => {
+                            setEidBackUI({ preview: null, validating: false, error: null, file: null });
+                            setEidBackDoc(undefined);
+                            eidBackDocRef.current = undefined;
+                            await updateDocumentReferences(submission.id, buildDocRefs());
+                          }}
+                        />
+                    </div>
+                  </div>
+
+                  {eidFrontDoc?.validated && eidBackDoc?.validated && (
+                    <div className="flex items-center gap-2 text-green-600 text-sm">
+                      <CheckCircle className="w-4 h-4" />
+                      Emirates ID uploaded (front and back).
+                    </div>
+                  )}
+
+                  {/* Show extracted EID data */}
+                  {watch('eid_number') && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-emerald-900">
+                        <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          EID extracted
+                        </span>
+                        <span>{watch('eid_number')}</span>
+                        {watch('eid_issue_date') && <span>Issued: {watch('eid_issue_date')}</span>}
+                        {watch('eid_expiry_date') && <span>Expires: {watch('eid_expiry_date')}</span>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </FormSection>
+
+          {/* Visa Document Upload (conditional on employer's visa category) */}
+          {visaDocumentRequired && (
+            <FormSection
+              title="Visa Document"
+              icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            >
+              <div className="space-y-4">
+                <div
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: '#FEF3C7' }}
+                >
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
+                  <div className="text-sm text-amber-800">
+                    <p className="font-medium">
+                      Your employer has indicated that you are currently in the UAE on a {VISA_CATEGORY_LABELS[employerVisaCategory!] || 'visa'}.
+                    </p>
+                    <p className="mt-1">
+                      Please upload a copy of your {VISA_CATEGORY_LABELS[employerVisaCategory!] || 'visa document'}. This is required to proceed.
+                    </p>
+                  </div>
+                </div>
+
+                <FileUploadSlot
+                  label={`Upload ${VISA_CATEGORY_LABELS[employerVisaCategory!] || 'Visa Document'}`}
+                  description="PDF or image of your visa document"
+                  uploaded={!!visaDoc}
+                  filename={visaDoc?.filename}
+                  onUpload={async (file) => {
+                    setVisaDocUI(prev => ({ ...prev, validating: true, error: null }));
+
+                    const result = await uploadDocument(submission.id, 'visa_document', file);
+                    if (!result) {
+                      setVisaDocUI(prev => ({ ...prev, validating: false, error: 'Failed to upload' }));
+                      return null;
+                    }
+
+                    // Validate the visa document with AI
+                    try {
+                      const reader = new FileReader();
+                      const preview = await new Promise<string>((resolve) => {
+                        reader.onload = (e) => resolve(e.target?.result as string);
+                        reader.readAsDataURL(file);
+                      });
+                      const compressedImage = await compressImageForAI(preview);
+                      const response = await fetch('/api/validate-visa-document', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image: compressedImage, expectedCategory: employerVisaCategory }),
+                      });
+                      if (response.ok) {
+                        const validationResult = await response.json();
+                        if (!validationResult.valid) {
+                          setVisaDocUI(prev => ({ ...prev, validating: false, error: validationResult.errorMessage || 'Document does not appear to match the expected type' }));
+                          // Still save the upload — just show the warning
+                        }
+                      }
+                    } catch (err) {
+                      console.error('Visa validation error:', err);
+                    }
+
+                    const docWithMeta = { ...result, validated: true, visa_category: employerVisaCategory };
+                    setVisaDoc(docWithMeta);
+                    visaDocRef.current = docWithMeta;
+                    setVisaDocUI(prev => ({ ...prev, validating: false }));
+                    await updateDocumentReferences(submission.id, buildDocRefs());
+                    return result;
+                  }}
+                  onRemove={async () => {
+                    setVisaDoc(undefined);
+                    visaDocRef.current = undefined;
+                    setVisaDocUI({ preview: null, validating: false, error: null, file: null });
+                    await updateDocumentReferences(submission.id, buildDocRefs());
+                  }}
+                />
+
+                {visaDocUI.validating && (
+                  <div className="flex items-center gap-2 text-sm" style={{ color: TME_COLORS.primary }}>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent" />
+                    Verifying document...
+                  </div>
+                )}
+
+                {visaDocUI.error && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                    <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
+                    <p className="text-xs text-amber-800">{visaDocUI.error}</p>
+                  </div>
+                )}
+              </div>
+            </FormSection>
+          )}
+
+          {/* No visa document needed message */}
+          {employerVisaInUAE && employerVisaCategory === 'visa_on_arrival' && (
+            <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
+              <div className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-gray-400" />
+                Your employer indicated you entered the UAE on a Visa on Arrival. No visa document upload is needed.
+              </div>
+            </div>
+          )}
+
+          {!employerVisaInUAE && !hasPreviousEid && (
+            <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
+              <div className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-gray-400" />
+                No additional identity or visa documents are required. You can continue to the next step.
+              </div>
+            </div>
+          )}
+
+          {viewingStep === 4 && (
+            <StepNavButtons
+              enabled={isStep4Complete}
+              onContinue={() => setViewingStep(5)}
+              onBack={() => setViewingStep(3)}
+            />
+          )}
+        </div>
+      </RevealSection>
+
+      {/* Step 5: Family Details */}
+      <RevealSection
+        show={viewingStep === 5 || viewingStep === 8}
+        onReveal={viewingStep !== 8 ? () => scrollToRef(familyRef) : undefined}
       >
         <div ref={familyRef}>
           <FormSection
             title="Family Details"
             icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={4}
+            stepNumber={5}
           >
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1385,24 +2024,24 @@ export function EmployeeForm({
                 />
               )}
             </div>
-            {viewingStep === 4 && (
-              <StepNavButtons enabled={isFamilyComplete} onContinue={() => setViewingStep(5)} onBack={() => setViewingStep(3)} />
+            {viewingStep === 5 && (
+              <StepNavButtons enabled={isFamilyComplete} onContinue={() => setViewingStep(6)} onBack={() => setViewingStep(4)} />
             )}
           </FormSection>
         </div>
       </RevealSection>
 
-      {/* Step 5: Address & Contact */}
+      {/* Step 6: Address & Contact */}
       <RevealSection
-        show={viewingStep === 5 || viewingStep === 7}
-        onReveal={viewingStep !== 7 ? () => scrollToRef(contactRef) : undefined}
+        show={viewingStep === 6 || viewingStep === 8}
+        onReveal={viewingStep !== 8 ? () => scrollToRef(contactRef) : undefined}
       >
         <div ref={contactRef} className="space-y-6">
           {/* Home Country Address */}
           <FormSection
             title="Home Country Address"
             icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={5}
+            stepNumber={6}
           >
             <div className="space-y-4">
               <Input
@@ -1556,23 +2195,23 @@ export function EmployeeForm({
               </div>
             </div>
           </FormSection>
-          {viewingStep === 5 && (
-            <StepNavButtons enabled={isContactComplete} onContinue={() => setViewingStep(6)} onBack={() => setViewingStep(4)} />
+          {viewingStep === 6 && (
+            <StepNavButtons enabled={isContactComplete} onContinue={() => setViewingStep(7)} onBack={() => setViewingStep(5)} />
           )}
         </div>
       </RevealSection>
 
-      {/* Step 6: Education & More */}
+      {/* Step 7: Education & More */}
       <RevealSection
-        show={viewingStep === 6 || viewingStep === 7}
-        onReveal={viewingStep !== 7 ? () => scrollToRef(educationRef) : undefined}
+        show={viewingStep === 7 || viewingStep === 8}
+        onReveal={viewingStep !== 8 ? () => scrollToRef(educationRef) : undefined}
       >
         <div ref={educationRef} className="space-y-6">
           {/* Education & Languages */}
           <FormSection
             title="Education & Languages"
             icon={<GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={6}
+            stepNumber={7}
           >
             <div className="space-y-4">
               <CustomDropdown
@@ -1868,15 +2507,15 @@ export function EmployeeForm({
               {...register('other_information')}
             />
           </div>
-          {viewingStep === 6 && (
-            <StepNavButtons enabled={isEducationComplete} onContinue={() => { setViewingStep(7); window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); }} onBack={() => setViewingStep(5)} label="Review & Sign" />
+          {viewingStep === 7 && (
+            <StepNavButtons enabled={isEducationComplete} onContinue={() => { setViewingStep(8); window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); }} onBack={() => setViewingStep(6)} label="Review & Sign" />
           )}
         </div>
       </RevealSection>
 
-      {/* Step 7: Review & Sign */}
+      {/* Step 8: Review & Sign */}
       <RevealSection
-        show={viewingStep === 7}
+        show={viewingStep === 8}
         onReveal={() => scrollToRef(signatureRef)}
       >
         <div ref={signatureRef}>
@@ -1884,7 +2523,7 @@ export function EmployeeForm({
             <FormSection
               title="Review & Sign"
               icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-              stepNumber={7}
+              stepNumber={8}
             >
               <div className="space-y-4">
                 <p className="text-sm text-gray-600">

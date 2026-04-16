@@ -32,7 +32,9 @@ export interface PassportExtractionResult {
 /**
  * Passport extraction prompt
  */
-const PASSPORT_EXTRACTION_PROMPT = `Extract information from this passport image.
+const PASSPORT_EXTRACTION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their passport with explicit consent for employment visa processing as required by UAE labor law. Extract the requested information.
+
+Extract information from this passport image.
 
 Look for and extract:
 1. First name (given name only - the FIRST given name, not middle names)

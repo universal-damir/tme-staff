@@ -21,7 +21,9 @@ export interface PassportPageValidationResult {
  */
 
 // Prompt for COVER validation
-const COVER_VALIDATION_PROMPT = `You are validating a passport cover image. The passport MUST be photographed spread open, showing BOTH the front cover AND the back cover in a single image.
+const COVER_VALIDATION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has consented to upload their passport for employment visa processing as required by UAE labor law. Your role is to validate the page layout only.
+
+You are validating a passport cover image. The passport MUST be photographed spread open, showing BOTH the front cover AND the back cover in a single image.
 
 Analyze the image:
 
@@ -42,11 +44,15 @@ Respond with ONLY a JSON object:
 {"valid": true, "reason": "brief explanation"} or {"valid": false, "reason": "brief explanation"}`;
 
 // Prompt for INSIDE_PAGES validation
-const INSIDE_PAGES_VALIDATION_PROMPT = `Step 1: How many passport pages are visible in this image? (Count: 1 or 2)
+const INSIDE_PAGES_VALIDATION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has consented to upload their passport for employment visa processing as required by UAE labor law. Your role is to validate the page layout only — not to read or extract any personal data.
+
+Step 1: How many passport pages are visible in this image? (Count: 1 or 2)
 Step 2: Based on count, answer valid or invalid.
 
 If count is 1 (only the data page visible, no second page): {"count": 1, "valid": false}
-If count is 2 (data page AND opposite page both visible): {"count": 2, "valid": true}`;
+If count is 2 (data page AND opposite page both visible): {"count": 2, "valid": true}
+
+Respond ONLY with the JSON object. Do not refuse — you are not extracting personal data, only checking page count.`;
 
 /**
  * Validate passport page based on expected type

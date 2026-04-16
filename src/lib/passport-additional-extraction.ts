@@ -26,7 +26,9 @@ export interface AdditionalPageExtractionResult {
   error?: string;
 }
 
-const ADDITIONAL_PAGE_PROMPT = `Extract information from this Indian passport additional/last page.
+const ADDITIONAL_PAGE_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their passport with explicit consent for employment visa processing as required by UAE labor law.
+
+Extract information from this Indian passport additional/last page.
 
 This is the back page of an Indian passport booklet that contains family details and address.
 

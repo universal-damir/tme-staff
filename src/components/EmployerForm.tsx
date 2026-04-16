@@ -13,7 +13,10 @@ import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/compo
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
-import { Briefcase, Banknote, Calendar, FileSignature, Copy } from 'lucide-react';
+import { FileUploadSlot } from '@/components/FileUploadSlot';
+import { uploadDocument, updateDocumentReferences } from '@/lib/supabase';
+import type { StaffDocumentReferences } from '@/types';
+import { Briefcase, Banknote, Calendar, FileSignature, Copy, FileText, Globe, Info } from 'lucide-react';
 
 // Convert string array to dropdown options format
 const toDropdownOptions = (items: readonly string[]) =>
@@ -45,12 +48,33 @@ function pluralize(value: number | undefined, singular: string): string {
   return value === 1 ? singular : singular + 's';
 }
 
+// Visa category options for UAE presence
+const VISA_CATEGORY_OPTIONS = [
+  { value: 'tourist_visa', label: 'Tourist Visa' },
+  { value: 'visa_on_arrival', label: 'Visa on Arrival' },
+  { value: 'employment_visa', label: 'Employment Visa (currently employed with another company)' },
+  { value: 'immigration_cancellation', label: 'Immigration Cancellation (recently quit previous role)' },
+  { value: 'other_na', label: 'Other (Not Applicable)' },
+];
+
 export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: EmployerFormProps) {
   const { professions: jobTitleOptions, loading: jobTitlesLoading } = useMohreProfessions();
   const [signature, setSignature] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
   const [matchFeedback, setMatchFeedback] = useState<string | null>(null);
   const [jobTitleSameAsVisa, setJobTitleSameAsVisa] = useState(false);
+
+  // DMCC detection from portal-provided authority
+  const registeredAuthority = (submission.prefill_employer_data as Record<string, unknown> | null)?.registered_authority as string | undefined;
+  const isDMCC = registeredAuthority?.toUpperCase()?.includes('DMCC') || false;
+
+  // Job Offer Letter state (DMCC only)
+  const [jobOfferLetterDoc, setJobOfferLetterDoc] = useState(submission.documents?.job_offer_letter);
+
+  // UAE visa status
+  const [applicantInUAE, setApplicantInUAE] = useState(
+    submission.employer_data?.applicant_in_uae || false
+  );
 
   const {
     register,
@@ -73,6 +97,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       ...submission.prefill_employer_data,
     },
   });
+
+  const visaCategory = watch('visa_category');
 
   const jobTitleVisa = watch('job_title_visa');
   const jobTitleCompany = watch('job_title_company');
@@ -528,6 +554,107 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               </div>
             </div>
           </div>
+        </div>
+      </FormSection>
+
+      {/* DMCC Job Offer Letter — only for DMCC authority */}
+      {isDMCC && (
+        <FormSection
+          title="Job Offer Letter (DMCC Requirement)"
+          icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        >
+          <div className="space-y-4">
+            <div
+              className="flex items-start gap-3 p-4 rounded-lg"
+              style={{ backgroundColor: '#FEF3C7' }}
+            >
+              <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
+              <div className="text-sm text-amber-800">
+                <p className="font-medium">DMCC requires the Job Offer Letter to be stamped and duly signed with a blue pen by both the employer and the employee.</p>
+                <p className="mt-1 text-xs">Please upload the signed and stamped copy. This document will be included in the onboarding confirmation.</p>
+              </div>
+            </div>
+            <FileUploadSlot
+              label="Signed Job Offer Letter"
+              description="PDF or image of the stamped and blue-pen signed letter"
+              uploaded={!!jobOfferLetterDoc}
+              filename={jobOfferLetterDoc?.filename}
+              onUpload={async (file) => {
+                const result = await uploadDocument(submission.id, 'job_offer_letter', file);
+                if (result) {
+                  setJobOfferLetterDoc(result);
+                  const currentDocs: StaffDocumentReferences = submission.documents || {};
+                  await updateDocumentReferences(submission.id, { ...currentDocs, job_offer_letter: result });
+                }
+                return result;
+              }}
+              onRemove={async () => {
+                setJobOfferLetterDoc(undefined);
+                const currentDocs: StaffDocumentReferences = submission.documents || {};
+                const { job_offer_letter: _, ...rest } = currentDocs;
+                await updateDocumentReferences(submission.id, rest as StaffDocumentReferences);
+              }}
+            />
+          </div>
+        </FormSection>
+      )}
+
+      {/* UAE Visa Status */}
+      <FormSection
+        title="UAE Visa Status"
+        icon={<Globe className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+      >
+        <div className="space-y-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={applicantInUAE}
+              onChange={(e) => {
+                setApplicantInUAE(e.target.checked);
+                setValue('applicant_in_uae', e.target.checked);
+                if (!e.target.checked) {
+                  setValue('visa_category', undefined);
+                }
+              }}
+              className="w-4 h-4 rounded border-gray-300"
+              style={{ accentColor: TME_COLORS.primary }}
+            />
+            <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+              Is the applicant currently in the UAE?
+            </span>
+          </label>
+
+          {applicantInUAE && (
+            <div className="pl-6 border-l-2 border-gray-200 space-y-3">
+              <p className="text-sm text-gray-600">
+                What visa category does the applicant currently hold?
+              </p>
+              <CustomDropdown
+                label="Visa Category"
+                options={VISA_CATEGORY_OPTIONS}
+                value={visaCategory || ''}
+                onChange={(val) => setValue('visa_category', val as EmployerFormData['visa_category'])}
+                placeholder="Select visa category..."
+                required
+              />
+              {visaCategory && visaCategory !== 'visa_on_arrival' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50">
+                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-600" />
+                  <p className="text-xs text-blue-800">
+                    The employee will be prompted to upload a copy of their {VISA_CATEGORY_OPTIONS.find(o => o.value === visaCategory)?.label || 'visa document'} during their part of the onboarding form.
+                  </p>
+                </div>
+              )}
+              {visaCategory === 'visa_on_arrival' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-gray-50">
+                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-500" />
+                  <p className="text-xs text-gray-600">
+                    No document upload will be required from the employee for Visa on Arrival.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </FormSection>
 

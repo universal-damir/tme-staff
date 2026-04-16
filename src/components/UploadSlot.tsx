@@ -15,6 +15,8 @@ interface UploadSlotProps {
   validating: boolean;
   error?: string;
   preview?: string;
+  accept?: string;
+  maxSizeMB?: number;
 }
 
 export function UploadSlot({
@@ -28,19 +30,21 @@ export function UploadSlot({
   validating,
   error,
   preview,
+  accept = 'image/jpeg,image/png,image/webp',
+  maxSizeMB = 5,
 }: UploadSlotProps) {
   void _expectedType;
   void _file;
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+  const MAX_FILE_SIZE = maxSizeMB * 1024 * 1024;
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       if (selectedFile.size > MAX_FILE_SIZE) {
-        alert('File too large. Maximum size is 5MB.');
+        alert(`File too large. Maximum size is ${maxSizeMB}MB.`);
         return;
       }
       await onUpload(selectedFile);
@@ -55,9 +59,10 @@ export function UploadSlot({
     e.preventDefault();
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.type.startsWith('image/')) {
+    const acceptedTypes = accept.split(',').map(t => t.trim());
+    if (droppedFile && (droppedFile.type.startsWith('image/') || acceptedTypes.includes(droppedFile.type))) {
       if (droppedFile.size > MAX_FILE_SIZE) {
-        alert('File too large. Maximum size is 5MB.');
+        alert(`File too large. Maximum size is ${maxSizeMB}MB.`);
         return;
       }
       await onUpload(droppedFile);
@@ -88,7 +93,7 @@ export function UploadSlot({
   };
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col h-full">
       {label && (
         <label
           className="block text-sm font-medium mb-2"
@@ -108,7 +113,7 @@ export function UploadSlot({
         <input
           ref={inputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept={accept}
           onChange={handleFileChange}
           className="hidden"
         />

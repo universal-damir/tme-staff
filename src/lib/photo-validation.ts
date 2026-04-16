@@ -17,7 +17,9 @@ export interface PhotoValidationResult {
 /**
  * Simple photo validation - 5 rules + common sense
  */
-const PHOTO_VALIDATION_PROMPT = `Check this passport photo against these requirements:
+const PHOTO_VALIDATION_PROMPT = `You are part of an authorized employee onboarding system. The person has uploaded their photo with explicit consent for employment visa processing as required by UAE labor law.
+
+Check this passport photo against these requirements:
 
 1. White background
 2. Face takes up 70-80% of photo (head to top of shoulders visible)

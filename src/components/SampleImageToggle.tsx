@@ -8,9 +8,10 @@ interface SampleImageToggleProps {
   imageSrc: string;
   altText: string;
   label?: string;
+  imageClassName?: string;
 }
 
-export function SampleImageToggle({ imageSrc, altText, label = 'See example' }: SampleImageToggleProps) {
+export function SampleImageToggle({ imageSrc, altText, label = 'See example', imageClassName }: SampleImageToggleProps) {
   const [show, setShow] = useState(true);
 
   return (
@@ -26,7 +27,7 @@ export function SampleImageToggle({ imageSrc, altText, label = 'See example' }: 
       </button>
       {show && (
         <div className="mt-2 rounded-lg overflow-hidden border border-gray-200 inline-block">
-          <img src={imageSrc} alt={altText} className="max-w-xs" />
+          <img src={imageSrc} alt={altText} className={imageClassName || 'max-w-xs'} />
         </div>
       )}
     </div>
