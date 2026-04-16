@@ -130,7 +130,7 @@ export function SalaryBreakdown({
   onChange,
   errors,
 }: SalaryBreakdownProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
   const [showInfo, setShowInfo] = useState(false);
 
   // Calculate sum and discrepancy
@@ -299,7 +299,7 @@ export function SalaryBreakdown({
             />
 
             <SalaryInput
-              label={`Accom. (${getPercentage(accommodation)})`}
+              label={`Accommodation (${getPercentage(accommodation)})`}
               value={accommodation}
               onChange={(val) =>
                 onChange({

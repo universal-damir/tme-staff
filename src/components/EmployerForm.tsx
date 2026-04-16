@@ -49,6 +49,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const { professions: jobTitleOptions, loading: jobTitlesLoading } = useMohreProfessions();
   const [signature, setSignature] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
+  const [matchFeedback, setMatchFeedback] = useState<string | null>(null);
   const [jobTitleSameAsVisa, setJobTitleSameAsVisa] = useState(false);
 
   const {
@@ -148,6 +149,23 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('payroll_salary_prepay_card', values.salary_prepay_card);
   };
 
+  const showMatchFeedback = (label: string) => {
+    setMatchFeedback(label);
+    setTimeout(() => setMatchFeedback(null), 1500);
+  };
+
+  const handleMatchPayrollToContract = () => {
+    setValue('salary_currency', payrollCurrency || 'AED');
+    setValue('salary_total', payrollTotal as number);
+    setValue('salary_basic', payrollBasic as number);
+    setValue('salary_accommodation', payrollAccommodation as number);
+    setValue('salary_transport', payrollTransport as number);
+    setValue('salary_food', payrollFood);
+    setValue('salary_other', payrollOther);
+    setValue('salary_prepay_card', payrollPrepayCard);
+    showMatchFeedback('contract');
+  };
+
   const handleMatchContractToPayroll = () => {
     setValue('payroll_salary_currency', salaryCurrency || 'AED');
     setValue('payroll_salary_total', salaryTotal);
@@ -157,6 +175,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('payroll_salary_food', salaryFood);
     setValue('payroll_salary_other', salaryOther);
     setValue('payroll_salary_prepay_card', salaryPrepayCard);
+    showMatchFeedback('payroll');
   };
 
   return (
@@ -337,6 +356,19 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         title="Salary Contract"
         icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
+        {payrollTotal && (
+          <div className="mb-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleMatchPayrollToContract}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border border-[#243F7B] text-[#243F7B] transition-all hover:bg-[#243F7B] hover:text-white hover:shadow-sm"
+            >
+              <Copy className="w-3 h-3" />
+              Match Payroll
+            </button>
+            {matchFeedback === 'contract' && <span className="text-xs text-green-600 font-medium animate-pulse">Matched!</span>}
+          </div>
+        )}
         <SalaryBreakdown
           currency={salaryCurrency || 'AED'}
           total={salaryTotal}
@@ -363,15 +395,17 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
             The payroll salary is what is actually paid monthly. It may differ from the contract salary.
           </p>
           {salaryTotal && (
-            <button
-              type="button"
-              onClick={handleMatchContractToPayroll}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors hover:opacity-90"
-              style={{ backgroundColor: '#D2BC99', color: '#243F7B' }}
-            >
-              <Copy className="w-3 h-3" />
-              Match Contract
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleMatchContractToPayroll}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border border-[#243F7B] text-[#243F7B] transition-all hover:bg-[#243F7B] hover:text-white hover:shadow-sm"
+              >
+                <Copy className="w-3 h-3" />
+                Match Contract
+              </button>
+              {matchFeedback === 'payroll' && <span className="text-xs text-green-600 font-medium animate-pulse">Matched!</span>}
+            </div>
           )}
           <SalaryBreakdown
             currency={payrollCurrency || salaryCurrency || 'AED'}
