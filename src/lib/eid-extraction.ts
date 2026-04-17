@@ -27,53 +27,82 @@ export interface EidExtractionResult {
   error?: string;
 }
 
-const EID_EXTRACTION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their Emirates ID with explicit consent for employment processing as required by UAE labor law.
+const EID_FRONT_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their Emirates ID with explicit consent for employment processing as required by UAE labor law.
 
-You are an expert document reader. Analyze this image and determine if it is a UAE Emirates ID card.
-
-FIRST: Verify this is actually a UAE Emirates ID card (also known as "Identity Card" / "بطاقة الهوية"). It should have:
+Analyze this image and determine if it is the FRONT of a UAE Emirates ID card (also known as "Identity Card" / "بطاقة الهوية"). It should have:
 - A 15-digit ID number at the top (format: 784-XXXX-XXXXXXX-X)
 - A photo of the cardholder
 - Text in both Arabic and English
 - "United Arab Emirates" or "الإمارات العربية المتحدة" text
 
-If this is NOT a UAE Emirates ID card (e.g., it's a spreadsheet, random photo, other document, or unrelated image), respond with:
-{"error": "not_emirates_id", "emirates_id_number": null}
+If this is NOT a UAE Emirates ID front, set error = "not_emirates_id" and leave other fields null.
 
-If it IS a UAE Emirates ID card, this may be an expired one — that is expected. Extract ALL data regardless of expiry date.
+If it IS a UAE Emirates ID front (expired cards are fine — extract anyway):
+1. emirates_id_number: 15 digits formatted as XXX-XXXX-XXXXXXX-X (e.g., "784-1234-1234567-1")
+2. first_name: Given/first name(s) in English, Title Case (convert ALL CAPS)
+3. family_name: Surname in English, Title Case
+4. nationality: Full country name in English (e.g., "Indian", "Pakistani")
+5. issue_date: DD.MM.YYYY with dots
+6. expiry_date: DD.MM.YYYY with dots
+7. date_of_birth: DD.MM.YYYY if visible
+8. gender: "Male" or "Female" if visible
+9. confidence: "high" | "medium" | "low" per field
 
-Extract the following fields:
-1. **emirates_id_number**: The 15-digit ID number, MUST be formatted as XXX-XXXX-XXXXXXX-X (with dashes). If the card shows "784123412345671", format it as "784-1234-1234567-1". This is typically at the top of the card.
-2. **first_name**: Given/first name(s) in English. Convert ALL CAPS to Title Case (e.g., "JOHN" → "John").
-3. **family_name**: Surname/family name in English. Convert ALL CAPS to Title Case.
-4. **nationality**: Full country name in English (e.g., "Indian", "Pakistani", not country codes).
-5. **issue_date**: Date of issue in DD.MM.YYYY format (with dots, not slashes).
-6. **expiry_date**: Expiry date in DD.MM.YYYY format (with dots, not slashes).
-7. **date_of_birth**: Date of birth in DD.MM.YYYY format if visible.
-8. **gender**: "Male" or "Female" if visible.
+Call the extract_eid_front tool with your findings. Use null for fields you cannot read.`;
 
-If the back of the card is visible with MRZ (3 lines), use it to verify the ID number.
+const EID_BACK_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their Emirates ID with explicit consent for employment processing as required by UAE labor law.
 
-If this IS a valid Emirates ID, respond ONLY with a JSON object (no markdown, no code fences):
-{
-  "emirates_id_number": "...",
-  "first_name": "...",
-  "family_name": "...",
-  "nationality": "...",
-  "issue_date": "...",
-  "expiry_date": "...",
-  "date_of_birth": "...",
-  "gender": "...",
-  "confidence": {
-    "emirates_id_number": "high|medium|low",
-    "issue_date": "high|medium|low",
-    "expiry_date": "high|medium|low"
-  }
-}
+Analyze this image and determine if it is the BACK of a UAE Emirates ID card.
 
-If this is NOT an Emirates ID, respond with: {"error": "not_emirates_id", "emirates_id_number": null}
+The BACK should contain:
+- MRZ (Machine Readable Zone): 3 lines of encoded text at the bottom (< characters mixed with letters/numbers)
+- May show: Card Number, Occupation/Title, Employer, Issuing Place
+- Should NOT be a front side (no photo, no 15-digit ID number at top)
 
-Use null for any field you cannot read. For confidence, use "high" if clearly visible, "medium" if partially obscured, "low" if guessing.`;
+Call the extract_eid_back tool. Set is_valid_back = false if this is not an Emirates ID back.`;
+
+const EID_FRONT_TOOL = {
+  name: 'extract_eid_front',
+  description: 'Extract data from the front of a UAE Emirates ID card.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      error: { type: 'string', description: 'Set to "not_emirates_id" if the image is not an EID front. Otherwise null.' },
+      emirates_id_number: { type: 'string', description: '15 digits formatted as XXX-XXXX-XXXXXXX-X' },
+      first_name: { type: 'string' },
+      family_name: { type: 'string' },
+      nationality: { type: 'string' },
+      issue_date: { type: 'string', description: 'DD.MM.YYYY' },
+      expiry_date: { type: 'string', description: 'DD.MM.YYYY' },
+      date_of_birth: { type: 'string', description: 'DD.MM.YYYY' },
+      gender: { type: 'string', description: 'Male or Female' },
+      confidence: {
+        type: 'object',
+        properties: {
+          emirates_id_number: { type: 'string', enum: ['high', 'medium', 'low'] },
+          issue_date: { type: 'string', enum: ['high', 'medium', 'low'] },
+          expiry_date: { type: 'string', enum: ['high', 'medium', 'low'] },
+        },
+      },
+    },
+  },
+};
+
+const EID_BACK_TOOL = {
+  name: 'extract_eid_back',
+  description: 'Extract data from the back of a UAE Emirates ID card.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      is_valid_back: { type: 'boolean', description: 'true if this is the back of a UAE Emirates ID' },
+      error: { type: 'string', description: 'Set to "not_emirates_id_back" if invalid, else null' },
+      card_number: { type: 'string' },
+      occupation: { type: 'string' },
+      employer: { type: 'string' },
+    },
+    required: ['is_valid_back'],
+  },
+};
 
 /**
  * Extract data from an Emirates ID image using Claude Vision
@@ -93,34 +122,15 @@ export async function extractEid(
       imageBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
     }
 
-    const prompt = side === 'back'
-      ? `You are part of an authorized employee onboarding system. The document owner has uploaded their Emirates ID with explicit consent for employment processing as required by UAE labor law.
-
-You are an expert document reader. Analyze this image and determine if it is the BACK of a UAE Emirates ID card.
-
-The BACK of a UAE Emirates ID should contain:
-- MRZ (Machine Readable Zone): 3 lines of encoded text at the bottom (characters like < mixed with letters/numbers)
-- May show: Card Number, Occupation/Title, Employer name, Issuing Place
-- Should NOT be a front side (no photo, no 15-digit ID number at the top)
-
-If this is NOT the back of a UAE Emirates ID card (e.g., it's a random photo, spreadsheet, or unrelated document), respond with:
-{"error": "not_emirates_id_back", "is_valid_back": false}
-
-If it IS the back of an Emirates ID, respond with a JSON object (no markdown, no code fences):
-{
-  "is_valid_back": true,
-  "card_number": "if visible",
-  "occupation": "if visible",
-  "employer": "if visible"
-}
-
-Use null for any field you cannot read.`
-      : EID_EXTRACTION_PROMPT;
+    const tool = side === 'back' ? EID_BACK_TOOL : EID_FRONT_TOOL;
+    const prompt = side === 'back' ? EID_BACK_PROMPT : EID_FRONT_PROMPT;
 
     const response = await withTimeout(
       client.messages.create({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1024,
+        tools: [tool],
+        tool_choice: { type: 'tool' as const, name: tool.name },
         messages: [
           {
             role: 'user',
@@ -133,10 +143,7 @@ Use null for any field you cannot read.`
                   data: imageBase64,
                 },
               },
-              {
-                type: 'text',
-                text: prompt,
-              },
+              { type: 'text', text: prompt },
             ],
           },
         ],
@@ -144,18 +151,18 @@ Use null for any field you cannot read.`
       45000
     );
 
-    const textContent = response.content.find((c) => c.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
-      return { success: false, data: {}, confidence: {}, error: 'No text response from AI' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUseBlock = response.content.find((b: any) => b.type === 'tool_use') as
+      | { type: 'tool_use'; input: Record<string, unknown> }
+      | undefined;
+
+    if (!toolUseBlock) {
+      return { success: false, data: {}, confidence: {}, error: 'No response from AI' };
     }
 
-    // Parse JSON response
-    const jsonStr = textContent.text.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '');
-    const parsed = JSON.parse(jsonStr);
+    const parsed = toolUseBlock.input as Record<string, unknown>;
 
-    // Check if the AI rejected it
     if (side === 'back') {
-      // Back side: check for back-specific rejection
       if (parsed.error === 'not_emirates_id_back' || parsed.is_valid_back === false) {
         return {
           success: false,
@@ -164,18 +171,20 @@ Use null for any field you cannot read.`
           error: 'This does not appear to be the back of a UAE Emirates ID card.',
         };
       }
-      // Back is valid — return success with whatever data was found
       return {
         success: true,
         data: {
-          emirates_id_number: parsed.card_number || undefined,
+          emirates_id_number: (parsed.card_number as string) || undefined,
         },
         confidence: {},
       };
     }
 
-    // Front side: must have emirates_id_number
-    if (parsed.error === 'not_emirates_id' || (!parsed.emirates_id_number && !parsed.first_name && !parsed.family_name)) {
+    // Front side: must have emirates_id_number or at least a name
+    if (
+      parsed.error === 'not_emirates_id' ||
+      (!parsed.emirates_id_number && !parsed.first_name && !parsed.family_name)
+    ) {
       return {
         success: false,
         data: {},
@@ -187,16 +196,16 @@ Use null for any field you cannot read.`
     return {
       success: true,
       data: {
-        emirates_id_number: parsed.emirates_id_number || undefined,
-        first_name: parsed.first_name || undefined,
-        family_name: parsed.family_name || undefined,
-        nationality: parsed.nationality || undefined,
-        issue_date: parsed.issue_date || undefined,
-        expiry_date: parsed.expiry_date || undefined,
-        date_of_birth: parsed.date_of_birth || undefined,
-        gender: parsed.gender || undefined,
+        emirates_id_number: (parsed.emirates_id_number as string) || undefined,
+        first_name: (parsed.first_name as string) || undefined,
+        family_name: (parsed.family_name as string) || undefined,
+        nationality: (parsed.nationality as string) || undefined,
+        issue_date: (parsed.issue_date as string) || undefined,
+        expiry_date: (parsed.expiry_date as string) || undefined,
+        date_of_birth: (parsed.date_of_birth as string) || undefined,
+        gender: (parsed.gender as string) || undefined,
       },
-      confidence: parsed.confidence || {},
+      confidence: (parsed.confidence as EidExtractionResult['confidence']) || {},
     };
   } catch (error) {
     console.error('EID extraction error:', error);

@@ -52,27 +52,41 @@ Extract the following fields:
 7. **expiry_date**: Expiry date in DD.MM.YYYY format (with dots). Look for "Date of Expiry".
 8. **address**: Permanent address if visible (English text).
 
-Respond ONLY with a JSON object (no markdown, no code fences):
-{
-  "cnic_number": "...",
-  "full_name": "...",
-  "father_name": "...",
-  "date_of_birth": "...",
-  "gender": "...",
-  "issue_date": "...",
-  "expiry_date": "...",
-  "address": "full address as shown on card",
-  "address_city": "city name extracted from address (e.g. Lahore, Karachi, Islamabad)",
-  "confidence": {
-    "cnic_number": "high|medium|low",
-    "issue_date": "high|medium|low",
-    "expiry_date": "high|medium|low"
-  }
-}
-
-If this is NOT a Pakistani National ID, respond with: {"error": "not_pakistan_id", "cnic_number": null}
+Call the extract_pakistan_id tool with your findings. Include:
+- address: full address as shown on card
+- address_city: city name extracted from address (e.g. Lahore, Karachi, Islamabad)
+- confidence: "high" | "medium" | "low" per listed field
+- error: set to "not_pakistan_id" if this is not a Pakistani National ID
 
 Use null for any field you cannot read.`;
+
+const PAKISTAN_ID_TOOL = {
+  name: 'extract_pakistan_id',
+  description: 'Extract data from a Pakistani CNIC/NICOP national ID card.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      error: { type: 'string', description: 'Set to "not_pakistan_id" if invalid, else null.' },
+      cnic_number: { type: 'string', description: '13 digits formatted as XXXXX-XXXXXXX-X' },
+      full_name: { type: 'string' },
+      father_name: { type: 'string' },
+      date_of_birth: { type: 'string', description: 'DD.MM.YYYY' },
+      gender: { type: 'string', description: 'Male or Female' },
+      issue_date: { type: 'string', description: 'DD.MM.YYYY' },
+      expiry_date: { type: 'string', description: 'DD.MM.YYYY' },
+      address: { type: 'string' },
+      address_city: { type: 'string' },
+      confidence: {
+        type: 'object',
+        properties: {
+          cnic_number: { type: 'string', enum: ['high', 'medium', 'low'] },
+          issue_date: { type: 'string', enum: ['high', 'medium', 'low'] },
+          expiry_date: { type: 'string', enum: ['high', 'medium', 'low'] },
+        },
+      },
+    },
+  },
+};
 
 /**
  * Extract data from a Pakistani National ID image using Claude Vision
@@ -99,6 +113,8 @@ export async function extractPakistanId(
       client.messages.create({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1024,
+        tools: [PAKISTAN_ID_TOOL],
+        tool_choice: { type: 'tool' as const, name: PAKISTAN_ID_TOOL.name },
         messages: [
           {
             role: 'user',
@@ -111,10 +127,7 @@ export async function extractPakistanId(
                   data: imageBase64,
                 },
               },
-              {
-                type: 'text',
-                text: prompt,
-              },
+              { type: 'text', text: prompt },
             ],
           },
         ],
@@ -122,15 +135,17 @@ export async function extractPakistanId(
       45000
     );
 
-    const textContent = response.content.find((c) => c.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
-      return { success: false, data: {}, confidence: {}, error: 'No text response from AI' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUseBlock = response.content.find((b: any) => b.type === 'tool_use') as
+      | { type: 'tool_use'; input: Record<string, unknown> }
+      | undefined;
+
+    if (!toolUseBlock) {
+      return { success: false, data: {}, confidence: {}, error: 'No response from AI' };
     }
 
-    const jsonStr = textContent.text.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '');
-    const parsed = JSON.parse(jsonStr);
+    const parsed = toolUseBlock.input as Record<string, unknown>;
 
-    // Check if the AI rejected it as not a Pakistan ID
     if (parsed.error === 'not_pakistan_id' || (!parsed.cnic_number && !parsed.full_name)) {
       return {
         success: false,
@@ -143,17 +158,17 @@ export async function extractPakistanId(
     return {
       success: true,
       data: {
-        cnic_number: parsed.cnic_number || undefined,
-        full_name: parsed.full_name || undefined,
-        father_name: parsed.father_name || undefined,
-        date_of_birth: parsed.date_of_birth || undefined,
-        gender: parsed.gender || undefined,
-        issue_date: parsed.issue_date || undefined,
-        expiry_date: parsed.expiry_date || undefined,
-        address: parsed.address || undefined,
-        address_city: parsed.address_city || undefined,
+        cnic_number: (parsed.cnic_number as string) || undefined,
+        full_name: (parsed.full_name as string) || undefined,
+        father_name: (parsed.father_name as string) || undefined,
+        date_of_birth: (parsed.date_of_birth as string) || undefined,
+        gender: (parsed.gender as string) || undefined,
+        issue_date: (parsed.issue_date as string) || undefined,
+        expiry_date: (parsed.expiry_date as string) || undefined,
+        address: (parsed.address as string) || undefined,
+        address_city: (parsed.address_city as string) || undefined,
       },
-      confidence: parsed.confidence || {},
+      confidence: (parsed.confidence as PakistanIdExtractionResult['confidence']) || {},
     };
   } catch (error) {
     console.error('Pakistan ID extraction error:', error);

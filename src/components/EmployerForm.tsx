@@ -13,6 +13,7 @@ import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/compo
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
+import { isDmccAuthority } from '@/lib/staff-form-logic';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
 import { uploadDocument, updateDocumentReferences } from '@/lib/supabase';
 import type { StaffDocumentReferences } from '@/types';
@@ -66,7 +67,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
 
   // DMCC detection from portal-provided authority
   const registeredAuthority = (submission.prefill_employer_data as Record<string, unknown> | null)?.registered_authority as string | undefined;
-  const isDMCC = registeredAuthority?.toUpperCase()?.includes('DMCC') || false;
+  const isDMCC = isDmccAuthority(registeredAuthority);
 
   // Job Offer Letter state (DMCC only)
   const [jobOfferLetterDoc, setJobOfferLetterDoc] = useState(submission.documents?.job_offer_letter);

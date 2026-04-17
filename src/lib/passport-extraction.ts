@@ -30,76 +30,41 @@ export interface PassportExtractionResult {
 }
 
 /**
- * Passport extraction prompt
+ * Passport extraction prompt.
+ *
+ * Principle: read labeled fields as labeled. The passport already tells you
+ * which text is the surname and which is the given names — don't re-derive
+ * that from string-splitting. The MRZ at the bottom is the unambiguous
+ * machine-encoded source for disambiguating anything the visual text makes
+ * unclear (characters with diacritics, low-contrast prints, etc).
+ *
+ * Kept nationality-agnostic on purpose: a SOTA vision model does not need
+ * per-country crutches, and layering them only hides the real failure mode
+ * (which is usually "Claude ignored the Surname field and split the Given
+ * Names string by spaces instead").
  */
-const PASSPORT_EXTRACTION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their passport with explicit consent for employment visa processing as required by UAE labor law. Extract the requested information.
+const PASSPORT_EXTRACTION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their passport with explicit consent for employment visa processing as required by UAE labor law.
 
-Extract information from this passport image.
+Extract the following fields. Two rules:
+- Read each LABELED field on the passport and copy it into the matching output field. The passport's own labels (Surname, Given Names, Nationality, Date of Birth, Date of Issue, Date of Expiry, Place of Birth, Sex, Passport No.) are authoritative.
+- If the visible text is ambiguous, use the MRZ (two <-separated lines at the bottom) to disambiguate. MRZ layout: line 1 = \`P<CCC<SURNAME<<GIVEN<NAMES<<<<\`, line 2 = \`<passport_no><CCC><YYMMDD_dob><SEX><YYMMDD_expiry>...\`.
 
-Look for and extract:
-1. First name (given name only - the FIRST given name, not middle names)
-2. Middle name(s) (all names between first name and family name)
-3. Family name / Surname
-4. Passport number (usually near top right, 6-9 alphanumeric characters)
-5. Issue date (date of issue)
-6. Expiry date (date of expiry)
-7. Nationality / Citizenship (full country name, e.g., "Germany", "India", "United Kingdom")
-8. Date of birth
-9. Gender (Male/Female)
-10. Place of birth
-11. Title (INFER from gender: Male = "Mr", Female = "Ms")
+Fields:
+- first_name: the first/primary given name from the Given Names field only
+- middle_name: all remaining names in the Given Names field, space-joined
+- family_name: whatever is in the Surname / Family Name field. Do NOT derive this by splitting the Given Names string
+- passport_no: exactly as printed, preserving any letter prefix (e.g. \`AB5981404\`, \`X12345678\`)
+- passport_issue_date: DD.MM.YYYY with dots
+- passport_expiry_date: DD.MM.YYYY with dots
+- date_of_birth: DD.MM.YYYY with dots
+- nationality: full country name, not the 3-letter code (e.g. \`PAK\` → Pakistan)
+- gender: Male or Female (from Sex field; M → Male, F → Female)
+- place_of_birth: copy from the labeled Place of Birth field (title case if it was all caps)
+- title: infer from gender only — Male → Mr, Female → Ms
 
-IMPORTANT formatting rules:
-- Convert ALL dates to DD.MM.YYYY format (e.g., 15.03.2025)
-- Convert names from ALL CAPS to Title Case (e.g., JOHN SMITH → John Smith)
-- Keep passport number in original format (usually uppercase)
-- Nationality must be the FULL country name (not code): "DEU" → "Germany", "GBR" → "United Kingdom", "IND" → "India", "USA" → "United States", "PAK" → "Pakistan", "PHL" → "Philippines", "MNE" → "Montenegro", etc.
+Formatting: convert ALL CAPS names to Title Case. Convert any date separator to dots. Don't invent values for fields you cannot read — omit them.
 
-CRITICAL - Date of Birth accuracy:
-- The date of birth is typically labeled "Date of birth" / "Date de naissance" / "Datum rodjenja" on the passport
-- Do NOT confuse it with issue date or expiry date
-- Cross-verify with the MRZ: in the MRZ, the date of birth appears as YYMMDD in the second line (positions 1-6 after the first '<' separator block)
-- If the visual date and MRZ date disagree, prefer the MRZ date as it is machine-encoded
-- Date of birth will typically be decades in the past (1950s-2000s), not a recent date
-
-Also check the MRZ (Machine Readable Zone - the two lines of characters at the bottom of the passport):
-- Verify passport number matches
-- Verify date of birth matches
-- Verify expiry date matches
-- If MRZ is readable, use it to cross-verify ALL extracted data — MRZ is more reliable than visual text
-
-Respond with a JSON object in exactly this format:
-{
-  "success": true,
-  "data": {
-    "title": "Mr",
-    "first_name": "John",
-    "middle_name": "Michael",
-    "family_name": "Smith",
-    "passport_no": "X12345678",
-    "passport_issue_date": "15.03.2020",
-    "passport_expiry_date": "15.03.2030",
-    "nationality": "United Kingdom",
-    "date_of_birth": "25.12.1985",
-    "gender": "Male",
-    "place_of_birth": "London"
-  },
-  "confidence": {
-    "passport_no": "high",
-    "expiry_date": "high"
-  },
-  "mrz_verified": true
-}
-
-If a field is not visible or cannot be extracted, omit it from the data object.
-If you cannot read the passport at all, return:
-{
-  "success": false,
-  "data": {},
-  "confidence": {},
-  "mrz_verified": false,
-  "error": "Description of the problem"
-}`;
+Call the \`extract_passport_data\` tool.`;
 
 /**
  * Extract data from a passport image using Claude Vision
@@ -178,7 +143,10 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
   try {
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        // sonnet-4-6 is the model tme-portal uses for extraction — noticeably
+        // better at MRZ parsing and South-Asian name handling than the older
+        // claude-sonnet-4-20250514 snapshot.
+        model: 'claude-sonnet-4-6',
         max_tokens: 2048,
         tools: [
           {
@@ -187,17 +155,17 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
             input_schema: {
               type: 'object' as const,
               properties: {
-                title: { type: 'string', description: 'Mr, Mrs, or Ms - inferred from gender' },
-                first_name: { type: 'string', description: 'Given/first name only in Title Case' },
-                middle_name: { type: 'string', description: 'Middle name(s) in Title Case' },
-                family_name: { type: 'string', description: 'Surname/family name in Title Case' },
-                passport_no: { type: 'string', description: 'Passport number in original format' },
-                passport_issue_date: { type: 'string', description: 'Issue date in DD.MM.YYYY format' },
-                passport_expiry_date: { type: 'string', description: 'Expiry date in DD.MM.YYYY format' },
-                nationality: { type: 'string', description: 'Full country name (e.g. Pakistan, India, Germany)' },
-                date_of_birth: { type: 'string', description: 'Date of birth in DD.MM.YYYY format' },
+                title: { type: 'string', description: 'Mr, Mrs, or Ms — inferred from gender' },
+                first_name: { type: 'string', description: 'First/primary given name, Title Case' },
+                middle_name: { type: 'string', description: 'Remaining given names, space-joined, Title Case' },
+                family_name: { type: 'string', description: 'Contents of the Surname / Family Name field, Title Case' },
+                passport_no: { type: 'string', description: 'Passport number exactly as printed' },
+                passport_issue_date: { type: 'string', description: 'DD.MM.YYYY' },
+                passport_expiry_date: { type: 'string', description: 'DD.MM.YYYY' },
+                nationality: { type: 'string', description: 'Full country name' },
+                date_of_birth: { type: 'string', description: 'DD.MM.YYYY' },
                 gender: { type: 'string', description: 'Male or Female' },
-                place_of_birth: { type: 'string', description: 'Place of birth/issue' },
+                place_of_birth: { type: 'string', description: 'Place of Birth field, Title Case' },
               },
               required: ['first_name', 'family_name'],
             },

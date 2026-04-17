@@ -29,13 +29,22 @@ Check this passport photo against these requirements:
 
 If it looks like a professional passport photo, accept it. Use common sense - don't reject for minor imperfections that any real passport office would accept.
 
-Return JSON:
-{
-  "valid": true or false,
-  "errors": ["which requirement failed"],
-  "suggestions": ["how to fix"],
-  "confidence": 0-100
-}`;
+Call the validate_photo tool with your assessment.`;
+
+const PHOTO_VALIDATION_TOOL = {
+  name: 'validate_photo',
+  description: 'Validate a passport photo against UAE visa requirements.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      valid: { type: 'boolean', description: 'true if photo meets requirements' },
+      errors: { type: 'array', items: { type: 'string' }, description: 'Which requirements failed' },
+      suggestions: { type: 'array', items: { type: 'string' }, description: 'How to fix issues' },
+      confidence: { type: 'number', description: 'Confidence 0-100' },
+    },
+    required: ['valid'],
+  },
+};
 
 /**
  * Validate a passport photo using Claude Vision
@@ -62,8 +71,10 @@ export async function validatePhoto(imageBase64: string): Promise<PhotoValidatio
   try {
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-haiku-4-5-20251001', // Haiku for speed and cost
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 1024,
+        tools: [PHOTO_VALIDATION_TOOL],
+        tool_choice: { type: 'tool' as const, name: PHOTO_VALIDATION_TOOL.name },
         messages: [
           {
             role: 'user',
@@ -76,45 +87,35 @@ export async function validatePhoto(imageBase64: string): Promise<PhotoValidatio
                   data: base64Data,
                 },
               },
-              {
-                type: 'text',
-                text: PHOTO_VALIDATION_PROMPT,
-              },
+              { type: 'text', text: PHOTO_VALIDATION_PROMPT },
             ],
           },
         ],
       }),
-      30000 // 30 second timeout
+      30000
     );
 
-    // Extract text content
-    const textBlock = response.content.find((block) => block.type === 'text');
-    if (!textBlock || textBlock.type !== 'text') {
-      throw new Error('No text response from Claude');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUseBlock = response.content.find((b: any) => b.type === 'tool_use') as
+      | { type: 'tool_use'; input: Record<string, unknown> }
+      | undefined;
+
+    if (!toolUseBlock) {
+      throw new Error('No tool_use response from Claude');
     }
 
-    // DEBUG: Log raw Claude response
-    console.log('[Photo Validation] Raw Claude response:', textBlock.text);
-
-    // Parse JSON from response
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('Could not parse JSON response');
-    }
-
-    const result = JSON.parse(jsonMatch[0]) as PhotoValidationResult;
-    console.log('[Photo Validation] Parsed result:', result);
-
-    // Validate response structure
-    if (typeof result.valid !== 'boolean') {
-      throw new Error('Invalid response: missing valid field');
-    }
+    const parsed = toolUseBlock.input as {
+      valid?: boolean;
+      errors?: string[];
+      suggestions?: string[];
+      confidence?: number;
+    };
 
     return {
-      valid: result.valid,
-      errors: result.errors || [],
-      suggestions: result.suggestions || [],
-      confidence: result.confidence || 0,
+      valid: !!parsed.valid,
+      errors: parsed.errors || [],
+      suggestions: parsed.suggestions || [],
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
     };
   } catch (error) {
     console.error('Photo validation error:', error);

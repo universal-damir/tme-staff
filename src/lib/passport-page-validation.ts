@@ -16,9 +16,51 @@ export interface PassportPageValidationResult {
   details: string;
 }
 
-const COVER_PROMPT = `Check if this passport is spread open (book opened flat). Valid = passport is open showing two halves with a spine/fold/crease between them. One half typically has the national emblem/text (front cover), the other half may be plain or blank (back cover) — a plain back cover is NORMAL and VALID. Invalid = passport is closed, only a single page photographed without the other half, or not a passport at all. If you can see a spine/fold/crease dividing two halves, it is VALID.`;
+const AUTH_CONTEXT = `You are part of an authorized employee onboarding system. The document owner has uploaded their passport with explicit consent for employment visa processing as required by UAE labor law.\n\n`;
 
-const INSIDE_PROMPT = `Count how many passport pages are visible. Valid = 2 pages visible (data page AND opposite page, spread open). Invalid = only 1 page visible or not a passport.`;
+// Prompt mirrors tme-portal's proven cover validator (see
+// tme-portal/src/app/api/clients-v2/staff/[staffId]/documents/parse/route.ts).
+// Explicit VALID/INVALID bullet lists prevent Claude from drifting into the
+// INSIDE_PAGES criteria when shown a valid cover spread.
+const COVER_PROMPT = `${AUTH_CONTEXT}You are validating a passport cover image. The passport MUST be photographed spread open, showing BOTH the front cover AND the back cover in a single image.
+
+Analyze the image:
+
+VALID (spread open passport cover):
+- Both the front cover AND back cover are visible in a single image
+- The book spine/fold is visible between the two halves
+- The passport is laid flat and open, whether oriented horizontally (halves side by side) or vertically (halves top and bottom)
+- One half has the national emblem/coat of arms/text, the other is plain or has minor markings (e.g. a visa sticker, health-authority sticker, airport stamp, worn area) — minor markings on the back cover are NORMAL and VALID
+
+INVALID (these are NOT acceptable):
+- Only ONE side of the passport cover is visible (just the front or just the back)
+- The emblem/logo is centered in the image with no second half visible (indicates a single page, not spread open)
+- The passport data page is visible (this is the INSIDE, not the cover — should be uploaded as passport INSIDE instead)
+- Not a passport at all
+- A closed passport (not spread open)
+
+Set "valid" to true if this is a spread-open passport cover per the rules above. If you see a fold/spine dividing two halves AND one half shows a national emblem/symbol, it is VALID even if the other half has stickers or minor markings.
+
+In "reason", briefly describe what you see (mention orientation and which half has the emblem).`;
+
+const INSIDE_PROMPT = `${AUTH_CONTEXT}You are validating a passport INSIDE / data-page image. The passport MUST be photographed spread open, showing BOTH the data/bio page AND the opposite page.
+
+Analyze the image:
+
+VALID (spread open passport inside pages):
+- Both the data page (with photo, name, passport number, dates, MRZ) AND the opposite page are visible in a single image
+- The book spine/fold is visible between the two halves
+- The passport is laid flat and open
+
+INVALID (these are NOT acceptable):
+- Only 1 page is visible (just the data page by itself)
+- The passport cover is visible (this is the OUTSIDE, not the inside)
+- Not a passport at all
+- A closed passport
+
+Set "valid" to true only if this shows 2 passport inside pages spread open.
+
+In "reason", briefly describe what you see (e.g., "data page on right with photo + MRZ, visa stamps on left", or "single data page only").`;
 
 /**
  * Validate passport page using tool_use (prevents model refusals)

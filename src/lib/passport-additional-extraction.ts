@@ -54,33 +54,30 @@ IMPORTANT formatting rules:
 - Keep file numbers and passport numbers in original format
 - For address: separate street, city, PIN, state into distinct fields
 
-Respond with a JSON object in exactly this format:
-{
-  "success": true,
-  "data": {
-    "father_name": "Keshava Hegde",
-    "mother_name": "Hemavathi Shetty",
-    "spouse_name": "Lilia Strotchi",
-    "address_street": "23-6-447 Market Road, Jeppu",
-    "address_city": "Mangaluru City",
-    "address_pin": "575002",
-    "address_state": "Karnataka",
-    "address_country": "India",
-    "old_passport_number": "Z3069032",
-    "old_passport_issue_date": "27.04.2015",
-    "old_passport_place_of_issue": "Dubai",
-    "file_number": "UE2075496120325"
-  }
-}
+Call the extract_passport_additional tool with your findings. Omit any field that is not visible or cannot be extracted. If the spouse field is blank, omit spouse_name.`;
 
-If a field is not visible or cannot be extracted, omit it from the data object.
-If the spouse field is blank/empty, omit "spouse_name".
-If you cannot read the page at all, return:
-{
-  "success": false,
-  "data": {},
-  "error": "Description of the problem"
-}`;
+const PASSPORT_ADDITIONAL_TOOL = {
+  name: 'extract_passport_additional',
+  description: 'Extract family and address details from the last page of an Indian passport.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      father_name: { type: 'string', description: 'Name of Father / Legal Guardian in Title Case' },
+      mother_name: { type: 'string', description: 'Name of Mother in Title Case' },
+      spouse_name: { type: 'string', description: 'Name of Spouse in Title Case (omit if blank)' },
+      address_street: { type: 'string' },
+      address_city: { type: 'string' },
+      address_pin: { type: 'string', description: '6-digit Indian postal code' },
+      address_state: { type: 'string' },
+      address_country: { type: 'string' },
+      old_passport_number: { type: 'string' },
+      old_passport_issue_date: { type: 'string', description: 'DD.MM.YYYY' },
+      old_passport_place_of_issue: { type: 'string' },
+      file_number: { type: 'string' },
+      error: { type: 'string', description: 'Set if the page could not be read at all' },
+    },
+  },
+};
 
 /**
  * Extract data from an Indian passport additional page using Claude Vision
@@ -123,6 +120,8 @@ export async function extractAdditionalPage(imageBase64: string): Promise<Additi
       client.messages.create({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 2048,
+        tools: [PASSPORT_ADDITIONAL_TOOL],
+        tool_choice: { type: 'tool' as const, name: PASSPORT_ADDITIONAL_TOOL.name },
         messages: [
           {
             role: 'user',
@@ -135,10 +134,7 @@ export async function extractAdditionalPage(imageBase64: string): Promise<Additi
                   data: base64Data,
                 },
               },
-              {
-                type: 'text',
-                text: ADDITIONAL_PAGE_PROMPT,
-              },
+              { type: 'text', text: ADDITIONAL_PAGE_PROMPT },
             ],
           },
         ],
@@ -146,22 +142,37 @@ export async function extractAdditionalPage(imageBase64: string): Promise<Additi
       45000
     );
 
-    const textBlock = response.content.find((block) => block.type === 'text');
-    if (!textBlock || textBlock.type !== 'text') {
-      throw new Error('No text response from Claude');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUseBlock = response.content.find((b: any) => b.type === 'tool_use') as
+      | { type: 'tool_use'; input: Record<string, unknown> }
+      | undefined;
+
+    if (!toolUseBlock) {
+      throw new Error('No tool_use response from Claude');
     }
 
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('Could not parse JSON response');
-    }
+    const parsed = toolUseBlock.input as Record<string, string | undefined>;
 
-    const result = JSON.parse(jsonMatch[0]) as AdditionalPageExtractionResult;
+    if (parsed.error) {
+      return { success: false, data: {}, error: parsed.error };
+    }
 
     return {
-      success: result.success ?? false,
-      data: result.data || {},
-      error: result.error,
+      success: true,
+      data: {
+        father_name: parsed.father_name,
+        mother_name: parsed.mother_name,
+        spouse_name: parsed.spouse_name,
+        address_street: parsed.address_street,
+        address_city: parsed.address_city,
+        address_pin: parsed.address_pin,
+        address_state: parsed.address_state,
+        address_country: parsed.address_country,
+        old_passport_number: parsed.old_passport_number,
+        old_passport_issue_date: parsed.old_passport_issue_date,
+        old_passport_place_of_issue: parsed.old_passport_place_of_issue,
+        file_number: parsed.file_number,
+      },
     };
   } catch (error) {
     console.error('Additional page extraction error:', error);

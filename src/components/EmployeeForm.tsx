@@ -20,6 +20,7 @@ import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
 import type { EmployeeFormData, EmployeeFormProps, PassportPageReference } from '@/types';
+import { mergeStaffDocRefs, isPakistaniNationality as checkPakistaniNationality } from '@/lib/staff-form-logic';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
 import { calculateFullName, compressImageForAI } from '@/lib/utils';
 import { nationalityToCountryCode } from '@/lib/country-utils';
@@ -544,7 +545,7 @@ export function EmployeeForm({
   const isInsidePagesUploaded = !!(passportPages.insidePages?.validated);
   const isAdditionalPageUploaded = !!(passportPages.additionalPage?.validated);
   const isIndianNationality = nationality === 'Indian' || nationality === 'India';
-  const isPakistaniNationality = nationality === 'Pakistani' || nationality === 'Pakistan';
+  const isPakistaniNationality = checkPakistaniNationality(nationality);
   const requiresAdditionalPage = isIndianNationality && isInsidePagesUploaded && passportDataReady;
   const isPersonalComplete = !!(firstName && lastName && nationality);
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
@@ -652,21 +653,22 @@ export function EmployeeForm({
     await onSubmit(data, signatureToUse);
   };
 
-  // Helper to build full document references including education docs + new identity docs
-  // IMPORTANT: spread existing submission.documents first to preserve employer-uploaded docs (e.g. job_offer_letter)
-  const buildDocRefs = (overrides?: { photo?: typeof photoDoc; passportPages?: typeof passportPages }) => ({
-    ...submission.documents,
-    photo: overrides?.photo ?? photoDocRef.current,
-    passportPages: overrides?.passportPages ?? passportPagesRef.current,
-    degree_attested: degreeDocRef.current,
-    transcript_of_records: transcriptDocRef.current,
-    education_additional: educationAdditionalDocRef.current,
-    eid_front: eidFrontDocRef.current,
-    eid_back: eidBackDocRef.current,
-    pakistan_id_front: pakistanIdFrontDocRef.current,
-    pakistan_id_back: pakistanIdBackDocRef.current,
-    visa_document: visaDocRef.current,
-  });
+  // Helper to build full document references including education docs + new identity docs.
+  // mergeStaffDocRefs spreads submission.documents first to preserve employer-uploaded docs
+  // (e.g. job_offer_letter). Tested in src/lib/staff-form-logic.test.ts.
+  const buildDocRefs = (overrides?: { photo?: typeof photoDoc; passportPages?: typeof passportPages }) =>
+    mergeStaffDocRefs(submission.documents, {
+      photo: overrides?.photo ?? photoDocRef.current,
+      passportPages: overrides?.passportPages ?? passportPagesRef.current,
+      degree_attested: degreeDocRef.current,
+      transcript_of_records: transcriptDocRef.current,
+      education_additional: educationAdditionalDocRef.current,
+      eid_front: eidFrontDocRef.current,
+      eid_back: eidBackDocRef.current,
+      pakistan_id_front: pakistanIdFrontDocRef.current,
+      pakistan_id_back: pakistanIdBackDocRef.current,
+      visa_document: visaDocRef.current,
+    });
 
   const handlePhotoUpload = async (file: File) => {
     const result = await uploadDocument(submission.id, 'photo', file);
@@ -1914,7 +1916,13 @@ export function EmployeeForm({
                     setVisaDoc(docWithMeta);
                     visaDocRef.current = docWithMeta;
                     setVisaDocUI(prev => ({ ...prev, validating: false }));
-                    await updateDocumentReferences(submission.id, buildDocRefs());
+                    try {
+                      const refs = buildDocRefs();
+                      await updateDocumentReferences(submission.id, refs);
+                      console.log('[VisaUpload] doc refs updated', { visaPath: refs.visa_document });
+                    } catch (err) {
+                      console.error('[VisaUpload] failed to persist doc refs', err);
+                    }
                     return result;
                   }}
                   onRemove={async () => {
