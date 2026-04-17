@@ -1604,7 +1604,7 @@ export function EmployeeForm({
         <div ref={identityDocsRef} className="space-y-6">
           {/* Emirates ID subsection (optional) */}
           <FormSection
-            title="Previously Held Emirates ID"
+            title="Emirates ID"
             icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
             stepNumber={4}
           >
@@ -1626,7 +1626,7 @@ export function EmployeeForm({
                   style={{ accentColor: TME_COLORS.primary }}
                 />
                 <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-                  Do you have a copy of your previously held Emirates ID?
+                  Did you previously hold a UAE Emirates ID?
                 </span>
               </label>
 
@@ -1638,9 +1638,9 @@ export function EmployeeForm({
                   >
                     <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
                     <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                      <p className="font-medium">Upload the front and back of your previously held Emirates ID</p>
+                      <p className="font-medium">If you have a copy, please upload the front and back of your Emirates ID</p>
                       <p className="mt-1 text-xs text-gray-600">
-                        This can be an expired ID. We will extract the ID number and dates automatically. It does not matter if it is expired.
+                        This is not mandatory, but UAE authorities may request it during visa processing. Expired IDs are accepted.
                       </p>
                     </div>
                   </div>
