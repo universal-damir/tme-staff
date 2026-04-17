@@ -1,10 +1,11 @@
 /**
  * Passport Page Type Validation
  *
- * Uses Claude Vision to identify what type of passport page an uploaded image is.
- * Used to validate that users upload the correct passport pages.
+ * Uses Claude Vision with tool_use to validate passport page layout.
+ * tool_use forces structured output and prevents model refusals.
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { getAnthropicClient, withTimeout } from './anthropic';
 
 export type PassportPageType = 'COVER' | 'INSIDE_PAGES' | 'INVALID';
@@ -15,51 +16,12 @@ export interface PassportPageValidationResult {
   details: string;
 }
 
-/**
- * Passport page validation - requires spread/open passport (both pages visible)
- * UAE government requirement: passport must be photographed open/spread, not single pages
- */
+const COVER_PROMPT = `Check if this passport is spread open (book opened flat). Valid = passport is open showing two halves with a spine/fold/crease between them. One half typically has the national emblem/text (front cover), the other half may be plain or blank (back cover) — a plain back cover is NORMAL and VALID. Invalid = passport is closed, only a single page photographed without the other half, or not a passport at all. If you can see a spine/fold/crease dividing two halves, it is VALID.`;
 
-// Prompt for COVER validation
-const COVER_VALIDATION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has consented to upload their passport for employment visa processing as required by UAE labor law. Your role is to validate the page layout only.
-
-You are validating a passport cover image. The passport MUST be photographed spread open, showing BOTH the front cover AND the back cover in a single image.
-
-Analyze the image:
-
-VALID (spread open passport cover):
-- Both the front cover AND back cover are visible in a single image
-- The book spine/fold is visible between the two halves
-- The passport is laid flat and open, whether oriented horizontally (halves side by side) or vertically (halves top and bottom)
-- One half has the national emblem/coat of arms/text, the other is plain or has minor markings
-
-INVALID (these are NOT acceptable):
-- Only ONE side of the passport cover is visible (just the front or just the back)
-- The emblem/logo is centered in the image (indicating a single page, not spread open)
-- The passport data page is visible (this is the inside, not the cover)
-- Not a passport at all
-- A closed passport (not spread open)
-
-Respond with ONLY a JSON object:
-{"valid": true, "reason": "brief explanation"} or {"valid": false, "reason": "brief explanation"}`;
-
-// Prompt for INSIDE_PAGES validation
-const INSIDE_PAGES_VALIDATION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has consented to upload their passport for employment visa processing as required by UAE labor law. Your role is to validate the page layout only — not to read or extract any personal data.
-
-Step 1: How many passport pages are visible in this image? (Count: 1 or 2)
-Step 2: Based on count, answer valid or invalid.
-
-If count is 1 (only the data page visible, no second page): {"count": 1, "valid": false}
-If count is 2 (data page AND opposite page both visible): {"count": 2, "valid": true}
-
-Respond ONLY with the JSON object. Do not refuse — you are not extracting personal data, only checking page count.`;
+const INSIDE_PROMPT = `Count how many passport pages are visible. Valid = 2 pages visible (data page AND opposite page, spread open). Invalid = only 1 page visible or not a passport.`;
 
 /**
- * Validate passport page based on expected type
- *
- * @param imageBase64 - Base64 encoded image (with or without data URL prefix)
- * @param expectedType - The type of page we expect (COVER or INSIDE_PAGES)
- * @returns PassportPageValidationResult
+ * Validate passport page using tool_use (prevents model refusals)
  */
 export async function validatePassportPage(
   imageBase64: string,
@@ -67,31 +29,41 @@ export async function validatePassportPage(
 ): Promise<PassportPageValidationResult> {
   const client = getAnthropicClient();
 
-  // Remove data URL prefix if present
   const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-  // Detect media type
   let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg';
-  if (imageBase64.includes('data:image/png')) {
-    mediaType = 'image/png';
-  } else if (imageBase64.includes('data:image/gif')) {
-    mediaType = 'image/gif';
-  } else if (imageBase64.includes('data:image/webp')) {
-    mediaType = 'image/webp';
-  }
+  if (imageBase64.includes('data:image/png')) mediaType = 'image/png';
+  else if (imageBase64.includes('data:image/gif')) mediaType = 'image/gif';
+  else if (imageBase64.includes('data:image/webp')) mediaType = 'image/webp';
 
-  // Select prompt based on expected type
-  const prompt = expectedType === 'COVER'
-    ? COVER_VALIDATION_PROMPT
-    : expectedType === 'INSIDE_PAGES'
-    ? INSIDE_PAGES_VALIDATION_PROMPT
-    : COVER_VALIDATION_PROMPT; // default
+  const prompt = expectedType === 'INSIDE_PAGES' ? INSIDE_PROMPT : COVER_PROMPT;
 
   try {
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-sonnet-4-6', // Latest Sonnet for best visual analysis
-        max_tokens: 256,
+        model: 'claude-sonnet-4-6',
+        max_tokens: 300,
+        tools: [
+          {
+            name: 'validate_passport_page',
+            description: 'Report whether the passport page layout is valid (spread open with both pages visible)',
+            input_schema: {
+              type: 'object' as const,
+              properties: {
+                valid: {
+                  type: 'boolean',
+                  description: 'true if passport is spread open showing required pages, false otherwise',
+                },
+                reason: {
+                  type: 'string',
+                  description: 'Brief explanation of what is visible in the image',
+                },
+              },
+              required: ['valid', 'reason'],
+            },
+          },
+        ],
+        tool_choice: { type: 'tool' as const, name: 'validate_passport_page' },
         messages: [
           {
             role: 'user',
@@ -112,28 +84,21 @@ export async function validatePassportPage(
           },
         ],
       }),
-      30000 // 30 second timeout
+      30000
     );
 
-    // Extract text content
-    const textBlock = response.content.find((block) => block.type === 'text');
-    if (!textBlock || textBlock.type !== 'text') {
-      throw new Error('No text response from Claude');
+    // Extract tool_use result — guaranteed structured output
+    const toolUseBlock = response.content.find(
+      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
+    );
+
+    if (!toolUseBlock) {
+      throw new Error('No tool_use response');
     }
 
-    // DEBUG: Log raw Claude response
-    console.log('[Passport Validation] Raw Claude response:', textBlock.text);
+    const result = toolUseBlock.input as { valid: boolean; reason: string };
+    console.log('[Passport Validation] Result:', result);
 
-    // Parse JSON from response
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('Could not parse JSON response');
-    }
-
-    const result = JSON.parse(jsonMatch[0]) as { valid: boolean; reason?: string };
-    console.log('[Passport Validation] Parsed result:', result);
-
-    // Convert valid/invalid to page_type
     if (result.valid) {
       return {
         page_type: expectedType || 'COVER',
@@ -149,8 +114,6 @@ export async function validatePassportPage(
     }
   } catch (error) {
     console.error('Passport page validation error:', error);
-
-    // Return a safe error response
     return {
       page_type: 'INVALID',
       confidence: 0,

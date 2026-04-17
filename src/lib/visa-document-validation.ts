@@ -33,51 +33,53 @@ export async function validateVisaDocument(
     const client = getAnthropicClient();
     const expectedLabel = VISA_CATEGORY_LABELS[expectedCategory] || 'visa document';
 
-    let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg';
+    // Detect if PDF or image
+    const isPdf = imageBase64.startsWith('data:application/pdf') || imageBase64.includes('application/pdf');
+    let base64Data = imageBase64;
+    let detectedMediaType = 'image/jpeg';
+
     if (imageBase64.startsWith('data:')) {
-      const match = imageBase64.match(/^data:(image\/\w+);/);
-      if (match) mediaType = match[1] as typeof mediaType;
-      imageBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      const match = imageBase64.match(/^data:([^;]+);base64,/);
+      if (match) detectedMediaType = match[1];
+      base64Data = imageBase64.replace(/^data:[^;]+;base64,/, '');
     }
+
+    // Build content block — PDF uses 'document' type, images use 'image' type
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fileContent: any = isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+      : { type: 'image', source: { type: 'base64', media_type: detectedMediaType, data: base64Data } };
 
     const response = await withTimeout(
       client.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 512,
+        tools: [
+          {
+            name: 'validate_visa_document',
+            description: 'Validate whether an uploaded document is a legitimate UAE visa/immigration document',
+            input_schema: {
+              type: 'object' as const,
+              properties: {
+                valid: { type: 'boolean', description: 'true if this is a legible UAE immigration/visa document' },
+                detected_type: { type: 'string', description: 'What type of document this appears to be' },
+                details: { type: 'string', description: 'Brief explanation of what is visible' },
+                errorMessage: { type: 'string', description: 'If invalid, explain why. Null if valid.' },
+                expiry_date: { type: 'string', description: 'Expiry date in DD.MM.YYYY if visible, null otherwise' },
+              },
+              required: ['valid', 'details'],
+            },
+          },
+        ],
+        tool_choice: { type: 'tool' as const, name: 'validate_visa_document' },
         messages: [
           {
             role: 'user',
             content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: mediaType,
-                  data: imageBase64,
-                },
-              },
+              fileContent,
               {
                 type: 'text',
-                text: `You are part of an authorized employee onboarding system. The document owner has uploaded this visa document with explicit consent for employment processing as required by UAE labor law.
-
-Analyze this document image. The user claims it is a "${expectedLabel}" for a UAE visa/immigration purpose.
-
-Verify:
-1. Is this document related to UAE immigration/visa? (It should be a UAE-issued document or immigration-related)
-2. Does it appear to match the expected type: "${expectedLabel}"?
-3. Is the document legible and appears genuine (not blank, not a random photo)?
-4. If dates are visible, what is the expiry date?
-
-Respond ONLY with a JSON object (no markdown, no code fences):
-{
-  "valid": true/false,
-  "detected_type": "what type of document this appears to be",
-  "details": "brief explanation of what you see",
-  "errorMessage": "if invalid, explain why (null if valid)",
-  "expiry_date": "DD.MM.YYYY if visible, null otherwise"
-}
-
-Be lenient — if it's a UAE immigration/visa related document and is legible, mark it as valid even if the exact type doesn't perfectly match. The important thing is that it's a real, legible immigration document.`,
+                text: `This is an authorized employee onboarding system. Validate if this is a "${expectedLabel}" for UAE visa/immigration. Be lenient — if it's a legible immigration document, mark valid.`,
               },
             ],
           },
@@ -86,20 +88,23 @@ Be lenient — if it's a UAE immigration/visa related document and is legible, m
       30000
     );
 
-    const textContent = response.content.find((c) => c.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUseBlock = response.content.find(
+      (block: any) => block.type === 'tool_use'
+    ) as { type: 'tool_use'; input: Record<string, unknown> } | undefined;
+
+    if (!toolUseBlock) {
       return { valid: false, details: '', errorMessage: 'No response from AI' };
     }
 
-    const jsonStr = textContent.text.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '');
-    const parsed = JSON.parse(jsonStr);
+    const parsed = toolUseBlock.input as Record<string, unknown>;
 
     return {
       valid: !!parsed.valid,
-      details: parsed.details || '',
-      errorMessage: parsed.errorMessage || undefined,
-      detected_type: parsed.detected_type || undefined,
-      expiry_date: parsed.expiry_date || undefined,
+      details: String(parsed.details || ''),
+      errorMessage: parsed.errorMessage ? String(parsed.errorMessage) : undefined,
+      detected_type: parsed.detected_type ? String(parsed.detected_type) : undefined,
+      expiry_date: parsed.expiry_date ? String(parsed.expiry_date) : undefined,
     };
   } catch (error) {
     console.error('Visa document validation error:', error);

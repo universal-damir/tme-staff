@@ -357,7 +357,9 @@ export function EmployeeForm({
   // Read employer's visa status answers
   const employerVisaInUAE = submission.employer_data?.applicant_in_uae || false;
   const employerVisaCategory = submission.employer_data?.visa_category;
+  // Visa document upload is mandatory when employer selected a visa category (except Visa on Arrival)
   const visaDocumentRequired = employerVisaInUAE && employerVisaCategory && employerVisaCategory !== 'visa_on_arrival';
+  const showVisaDocumentUpload = visaDocumentRequired;
 
   // Passport upload UI state (preview, validating, error — separate from persisted data)
   const initCover = submission.documents?.passportPages?.cover;
@@ -1602,7 +1604,8 @@ export function EmployeeForm({
         onReveal={viewingStep !== 8 ? () => scrollToRef(identityDocsRef) : undefined}
       >
         <div ref={identityDocsRef} className="space-y-6">
-          {/* Emirates ID subsection (optional) */}
+          {/* Emirates ID subsection (optional — new hires only, not renewals) */}
+          {!isRenewal && (
           <FormSection
             title="Emirates ID"
             icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -1844,9 +1847,10 @@ export function EmployeeForm({
               )}
             </div>
           </FormSection>
+          )}
 
           {/* Visa Document Upload (conditional on employer's visa category) */}
-          {visaDocumentRequired && (
+          {showVisaDocumentUpload && (
             <FormSection
               title="Visa Document"
               icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -1884,21 +1888,22 @@ export function EmployeeForm({
                     // Validate the visa document with AI
                     try {
                       const reader = new FileReader();
-                      const preview = await new Promise<string>((resolve) => {
+                      const dataUrl = await new Promise<string>((resolve) => {
                         reader.onload = (e) => resolve(e.target?.result as string);
                         reader.readAsDataURL(file);
                       });
-                      const compressedImage = await compressImageForAI(preview);
+                      // For images: compress first. For PDFs: send raw base64
+                      const isImage = file.type.startsWith('image/');
+                      const imageData = isImage ? await compressImageForAI(dataUrl) : dataUrl;
                       const response = await fetch('/api/validate-visa-document', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ image: compressedImage, expectedCategory: employerVisaCategory }),
+                        body: JSON.stringify({ image: imageData, expectedCategory: employerVisaCategory }),
                       });
                       if (response.ok) {
                         const validationResult = await response.json();
                         if (!validationResult.valid) {
                           setVisaDocUI(prev => ({ ...prev, validating: false, error: validationResult.errorMessage || 'Document does not appear to match the expected type' }));
-                          // Still save the upload — just show the warning
                         }
                       }
                     } catch (err) {

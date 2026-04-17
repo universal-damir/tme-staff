@@ -178,8 +178,32 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
   try {
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-sonnet-4-20250514', // Sonnet 4 for accuracy
+        model: 'claude-sonnet-4-20250514',
         max_tokens: 2048,
+        tools: [
+          {
+            name: 'extract_passport_data',
+            description: 'Extract personal information from a passport image for authorized employee onboarding',
+            input_schema: {
+              type: 'object' as const,
+              properties: {
+                title: { type: 'string', description: 'Mr, Mrs, or Ms - inferred from gender' },
+                first_name: { type: 'string', description: 'Given/first name only in Title Case' },
+                middle_name: { type: 'string', description: 'Middle name(s) in Title Case' },
+                family_name: { type: 'string', description: 'Surname/family name in Title Case' },
+                passport_no: { type: 'string', description: 'Passport number in original format' },
+                passport_issue_date: { type: 'string', description: 'Issue date in DD.MM.YYYY format' },
+                passport_expiry_date: { type: 'string', description: 'Expiry date in DD.MM.YYYY format' },
+                nationality: { type: 'string', description: 'Full country name (e.g. Pakistan, India, Germany)' },
+                date_of_birth: { type: 'string', description: 'Date of birth in DD.MM.YYYY format' },
+                gender: { type: 'string', description: 'Male or Female' },
+                place_of_birth: { type: 'string', description: 'Place of birth/issue' },
+              },
+              required: ['first_name', 'family_name'],
+            },
+          },
+        ],
+        tool_choice: { type: 'tool' as const, name: 'extract_passport_data' },
         messages: [
           {
             role: 'user',
@@ -200,34 +224,39 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
           },
         ],
       }),
-      45000 // 45 second timeout for extraction
+      45000
     );
 
-    // Extract text content
-    const textBlock = response.content.find((block) => block.type === 'text');
-    if (!textBlock || textBlock.type !== 'text') {
-      throw new Error('No text response from Claude');
+    // Extract tool_use result — guaranteed structured output, no refusals
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUseBlock = response.content.find(
+      (block: any) => block.type === 'tool_use'
+    ) as { type: 'tool_use'; input: Record<string, unknown> } | undefined;
+
+    if (!toolUseBlock) {
+      throw new Error('No tool_use response from Claude');
     }
 
-    // Parse JSON from response
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('Could not parse JSON response');
-    }
-
-    const result = JSON.parse(jsonMatch[0]) as PassportExtractionResult;
-
-    // Validate response structure
-    if (typeof result.success !== 'boolean') {
-      throw new Error('Invalid response: missing success field');
-    }
+    const extracted = toolUseBlock.input as Record<string, string | undefined>;
 
     return {
-      success: result.success,
-      data: result.data || {},
-      confidence: result.confidence || {},
-      mrz_verified: result.mrz_verified || false,
-      error: result.error,
+      success: true,
+      data: {
+        title: extracted.title,
+        first_name: extracted.first_name,
+        middle_name: extracted.middle_name,
+        family_name: extracted.family_name,
+        passport_no: extracted.passport_no,
+        passport_issue_date: extracted.passport_issue_date,
+        passport_expiry_date: extracted.passport_expiry_date,
+        nationality: extracted.nationality,
+        date_of_birth: extracted.date_of_birth,
+        gender: extracted.gender,
+        place_of_birth: extracted.place_of_birth,
+      },
+      confidence: {},
+      mrz_verified: false,
+      error: undefined,
     };
   } catch (error) {
     console.error('Passport extraction error:', error);
