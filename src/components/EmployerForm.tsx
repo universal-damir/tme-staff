@@ -165,7 +165,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const probationPeriodValue = watch('probation_period_value');
 
   const handleFormSubmit = async (data: EmployerFormData) => {
-    if (applicantInUAE === null) {
+    if (!isRenewal && applicantInUAE === null) {
       setApplicantInUAEError('Please indicate whether the applicant is currently in the UAE');
       return;
     }
@@ -175,7 +175,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       return;
     }
     setSignatureError(null);
-    await onSubmit({ ...data, applicant_in_uae: applicantInUAE }, signature);
+    await onSubmit({ ...data, applicant_in_uae: applicantInUAE ?? undefined }, signature);
   };
 
   const handleSalaryChange = (values: {
@@ -393,6 +393,11 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         title="Salary Contract"
         icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
+        {isRenewal && (
+          <p className="text-xs text-gray-500 italic mb-3">
+            The salary as written in the previous employment contract. The renewed contract will be issued with this amount.
+          </p>
+        )}
         {isRenewal && payrollTotal ? (
           <div className="mb-3 flex items-center gap-2">
             <button
@@ -564,8 +569,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         </div>
       </FormSection>
 
-      {/* DMCC Job Offer Letter — only for DMCC authority */}
-      {isDMCC && (
+      {/* DMCC Job Offer Letter — only for DMCC authority, new-hire path.
+          Skipped on renewal (already on file from the original onboarding). */}
+      {isDMCC && !isRenewal && (
         <FormSection
           title="Job Offer Letter (DMCC Requirement)"
           icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -606,7 +612,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         </FormSection>
       )}
 
-      {/* UAE Visa Status */}
+      {/* UAE Visa Status — new-hire path only. On renewal the employee's
+          current visa situation is already known from the prior onboarding. */}
+      {!isRenewal && (
       <FormSection
         title="UAE Visa Status"
         icon={<Globe className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -650,6 +658,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
           )}
         </div>
       </FormSection>
+      )}
 
       {/* Signature */}
       <FormSection
