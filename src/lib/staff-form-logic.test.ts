@@ -3,6 +3,8 @@ import {
   mergeStaffDocRefs,
   isPakistaniNationality,
   isDmccAuthority,
+  visaDocumentRequirement,
+  requiresArrivalDate,
 } from './staff-form-logic';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -114,5 +116,48 @@ describe('isDmccAuthority', () => {
     expect(isDmccAuthority(null)).toBe(false);
     expect(isDmccAuthority(undefined)).toBe(false);
     expect(isDmccAuthority('')).toBe(false);
+  });
+});
+
+describe('visaDocumentRequirement', () => {
+  it('requires a document for tourist / employment / immigration / golden / dependent', () => {
+    expect(visaDocumentRequirement('tourist_visa')).toBe('mandatory');
+    expect(visaDocumentRequirement('employment_visa')).toBe('mandatory');
+    expect(visaDocumentRequirement('immigration_cancellation')).toBe('mandatory');
+    expect(visaDocumentRequirement('golden_visa')).toBe('mandatory');
+    expect(visaDocumentRequirement('dependent_visa')).toBe('mandatory');
+  });
+
+  it('makes the document optional for "other"', () => {
+    expect(visaDocumentRequirement('other')).toBe('optional');
+  });
+
+  it('skips document upload for visa_on_arrival (captured via arrival date)', () => {
+    expect(visaDocumentRequirement('visa_on_arrival')).toBe('none');
+  });
+
+  it('returns "none" for undefined / null', () => {
+    expect(visaDocumentRequirement(undefined)).toBe('none');
+    expect(visaDocumentRequirement(null)).toBe('none');
+  });
+});
+
+describe('requiresArrivalDate', () => {
+  it('is true only for visa_on_arrival', () => {
+    expect(requiresArrivalDate('visa_on_arrival')).toBe(true);
+  });
+
+  it('is false for every other category', () => {
+    expect(requiresArrivalDate('tourist_visa')).toBe(false);
+    expect(requiresArrivalDate('employment_visa')).toBe(false);
+    expect(requiresArrivalDate('immigration_cancellation')).toBe(false);
+    expect(requiresArrivalDate('golden_visa')).toBe(false);
+    expect(requiresArrivalDate('dependent_visa')).toBe(false);
+    expect(requiresArrivalDate('other')).toBe(false);
+  });
+
+  it('is false for undefined / null', () => {
+    expect(requiresArrivalDate(undefined)).toBe(false);
+    expect(requiresArrivalDate(null)).toBe(false);
   });
 });

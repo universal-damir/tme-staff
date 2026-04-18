@@ -131,7 +131,7 @@ export function SalaryBreakdown({
   errors,
 }: SalaryBreakdownProps) {
   const [isExpanded, setIsExpanded] = useState(true);
-  const [showInfo, setShowInfo] = useState(false);
+  const [showInfo, setShowInfo] = useState(true);
 
   // Calculate sum and discrepancy
   const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0) + (prepayCard || 0);

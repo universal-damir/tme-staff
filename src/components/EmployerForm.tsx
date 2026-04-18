@@ -43,20 +43,55 @@ function FormSection({ title, icon, children }: FormSectionProps) {
   );
 }
 
+/**
+ * Read-only view of a salary breakdown — used on renewal to show the current
+ * payroll as reference data next to the editable contract salary.
+ */
+interface ReadOnlySalarySummaryProps {
+  currency: string;
+  total: number | undefined;
+  basic: number | undefined;
+  accommodation: number | undefined;
+  transport: number | undefined;
+  food?: number | undefined;
+  other?: number | undefined;
+  prepayCard?: number | undefined;
+}
+
+function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
+  const fmt = (n: number | undefined) =>
+    n === undefined || n === null || isNaN(n) ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const rows: Array<{ label: string; value: number | undefined }> = [
+    { label: 'Monthly Salary (Total)', value: props.total },
+    { label: 'Basic', value: props.basic },
+    { label: 'Accommodation', value: props.accommodation },
+    { label: 'Transport', value: props.transport },
+    { label: 'Food', value: props.food },
+    { label: 'Other', value: props.other },
+    { label: 'Prepaid Card', value: props.prepayCard },
+  ];
+  return (
+    <div className="border-2 border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-3 py-2 bg-gray-50 border-b-2 border-gray-200 text-xs font-medium text-gray-600">
+        Currency: <span style={{ color: TME_COLORS.primary }}>{props.currency}</span>
+      </div>
+      <div className="divide-y divide-gray-100">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center justify-between px-3 py-2 text-sm">
+            <span className="text-gray-600">{r.label}</span>
+            <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(r.value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Helper function to pluralize time units
 function pluralize(value: number | undefined, singular: string): string {
   if (value === undefined || value === null) return singular + 's';
   return value === 1 ? singular : singular + 's';
 }
-
-// Visa category options for UAE presence
-const VISA_CATEGORY_OPTIONS = [
-  { value: 'tourist_visa', label: 'Tourist Visa' },
-  { value: 'visa_on_arrival', label: 'Visa on Arrival' },
-  { value: 'employment_visa', label: 'Employment Visa (currently employed with another company)' },
-  { value: 'immigration_cancellation', label: 'Immigration Cancellation (recently quit previous role)' },
-  { value: 'other_na', label: 'Other (Not Applicable)' },
-];
 
 export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: EmployerFormProps) {
   const { professions: jobTitleOptions, loading: jobTitlesLoading } = useMohreProfessions();
@@ -72,10 +107,15 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   // Job Offer Letter state (DMCC only)
   const [jobOfferLetterDoc, setJobOfferLetterDoc] = useState(submission.documents?.job_offer_letter);
 
-  // UAE visa status
-  const [applicantInUAE, setApplicantInUAE] = useState(
-    submission.employer_data?.applicant_in_uae || false
+  // UAE visa status — tri-state so "No" is a real answer, not the absence of one.
+  // Prefill from saved data → prefill → null (unanswered).
+  const savedApplicantInUAE =
+    submission.employer_data?.applicant_in_uae ??
+    (submission.prefill_employer_data as Record<string, unknown> | null)?.applicant_in_uae;
+  const [applicantInUAE, setApplicantInUAE] = useState<boolean | null>(
+    typeof savedApplicantInUAE === 'boolean' ? savedApplicantInUAE : null
   );
+  const [applicantInUAEError, setApplicantInUAEError] = useState<string | null>(null);
 
   const {
     register,
@@ -98,8 +138,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       ...submission.prefill_employer_data,
     },
   });
-
-  const visaCategory = watch('visa_category');
 
   const jobTitleVisa = watch('job_title_visa');
   const jobTitleCompany = watch('job_title_company');
@@ -127,12 +165,17 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const probationPeriodValue = watch('probation_period_value');
 
   const handleFormSubmit = async (data: EmployerFormData) => {
+    if (applicantInUAE === null) {
+      setApplicantInUAEError('Please indicate whether the applicant is currently in the UAE');
+      return;
+    }
+    setApplicantInUAEError(null);
     if (!signature) {
       setSignatureError('Please sign the form');
       return;
     }
     setSignatureError(null);
-    await onSubmit(data, signature);
+    await onSubmit({ ...data, applicant_in_uae: applicantInUAE }, signature);
   };
 
   const handleSalaryChange = (values: {
@@ -155,27 +198,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('salary_prepay_card', values.salary_prepay_card);
   };
 
-  // Remap SalaryBreakdown's salary_* keys to payroll_salary_* form fields
-  const handlePayrollSalaryChange = (values: {
-    salary_currency: string;
-    salary_total: number | undefined;
-    salary_basic: number | undefined;
-    salary_accommodation: number | undefined;
-    salary_transport: number | undefined;
-    salary_food?: number | undefined;
-    salary_other?: number | undefined;
-    salary_prepay_card?: number | undefined;
-  }) => {
-    setValue('payroll_salary_currency', values.salary_currency);
-    setValue('payroll_salary_total', values.salary_total);
-    setValue('payroll_salary_basic', values.salary_basic);
-    setValue('payroll_salary_accommodation', values.salary_accommodation);
-    setValue('payroll_salary_transport', values.salary_transport);
-    setValue('payroll_salary_food', values.salary_food);
-    setValue('payroll_salary_other', values.salary_other);
-    setValue('payroll_salary_prepay_card', values.salary_prepay_card);
-  };
-
   const showMatchFeedback = (label: string) => {
     setMatchFeedback(label);
     setTimeout(() => setMatchFeedback(null), 1500);
@@ -191,18 +213,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('salary_other', payrollOther);
     setValue('salary_prepay_card', payrollPrepayCard);
     showMatchFeedback('contract');
-  };
-
-  const handleMatchContractToPayroll = () => {
-    setValue('payroll_salary_currency', salaryCurrency || 'AED');
-    setValue('payroll_salary_total', salaryTotal);
-    setValue('payroll_salary_basic', salaryBasic);
-    setValue('payroll_salary_accommodation', salaryAccommodation);
-    setValue('payroll_salary_transport', salaryTransport);
-    setValue('payroll_salary_food', salaryFood);
-    setValue('payroll_salary_other', salaryOther);
-    setValue('payroll_salary_prepay_card', salaryPrepayCard);
-    showMatchFeedback('payroll');
   };
 
   return (
@@ -378,12 +388,12 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         </div>
       </FormSection>
 
-      {/* Salary Contract */}
+      {/* Salary Contract — editable */}
       <FormSection
         title="Salary Contract"
         icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
-        {payrollTotal && (
+        {isRenewal && payrollTotal ? (
           <div className="mb-3 flex items-center gap-2">
             <button
               type="button"
@@ -391,11 +401,11 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border border-[#243F7B] text-[#243F7B] transition-all hover:bg-[#243F7B] hover:text-white hover:shadow-sm"
             >
               <Copy className="w-3 h-3" />
-              Match Payroll
+              Match to current payroll
             </button>
             {matchFeedback === 'contract' && <span className="text-xs text-green-600 font-medium animate-pulse">Matched!</span>}
           </div>
-        )}
+        ) : null}
         <SalaryBreakdown
           currency={salaryCurrency || 'AED'}
           total={salaryTotal}
@@ -412,42 +422,38 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         />
       </FormSection>
 
-      {/* Salary Payroll */}
-      <FormSection
-        title="Salary Payroll"
-        icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-gray-500">
-            The payroll salary is what is actually paid monthly. It may differ from the contract salary.
-          </p>
-          {salaryTotal && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleMatchContractToPayroll}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border border-[#243F7B] text-[#243F7B] transition-all hover:bg-[#243F7B] hover:text-white hover:shadow-sm"
-              >
-                <Copy className="w-3 h-3" />
-                Match Contract
-              </button>
-              {matchFeedback === 'payroll' && <span className="text-xs text-green-600 font-medium animate-pulse">Matched!</span>}
+      {/* Salary Payroll — renewal only, read-only reference of what is currently
+          being paid. Shown so the employer can compare contract vs actual and
+          decide whether to update the contract figure above. Not collected on
+          new onboarding (no prior payroll exists). */}
+      {isRenewal && payrollTotal !== undefined && (
+        <FormSection
+          title="Current Salary Payroll (reference)"
+          icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        >
+          <div className="space-y-3">
+            <div
+              className="flex items-start gap-3 p-4 rounded-lg"
+              style={{ backgroundColor: '#F3F4F6' }}
+            >
+              <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-gray-500" />
+              <p className="text-sm text-gray-700">
+                This is the payroll currently on file — what is actually paid each month. It may differ from the contract above (e.g. after a raise). The renewed contract will use the figures in <strong>Salary Contract</strong>, not this. Use “Match to current payroll” above if you want to align the contract with what is being paid.
+              </p>
             </div>
-          )}
-          <SalaryBreakdown
-            currency={payrollCurrency || salaryCurrency || 'AED'}
-            total={payrollTotal}
-            basic={payrollBasic}
-            accommodation={payrollAccommodation}
-            transport={payrollTransport}
-            food={payrollFood}
-            other={payrollOther}
-            prepayCard={payrollPrepayCard}
-            onChange={handlePayrollSalaryChange}
-            errors={{}}
-          />
-        </div>
-      </FormSection>
+            <ReadOnlySalarySummary
+              currency={payrollCurrency || salaryCurrency || 'AED'}
+              total={payrollTotal}
+              basic={payrollBasic}
+              accommodation={payrollAccommodation}
+              transport={payrollTransport}
+              food={payrollFood}
+              other={payrollOther}
+              prepayCard={payrollPrepayCard}
+            />
+          </div>
+        </FormSection>
+      )}
 
       {/* Leave & Terms */}
       <FormSection
@@ -605,56 +611,42 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         title="UAE Visa Status"
         icon={<Globe className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
       >
-        <div className="space-y-4">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={applicantInUAE}
-              onChange={(e) => {
-                setApplicantInUAE(e.target.checked);
-                setValue('applicant_in_uae', e.target.checked);
-                if (!e.target.checked) {
-                  setValue('visa_category', undefined);
-                }
-              }}
-              className="w-4 h-4 rounded border-gray-300"
-              style={{ accentColor: TME_COLORS.primary }}
-            />
-            <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-              Is the applicant currently in the UAE?
-            </span>
-          </label>
-
-          {applicantInUAE && (
-            <div className="pl-6 border-l-2 border-gray-200 space-y-3">
-              <p className="text-sm text-gray-600">
-                What visa category does the applicant currently hold?
+        <div className="space-y-3">
+          <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+            Is the applicant currently in the UAE? <span className="text-red-500">*</span>
+          </p>
+          <div className="flex items-center gap-6">
+            {([
+              { value: true, label: 'Yes' },
+              { value: false, label: 'No' },
+            ] as const).map((opt) => (
+              <label key={opt.label} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="applicant_in_uae"
+                  checked={applicantInUAE === opt.value}
+                  onChange={() => {
+                    setApplicantInUAE(opt.value);
+                    setValue('applicant_in_uae', opt.value);
+                    setApplicantInUAEError(null);
+                  }}
+                  className="w-4 h-4"
+                  style={{ accentColor: TME_COLORS.primary }}
+                />
+                <span className="text-sm" style={{ color: TME_COLORS.primary }}>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+          {applicantInUAE === true && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50">
+              <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-600" />
+              <p className="text-xs text-blue-800">
+                The employee will confirm their current visa category (and upload any required supporting documents) during their part of the onboarding form.
               </p>
-              <CustomDropdown
-                label="Visa Category"
-                options={VISA_CATEGORY_OPTIONS}
-                value={visaCategory || ''}
-                onChange={(val) => setValue('visa_category', val as EmployerFormData['visa_category'])}
-                placeholder="Select visa category..."
-                required
-              />
-              {visaCategory && visaCategory !== 'visa_on_arrival' && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50">
-                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-600" />
-                  <p className="text-xs text-blue-800">
-                    The employee will be prompted to upload a copy of their {VISA_CATEGORY_OPTIONS.find(o => o.value === visaCategory)?.label || 'visa document'} during their part of the onboarding form.
-                  </p>
-                </div>
-              )}
-              {visaCategory === 'visa_on_arrival' && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-gray-50">
-                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-500" />
-                  <p className="text-xs text-gray-600">
-                    No document upload will be required from the employee for Visa on Arrival.
-                  </p>
-                </div>
-              )}
             </div>
+          )}
+          {applicantInUAEError && (
+            <p className="text-sm text-red-500">{applicantInUAEError}</p>
           )}
         </div>
       </FormSection>

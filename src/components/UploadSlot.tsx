@@ -2,7 +2,7 @@
 
 import React, { useState, useRef } from 'react';
 import { TME_COLORS } from '@/lib/constants';
-import { Upload, CheckCircle, AlertCircle, X, Loader2 } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, X, Loader2, FileText } from 'lucide-react';
 
 interface UploadSlotProps {
   label: string;
@@ -121,13 +121,21 @@ export function UploadSlot({
         {/* Preview or Upload Prompt */}
         {preview ? (
           <div className="relative p-2">
-            {/* Image Preview - using img for base64 data URLs */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={preview}
-              alt={label}
-              className="w-full h-64 object-contain rounded-lg"
-            />
+            {/* Images preview inline. PDFs don't preview — validation runs,
+                and once valid we just show a compact "PDF uploaded" card. */}
+            {preview.startsWith('data:application/pdf') || preview.toLowerCase().endsWith('.pdf') ? (
+              <div className="w-full h-64 flex flex-col items-center justify-center rounded-lg bg-white">
+                <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
+                <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
+              </div>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={preview}
+                alt={label}
+                className="w-full h-64 object-contain rounded-lg"
+              />
+            )}
 
             {/* Status Badge */}
             <div className="absolute top-4 right-4">

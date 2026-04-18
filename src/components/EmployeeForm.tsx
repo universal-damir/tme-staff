@@ -19,11 +19,16 @@ import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
-import type { EmployeeFormData, EmployeeFormProps, PassportPageReference } from '@/types';
-import { mergeStaffDocRefs, isPakistaniNationality as checkPakistaniNationality } from '@/lib/staff-form-logic';
+import type { EmployeeFormData, EmployeeFormProps, PassportPageReference, VisaCategory } from '@/types';
+import {
+  mergeStaffDocRefs,
+  isPakistaniNationality as checkPakistaniNationality,
+  visaDocumentRequirement,
+  requiresArrivalDate,
+} from '@/lib/staff-form-logic';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
 import { calculateFullName, compressImageForAI } from '@/lib/utils';
-import { nationalityToCountryCode } from '@/lib/country-utils';
+import { nationalityToCountryCode, resolveExtractedNationality } from '@/lib/country-utils';
 import { SampleImageToggle } from '@/components/SampleImageToggle';
 import {
   User,
@@ -69,12 +74,25 @@ const STEP_LABELS = [
 
 // Visa category labels for display
 const VISA_CATEGORY_LABELS: Record<string, string> = {
-  tourist_visa: 'Tourist Visa',
-  visa_on_arrival: 'Visa on Arrival',
-  employment_visa: 'Employment Visa',
-  immigration_cancellation: 'Immigration Cancellation document',
-  other_na: 'visa or immigration document',
+  visa_on_arrival: 'On arrival visa',
+  tourist_visa: 'Tourist visa',
+  employment_visa: 'Employment visa',
+  immigration_cancellation: 'Immigration cancellation document',
+  golden_visa: 'Golden visa',
+  dependent_visa: 'Dependent visa',
+  other: 'Supporting document',
 };
+
+// Options for the employee-facing visa status dropdown.
+const EMPLOYEE_VISA_CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'visa_on_arrival', label: 'On arrival visa' },
+  { value: 'tourist_visa', label: 'Tourist visa' },
+  { value: 'employment_visa', label: 'Employment visa (currently employed with another company)' },
+  { value: 'immigration_cancellation', label: 'Immigration cancellation' },
+  { value: 'golden_visa', label: 'Golden visa holder' },
+  { value: 'dependent_visa', label: 'Dependent visa' },
+  { value: 'other', label: 'Other' },
+];
 
 interface FormSectionProps {
   title: string;
@@ -312,9 +330,16 @@ export function EmployeeForm({
   React.useEffect(() => { transcriptDocRef.current = transcriptDoc; }, [transcriptDoc]);
   React.useEffect(() => { educationAdditionalDocRef.current = educationAdditionalDoc; }, [educationAdditionalDoc]);
 
-  // Emirates ID state (optional — previously held EID)
-  const [hasPreviousEid, setHasPreviousEid] = useState(
-    !!(submission.employee_data?.has_previous_eid) || !!(submission.documents?.eid_front)
+  // "Did you previously hold a UAE visa and Emirates ID?" — tri-state so that
+  // No is a real answer (collapses the section) and Yes unveils both the
+  // previous-visa slot and the EID front/back slots. Stored back into
+  // `has_previous_eid` in the form for backwards-compat with existing
+  // downstream consumers.
+  const savedHasPreviousUaeDocs =
+    submission.employee_data?.has_previous_eid ??
+    (!!submission.documents?.eid_front || !!submission.documents?.previous_visa_document ? true : undefined);
+  const [hasPreviousUaeDocs, setHasPreviousUaeDocs] = useState<boolean | null>(
+    typeof savedHasPreviousUaeDocs === 'boolean' ? savedHasPreviousUaeDocs : null
   );
   const [eidFrontDoc, setEidFrontDoc] = useState(submission.documents?.eid_front);
   const [eidBackDoc, setEidBackDoc] = useState(submission.documents?.eid_back);
@@ -330,6 +355,16 @@ export function EmployeeForm({
   const eidBackDocRef = React.useRef(eidBackDoc);
   React.useEffect(() => { eidFrontDocRef.current = eidFrontDoc; }, [eidFrontDoc]);
   React.useEffect(() => { eidBackDocRef.current = eidBackDoc; }, [eidBackDoc]);
+
+  // Previous UAE visa / residence permit state (optional, sits alongside EID
+  // inside the same Yes/No section).
+  const [previousVisaDoc, setPreviousVisaDoc] = useState(submission.documents?.previous_visa_document);
+  const [previousVisaUI, setPreviousVisaUI] = useState({
+    preview: submission.documents?.previous_visa_document?.path ? getDocumentUrl(submission.documents.previous_visa_document.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const previousVisaDocRef = React.useRef(previousVisaDoc);
+  React.useEffect(() => { previousVisaDocRef.current = previousVisaDoc; }, [previousVisaDoc]);
 
   // Pakistani National ID state (conditional on Pakistani nationality)
   const [pakistanIdFrontDoc, setPakistanIdFrontDoc] = useState(submission.documents?.pakistan_id_front);
@@ -355,12 +390,10 @@ export function EmployeeForm({
   const visaDocRef = React.useRef(visaDoc);
   React.useEffect(() => { visaDocRef.current = visaDoc; }, [visaDoc]);
 
-  // Read employer's visa status answers
-  const employerVisaInUAE = submission.employer_data?.applicant_in_uae || false;
-  const employerVisaCategory = submission.employer_data?.visa_category;
-  // Visa document upload is mandatory when employer selected a visa category (except Visa on Arrival)
-  const visaDocumentRequired = employerVisaInUAE && employerVisaCategory && employerVisaCategory !== 'visa_on_arrival';
-  const showVisaDocumentUpload = visaDocumentRequired;
+  // Employer's "Yes" answer gates the visa-status section below. The actual
+  // category + arrival date are picked by the employee (derived below, after
+  // useForm is initialized and `watch` is available).
+  const employerVisaInUAE = submission.employer_data?.applicant_in_uae === true;
 
   // Passport upload UI state (preview, validating, error — separate from persisted data)
   const initCover = submission.documents?.passportPages?.cover;
@@ -444,6 +477,8 @@ export function EmployeeForm({
     register('eid_number');
     register('eid_issue_date');
     register('eid_expiry_date');
+    register('visa_category');
+    register('visa_arrival_date');
   }, [register]);
 
   const title = watch('title');
@@ -469,6 +504,13 @@ export function EmployeeForm({
   const fatherFullName = watch('father_full_name');
   const motherFullName = watch('mother_full_name');
   const dateOfBirth = watch('date_of_birth');
+  const employeeVisaCategory = watch('visa_category') as VisaCategory | undefined;
+  const employeeVisaArrivalDate = watch('visa_arrival_date');
+  const visaUploadRule = visaDocumentRequirement(employeeVisaCategory);
+  const showVisaCategoryPicker = employerVisaInUAE;
+  const showArrivalDatePicker = showVisaCategoryPicker && requiresArrivalDate(employeeVisaCategory);
+  const showVisaDocumentUpload = showVisaCategoryPicker && visaUploadRule !== 'none';
+  const visaDocumentRequired = showVisaCategoryPicker && visaUploadRule === 'mandatory';
   const passportNumber = watch('passport_number');
   const passportIssueDate = watch('passport_issue_date');
   const passportExpiry = watch('passport_expiry');
@@ -559,7 +601,17 @@ export function EmployeeForm({
 
   // Step 4 (Identity & Visa Documents) completion check
   const isVisaDocUploaded = !!visaDoc;
-  const isStep4Complete = !visaDocumentRequired || isVisaDocUploaded;
+  const isVisaCategoryPicked = !!employeeVisaCategory;
+  const isArrivalDateProvided = !!employeeVisaArrivalDate;
+  const isVisaSectionComplete = !showVisaCategoryPicker
+    ? true
+    : isVisaCategoryPicked &&
+      (!showArrivalDatePicker || isArrivalDateProvided) &&
+      (!visaDocumentRequired || isVisaDocUploaded);
+  // Combined "UAE Visa and Emirates ID" section requires a Yes/No answer on
+  // new-hire onboarding. Uploads themselves are optional.
+  const isPreviousUaeDocsAnswered = isRenewal || hasPreviousUaeDocs !== null;
+  const isStep4Complete = isVisaSectionComplete && isPreviousUaeDocsAnswered;
 
   // Compute the highest unlocked step (1-indexed, 8 steps total)
   const computeCurrentStep = useCallback(() => {
@@ -668,6 +720,7 @@ export function EmployeeForm({
       pakistan_id_front: pakistanIdFrontDocRef.current,
       pakistan_id_back: pakistanIdBackDocRef.current,
       visa_document: visaDocRef.current,
+      previous_visa_document: previousVisaDocRef.current,
     });
 
   const handlePhotoUpload = async (file: File) => {
@@ -740,6 +793,14 @@ export function EmployeeForm({
         // Normalize gender to lowercase
         if (formField === 'gender' && typeof value === 'string') {
           setValue('gender', value.toLowerCase() as 'male' | 'female');
+          return;
+        }
+        // Normalize nationality to a NATIONALITIES entry so the dropdown
+        // actually selects it. Passports print demonyms / long official
+        // names that don't match the list verbatim.
+        if (formField === 'nationality' && typeof value === 'string') {
+          const resolved = resolveExtractedNationality(value, NATIONALITIES);
+          if (resolved) setValue('nationality', resolved);
           return;
         }
         setValue(formField as keyof EmployeeFormData, value as never);
@@ -1606,49 +1667,250 @@ export function EmployeeForm({
         onReveal={viewingStep !== 8 ? () => scrollToRef(identityDocsRef) : undefined}
       >
         <div ref={identityDocsRef} className="space-y-6">
-          {/* Emirates ID subsection (optional — new hires only, not renewals) */}
+          {/* UAE Visa Status — appears first when employer answered "Yes, applicant is in the UAE" */}
+          {showVisaCategoryPicker && (
+            <FormSection
+              title="UAE Visa Status"
+              icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            >
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  Your employer has indicated that you are currently in the UAE. Please confirm your current visa status.
+                </p>
+
+                <CustomDropdown
+                  label="Current visa status"
+                  options={EMPLOYEE_VISA_CATEGORY_OPTIONS}
+                  value={employeeVisaCategory || ''}
+                  onChange={(val) => {
+                    setValue('visa_category', val as VisaCategory);
+                    if (val !== 'visa_on_arrival') {
+                      setValue('visa_arrival_date', undefined);
+                    }
+                    if (val === 'visa_on_arrival') {
+                      if (visaDocRef.current) {
+                        setVisaDoc(undefined);
+                        visaDocRef.current = undefined;
+                        updateDocumentReferences(submission.id, buildDocRefs()).catch(() => {});
+                      }
+                    }
+                  }}
+                  placeholder="Select your current visa status..."
+                  required
+                />
+
+                {showArrivalDatePicker && (
+                  <div className="space-y-2">
+                    <CustomDatePicker
+                      label="Date of Arrival"
+                      value={employeeVisaArrivalDate || ''}
+                      onChange={(val) => setValue('visa_arrival_date', val)}
+                      required
+                    />
+                    <p className="text-xs text-gray-500">
+                      This is the date you entered the UAE on your arrival visa. It will be included in the onboarding confirmation.
+                    </p>
+                  </div>
+                )}
+
+                {showVisaDocumentUpload && (
+                  <div className="space-y-3">
+                    <div
+                      className="flex items-start gap-3 p-4 rounded-lg"
+                      style={{ backgroundColor: visaUploadRule === 'mandatory' ? '#FEF3C7' : '#F3F4F6' }}
+                    >
+                      <Info className={`w-5 h-5 flex-shrink-0 mt-0.5 ${visaUploadRule === 'mandatory' ? 'text-amber-600' : 'text-gray-500'}`} />
+                      <div className={`text-sm ${visaUploadRule === 'mandatory' ? 'text-amber-800' : 'text-gray-700'}`}>
+                        <p className="font-medium">
+                          {visaUploadRule === 'mandatory'
+                            ? `Please upload a copy of your ${VISA_CATEGORY_LABELS[employeeVisaCategory!] || 'supporting document'}.`
+                            : 'You may upload a supporting document if you have one (optional).'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <UploadSlot
+                      label=""
+                      description={`Scan or photo of your ${VISA_CATEGORY_LABELS[employeeVisaCategory!] || 'supporting document'} (PDF or image)`}
+                      expectedType="INSIDE_PAGES"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      maxSizeMB={10}
+                      file={visaDocUI.file}
+                      preview={visaDocUI.preview || undefined}
+                      validated={!!visaDoc?.validated}
+                      validating={visaDocUI.validating}
+                      error={visaDocUI.error || undefined}
+                      onUpload={async (file) => {
+                        const reader = new FileReader();
+                        const preview = await new Promise<string>((resolve) => {
+                          reader.onload = (e) => resolve(e.target?.result as string);
+                          reader.readAsDataURL(file);
+                        });
+                        setVisaDocUI({ preview, validating: false, error: null, file });
+                        const result = await uploadDocument(submission.id, 'visa_document', file);
+                        if (!result) {
+                          setVisaDocUI({ preview, validating: false, error: 'Failed to upload', file });
+                          return false;
+                        }
+                        const docWithMeta = { ...result, validated: true, visa_category: employeeVisaCategory };
+                        setVisaDoc(docWithMeta);
+                        visaDocRef.current = docWithMeta;
+                        try {
+                          const refs = buildDocRefs();
+                          await updateDocumentReferences(submission.id, refs);
+                        } catch (err) {
+                          console.error('[VisaUpload] failed to persist doc refs', err);
+                        }
+                        return true;
+                      }}
+                      onRemove={async () => {
+                        setVisaDoc(undefined);
+                        visaDocRef.current = undefined;
+                        setVisaDocUI({ preview: null, validating: false, error: null, file: null });
+                        await updateDocumentReferences(submission.id, buildDocRefs());
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </FormSection>
+          )}
+
+          {/* UAE Visa and Emirates ID — combined previous-documents section.
+              New-hire path only (on renewal we already have these on file). */}
           {!isRenewal && (
           <FormSection
-            title="Emirates ID"
+            title="UAE Visa and Emirates ID"
             icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
             stepNumber={4}
           >
             <div className="space-y-4">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={hasPreviousEid}
-                  onChange={(e) => {
-                    setHasPreviousEid(e.target.checked);
-                    setValue('has_previous_eid', e.target.checked);
-                    if (!e.target.checked) {
-                      setValue('eid_number', undefined);
-                      setValue('eid_issue_date', undefined);
-                      setValue('eid_expiry_date', undefined);
-                    }
-                  }}
-                  className="w-4 h-4 rounded border-gray-300"
-                  style={{ accentColor: TME_COLORS.primary }}
-                />
-                <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-                  Did you previously hold a UAE Emirates ID?
-                </span>
-              </label>
+              <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                Did you previously hold a UAE visa and Emirates ID? <span className="text-red-500">*</span>
+              </p>
+              <div className="flex items-center gap-6">
+                {([
+                  { value: true, label: 'Yes' },
+                  { value: false, label: 'No' },
+                ] as const).map((opt) => (
+                  <label key={opt.label} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="has_previous_uae_docs"
+                      checked={hasPreviousUaeDocs === opt.value}
+                      onChange={() => {
+                        setHasPreviousUaeDocs(opt.value);
+                        setValue('has_previous_eid', opt.value);
+                        if (opt.value === false) {
+                          // Clear any previously entered EID fields when the
+                          // user switches back to No.
+                          setValue('eid_number', undefined);
+                          setValue('eid_issue_date', undefined);
+                          setValue('eid_expiry_date', undefined);
+                        }
+                      }}
+                      className="w-4 h-4"
+                      style={{ accentColor: TME_COLORS.primary }}
+                    />
+                    <span className="text-sm" style={{ color: TME_COLORS.primary }}>{opt.label}</span>
+                  </label>
+                ))}
+              </div>
 
-              {hasPreviousEid && (
-                <div className="space-y-4 pl-6 border-l-2 border-gray-200">
+              {hasPreviousUaeDocs === true && (
+                <div className="space-y-5 pl-6 border-l-2 border-gray-200">
+                  {/* Combined guidance — applies to both the visa and the EID uploads below */}
                   <div
                     className="flex items-start gap-3 p-4 rounded-lg"
                     style={{ backgroundColor: '#EBF4FF' }}
                   >
                     <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
                     <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                      <p className="font-medium">If you have a copy, please upload the front and back of your Emirates ID</p>
+                      <p className="font-medium">If you have a copy, please upload your previous UAE visa and the front and back of your Emirates ID.</p>
+
                       <p className="mt-1 text-xs text-gray-600">
-                        This is not mandatory, but UAE authorities may request it during visa processing. Expired IDs are accepted.
+                        UAE authorities may request these during visa processing. Expired documents are accepted.
                       </p>
                     </div>
                   </div>
+
+                  {/* Previous UAE visa upload — accepts PDF/image, AI-validated loosely.
+                      Uses UploadSlot for visual consistency with the EID drop-zones below. */}
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Previous UAE visa</p>
+                    <div className="text-center mb-2">
+                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Example</p>
+                      <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/samples/visa-example.png" alt="Example UAE visa" className="h-32 sm:h-40 object-contain" />
+                      </div>
+                    </div>
+                    <UploadSlot
+                      label=""
+                      description="Scan or photo of your previous UAE visa (PDF or image)"
+                      expectedType="INSIDE_PAGES"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      maxSizeMB={10}
+                      file={previousVisaUI.file}
+                      preview={previousVisaUI.preview || undefined}
+                      validated={!!previousVisaDoc?.validated}
+                      validating={previousVisaUI.validating}
+                      error={previousVisaUI.error || undefined}
+                      onUpload={async (file) => {
+                        const reader = new FileReader();
+                        const preview = await new Promise<string>((resolve) => {
+                          reader.onload = (e) => resolve(e.target?.result as string);
+                          reader.readAsDataURL(file);
+                        });
+                        setPreviousVisaUI({ preview, validating: true, error: null, file });
+
+                        // Loose AI validation — a scan or phone photo is fine.
+                        try {
+                          const isImage = file.type.startsWith('image/');
+                          const imageData = isImage ? await compressImageForAI(preview) : preview;
+                          const response = await fetch('/api/validate-visa-document', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ image: imageData, expectedCategory: 'previous_visa' }),
+                          });
+                          if (response.ok) {
+                            const validationResult = await response.json();
+                            if (!validationResult.valid) {
+                              setPreviousVisaUI({
+                                preview,
+                                validating: false,
+                                error: validationResult.errorMessage || 'This does not look like a UAE visa. You can retry or skip this upload.',
+                                file,
+                              });
+                              return false;
+                            }
+                          }
+                        } catch (err) {
+                          console.error('Previous visa validation error:', err);
+                          // Non-blocking — allow upload if the validator is unreachable
+                        }
+
+                        const result = await uploadDocument(submission.id, 'previous_visa_document', file);
+                        if (!result) {
+                          setPreviousVisaUI({ preview, validating: false, error: 'Failed to upload', file });
+                          return false;
+                        }
+                        setPreviousVisaUI({ preview, validating: false, error: null, file });
+                        const newDoc = { ...result, validated: true };
+                        setPreviousVisaDoc(newDoc);
+                        previousVisaDocRef.current = newDoc;
+                        await updateDocumentReferences(submission.id, buildDocRefs());
+                        return true;
+                      }}
+                      onRemove={async () => {
+                        setPreviousVisaUI({ preview: null, validating: false, error: null, file: null });
+                        setPreviousVisaDoc(undefined);
+                        previousVisaDocRef.current = undefined;
+                        await updateDocumentReferences(submission.id, buildDocRefs());
+                      }}
+                    />
+                  </div>
+
 
                   {/* Sample images — shown together above upload areas */}
                   <div className="grid grid-cols-2 gap-3 mb-4">
@@ -1851,116 +2113,7 @@ export function EmployeeForm({
           </FormSection>
           )}
 
-          {/* Visa Document Upload (conditional on employer's visa category) */}
-          {showVisaDocumentUpload && (
-            <FormSection
-              title="Visa Document"
-              icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            >
-              <div className="space-y-4">
-                <div
-                  className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ backgroundColor: '#FEF3C7' }}
-                >
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
-                  <div className="text-sm text-amber-800">
-                    <p className="font-medium">
-                      Your employer has indicated that you are currently in the UAE on a {VISA_CATEGORY_LABELS[employerVisaCategory!] || 'visa'}.
-                    </p>
-                    <p className="mt-1">
-                      Please upload a copy of your {VISA_CATEGORY_LABELS[employerVisaCategory!] || 'visa document'}. This is required to proceed.
-                    </p>
-                  </div>
-                </div>
-
-                <FileUploadSlot
-                  label={`Upload ${VISA_CATEGORY_LABELS[employerVisaCategory!] || 'Visa Document'}`}
-                  description="PDF or image of your visa document"
-                  uploaded={!!visaDoc}
-                  filename={visaDoc?.filename}
-                  onUpload={async (file) => {
-                    setVisaDocUI(prev => ({ ...prev, validating: true, error: null }));
-
-                    const result = await uploadDocument(submission.id, 'visa_document', file);
-                    if (!result) {
-                      setVisaDocUI(prev => ({ ...prev, validating: false, error: 'Failed to upload' }));
-                      return null;
-                    }
-
-                    // Validate the visa document with AI
-                    try {
-                      const reader = new FileReader();
-                      const dataUrl = await new Promise<string>((resolve) => {
-                        reader.onload = (e) => resolve(e.target?.result as string);
-                        reader.readAsDataURL(file);
-                      });
-                      // For images: compress first. For PDFs: send raw base64
-                      const isImage = file.type.startsWith('image/');
-                      const imageData = isImage ? await compressImageForAI(dataUrl) : dataUrl;
-                      const response = await fetch('/api/validate-visa-document', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ image: imageData, expectedCategory: employerVisaCategory }),
-                      });
-                      if (response.ok) {
-                        const validationResult = await response.json();
-                        if (!validationResult.valid) {
-                          setVisaDocUI(prev => ({ ...prev, validating: false, error: validationResult.errorMessage || 'Document does not appear to match the expected type' }));
-                        }
-                      }
-                    } catch (err) {
-                      console.error('Visa validation error:', err);
-                    }
-
-                    const docWithMeta = { ...result, validated: true, visa_category: employerVisaCategory };
-                    setVisaDoc(docWithMeta);
-                    visaDocRef.current = docWithMeta;
-                    setVisaDocUI(prev => ({ ...prev, validating: false }));
-                    try {
-                      const refs = buildDocRefs();
-                      await updateDocumentReferences(submission.id, refs);
-                      console.log('[VisaUpload] doc refs updated', { visaPath: refs.visa_document });
-                    } catch (err) {
-                      console.error('[VisaUpload] failed to persist doc refs', err);
-                    }
-                    return result;
-                  }}
-                  onRemove={async () => {
-                    setVisaDoc(undefined);
-                    visaDocRef.current = undefined;
-                    setVisaDocUI({ preview: null, validating: false, error: null, file: null });
-                    await updateDocumentReferences(submission.id, buildDocRefs());
-                  }}
-                />
-
-                {visaDocUI.validating && (
-                  <div className="flex items-center gap-2 text-sm" style={{ color: TME_COLORS.primary }}>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent" />
-                    Verifying document...
-                  </div>
-                )}
-
-                {visaDocUI.error && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                    <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
-                    <p className="text-xs text-amber-800">{visaDocUI.error}</p>
-                  </div>
-                )}
-              </div>
-            </FormSection>
-          )}
-
-          {/* No visa document needed message */}
-          {employerVisaInUAE && employerVisaCategory === 'visa_on_arrival' && (
-            <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
-              <div className="flex items-center gap-2">
-                <Info className="w-4 h-4 text-gray-400" />
-                Your employer indicated you entered the UAE on a Visa on Arrival. No visa document upload is needed.
-              </div>
-            </div>
-          )}
-
-          {!employerVisaInUAE && !hasPreviousEid && (
+          {!employerVisaInUAE && hasPreviousUaeDocs === false && (
             <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
               <div className="flex items-center gap-2">
                 <Info className="w-4 h-4 text-gray-400" />
@@ -2507,19 +2660,16 @@ export function EmployeeForm({
           </FormSection>
 
           {/* Other Information */}
-          <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm">
-            <label
-              className="block text-sm font-medium mb-2"
-              style={{ color: TME_COLORS.primary }}
-            >
-              Other Information
-            </label>
+          <FormSection
+            title="Other Information"
+            icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
             <textarea
               className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 min-h-[100px]"
               placeholder="Any additional information you would like to provide..."
               {...register('other_information')}
             />
-          </div>
+          </FormSection>
           {viewingStep === 7 && (
             <StepNavButtons enabled={isEducationComplete} onContinue={() => { setViewingStep(8); window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); }} onBack={() => setViewingStep(6)} label="Review & Sign" />
           )}

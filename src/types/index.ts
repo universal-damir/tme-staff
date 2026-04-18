@@ -42,10 +42,19 @@ export interface EmployerFormData {
   weekly_off: 'sunday' | 'saturday_sunday';
   starting_date: string; // ISO format YYYY-MM-DD
 
-  // UAE Visa Status (employer indicates applicant's current visa situation)
+  // UAE Visa Status (employer only indicates whether applicant is currently in UAE;
+  // the employee picks the visa category themselves)
   applicant_in_uae?: boolean;
-  visa_category?: 'tourist_visa' | 'visa_on_arrival' | 'employment_visa' | 'immigration_cancellation' | 'other_na';
 }
+
+export type VisaCategory =
+  | 'visa_on_arrival'
+  | 'tourist_visa'
+  | 'employment_visa'
+  | 'immigration_cancellation'
+  | 'golden_visa'
+  | 'dependent_visa'
+  | 'other';
 
 // ===================================================================
 // EMPLOYEE FORM DATA
@@ -123,6 +132,11 @@ export interface EmployeeFormData {
   eid_issue_date?: string;   // ISO format
   eid_expiry_date?: string;  // ISO format
 
+  // UAE Visa Status (employee picks their current visa category when employer
+  // indicated applicant_in_uae = true)
+  visa_category?: VisaCategory;
+  visa_arrival_date?: string; // ISO format YYYY-MM-DD, only when visa_category = 'visa_on_arrival'
+
   // Other
   other_information?: string;
 }
@@ -173,6 +187,13 @@ export interface StaffDocumentReferences {
     filename: string;
     validated?: boolean;
     visa_category?: string;
+  };
+  // Previously held UAE visa / residence permit (optional, step 4)
+  previous_visa_document?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    extracted_data?: Record<string, unknown>;
   };
   // Emirates ID (front + back, employee uploads)
   eid_front?: {
