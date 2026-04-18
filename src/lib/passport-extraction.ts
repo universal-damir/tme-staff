@@ -4,6 +4,7 @@
  * Uses Claude Vision to extract data from passport images.
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { getAnthropicClient, withTimeout } from './anthropic';
 
 export interface PassportExtractionResult {
@@ -196,10 +197,9 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
     );
 
     // Extract tool_use result — guaranteed structured output, no refusals
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const toolUseBlock = response.content.find(
-      (block: any) => block.type === 'tool_use'
-    ) as { type: 'tool_use'; input: Record<string, unknown> } | undefined;
+      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
+    );
 
     if (!toolUseBlock) {
       throw new Error('No tool_use response from Claude');

@@ -5,6 +5,7 @@
  * and are legible/genuine.
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { getAnthropicClient, withTimeout } from './anthropic';
 
 export interface VisaDocumentValidationResult {
@@ -88,10 +89,9 @@ export async function validateVisaDocument(
       30000
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const toolUseBlock = response.content.find(
-      (block: any) => block.type === 'tool_use'
-    ) as { type: 'tool_use'; input: Record<string, unknown> } | undefined;
+      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
+    );
 
     if (!toolUseBlock) {
       return { valid: false, details: '', errorMessage: 'No response from AI' };
