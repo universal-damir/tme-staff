@@ -191,9 +191,58 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
       const localY = e.clientY - rect.top;
       const imgX = clamp((localX - metrics.offsetX) / metrics.scale, 0, imgSize.w);
       const imgY = clamp((localY - metrics.offsetY) / metrics.scale, 0, imgSize.h);
-      setCorners((prev) =>
-        prev ? { ...prev, [draggingKey]: { x: imgX, y: imgY } } : prev
-      );
+      setCorners((prev) => {
+        if (!prev) return prev;
+        const next: Corners = { ...prev, [draggingKey]: { x: imgX, y: imgY } };
+
+        // When a corner moves, the two adjacent mid-handles slide along with
+        // it, preserving whatever offset the user had set relative to the
+        // edge midpoint. Without this, a corner drag warps the polygon into
+        // weird shapes because the mid-handles stay frozen.
+        if (
+          draggingKey === 'tl' ||
+          draggingKey === 'tr' ||
+          draggingKey === 'br' ||
+          draggingKey === 'bl'
+        ) {
+          const adj: Record<
+            'tl' | 'tr' | 'br' | 'bl',
+            Array<{
+              key: 'mt' | 'mr' | 'mb' | 'ml';
+              a: 'tl' | 'tr' | 'br' | 'bl';
+              b: 'tl' | 'tr' | 'br' | 'bl';
+            }>
+          > = {
+            tl: [
+              { key: 'mt', a: 'tl', b: 'tr' },
+              { key: 'ml', a: 'bl', b: 'tl' },
+            ],
+            tr: [
+              { key: 'mt', a: 'tl', b: 'tr' },
+              { key: 'mr', a: 'tr', b: 'br' },
+            ],
+            br: [
+              { key: 'mr', a: 'tr', b: 'br' },
+              { key: 'mb', a: 'br', b: 'bl' },
+            ],
+            bl: [
+              { key: 'mb', a: 'br', b: 'bl' },
+              { key: 'ml', a: 'bl', b: 'tl' },
+            ],
+          };
+          for (const e of adj[draggingKey]) {
+            const oldMidX = (prev[e.a].x + prev[e.b].x) / 2;
+            const oldMidY = (prev[e.a].y + prev[e.b].y) / 2;
+            const offX = prev[e.key].x - oldMidX;
+            const offY = prev[e.key].y - oldMidY;
+            const newMidX = (next[e.a].x + next[e.b].x) / 2;
+            const newMidY = (next[e.a].y + next[e.b].y) / 2;
+            next[e.key] = { x: newMidX + offX, y: newMidY + offY };
+          }
+        }
+
+        return next;
+      });
     },
     [draggingKey, metrics, imgSize]
   );
@@ -638,8 +687,6 @@ async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<B
     }
   }
 
-  applyScanFilter(ctx, outW, outH);
-
   return new Promise((resolve, reject) =>
     canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error('Encode failed'))),
@@ -647,72 +694,6 @@ async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<B
       JPEG_QUALITY
     )
   );
-}
-
-// "Scan-like" enhancement: auto white-balance via percentile-based linear
-// stretch on the luminance channel. Makes paper look truly white and text
-// pop without losing color in stamps/photos. Roughly 30 ms on a 2000x1500
-// image on iPhone 13.
-function applyScanFilter(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number
-) {
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const data = imgData.data;
-
-  const hist = new Uint32Array(256);
-  const sampleStep = 16;
-  let sampled = 0;
-  for (let i = 0; i < data.length; i += 4 * sampleStep) {
-    const lum = Math.round(
-      0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-    );
-    hist[lum]++;
-    sampled++;
-  }
-
-  let pLo = 0;
-  let pHi = 255;
-  let acc = 0;
-  for (let i = 0; i < 256; i++) {
-    acc += hist[i];
-    if (acc >= sampled * 0.05) {
-      pLo = i;
-      break;
-    }
-  }
-  acc = 0;
-  for (let i = 255; i >= 0; i--) {
-    acc += hist[i];
-    if (acc >= sampled * 0.05) {
-      pHi = i;
-      break;
-    }
-  }
-
-  if (pHi - pLo < 20) return;
-
-  // Stretch the 5th–95th percentile range into [20, 235]. This brightens the
-  // paper and pops dark text without crushing blacks or blowing highlights —
-  // earlier [4, 251] was too aggressive on passport stamps.
-  const dstLo = 20;
-  const dstHi = 235;
-  const scale = (dstHi - dstLo) / (pHi - pLo);
-
-  for (let i = 0; i < data.length; i += 4) {
-    let r = (data[i] - pLo) * scale + dstLo;
-    let g = (data[i + 1] - pLo) * scale + dstLo;
-    let b = (data[i + 2] - pLo) * scale + dstLo;
-    if (r < 0) r = 0; else if (r > 255) r = 255;
-    if (g < 0) g = 0; else if (g > 255) g = 255;
-    if (b < 0) b = 0; else if (b > 255) b = 255;
-    data[i] = r;
-    data[i + 1] = g;
-    data[i + 2] = b;
-  }
-
-  ctx.putImageData(imgData, 0, 0);
 }
 
 // Dilate triangle vertices outward from the centroid by a small fixed pixel
