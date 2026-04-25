@@ -12,17 +12,40 @@ const WARP_GRID_N = 20;
 const JPEG_QUALITY = 0.92;
 
 type Point = { x: number; y: number };
-type Corners = { tl: Point; tr: Point; br: Point; bl: Point };
+type Corners = {
+  tl: Point;
+  tr: Point;
+  br: Point;
+  bl: Point;
+  // Mid-edge handles. Default to midpoints of each edge — in that position
+  // the warp is exactly equivalent to a plain 4-corner perspective warp.
+  // Drag a handle to compensate for slight edge curvature (book bow, lens
+  // distortion, table reflection). The warp adds a smooth perturbation to
+  // the perspective base so the mid-handle is interpolated through.
+  mt: Point;
+  mr: Point;
+  mb: Point;
+  ml: Point;
+};
 type CornerKey = keyof Corners;
+
+function mid(a: Point, b: Point): Point {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
 
 function defaultCorners(w: number, h: number): Corners {
   const ix = w * 0.08;
   const iy = h * 0.08;
+  const tl = { x: ix, y: iy };
+  const tr = { x: w - ix, y: iy };
+  const br = { x: w - ix, y: h - iy };
+  const bl = { x: ix, y: h - iy };
   return {
-    tl: { x: ix, y: iy },
-    tr: { x: w - ix, y: iy },
-    br: { x: w - ix, y: h - iy },
-    bl: { x: ix, y: h - iy },
+    tl, tr, br, bl,
+    mt: mid(tl, tr),
+    mr: mid(tr, br),
+    mb: mid(br, bl),
+    ml: mid(bl, tl),
   };
 }
 
@@ -208,23 +231,43 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
     [metrics]
   );
 
-  const polygonPoints = useMemo(() => {
+  const outlinePath = useMemo(() => {
     if (!corners || !metrics) return '';
-    const pts = [
-      screenCorner(corners.tl),
-      screenCorner(corners.tr),
-      screenCorner(corners.br),
-      screenCorner(corners.bl),
-    ];
-    return pts.map((p) => `${p.x},${p.y}`).join(' ');
+    const tl = screenCorner(corners.tl);
+    const tr = screenCorner(corners.tr);
+    const br = screenCorner(corners.br);
+    const bl = screenCorner(corners.bl);
+    const mt = screenCorner(corners.mt);
+    const mr = screenCorner(corners.mr);
+    const mb = screenCorner(corners.mb);
+    const ml = screenCorner(corners.ml);
+    // Quadratic Bezier control point that makes the curve actually pass through
+    // the mid handle: c = 2·mid - 0.5·start - 0.5·end.
+    const ctrl = (m: Point, a: Point, b: Point) => ({
+      x: 2 * m.x - 0.5 * a.x - 0.5 * b.x,
+      y: 2 * m.y - 0.5 * a.y - 0.5 * b.y,
+    });
+    const cTop = ctrl(mt, tl, tr);
+    const cRight = ctrl(mr, tr, br);
+    const cBot = ctrl(mb, br, bl);
+    const cLeft = ctrl(ml, bl, tl);
+    return (
+      `M ${tl.x} ${tl.y}` +
+      ` Q ${cTop.x} ${cTop.y} ${tr.x} ${tr.y}` +
+      ` Q ${cRight.x} ${cRight.y} ${br.x} ${br.y}` +
+      ` Q ${cBot.x} ${cBot.y} ${bl.x} ${bl.y}` +
+      ` Q ${cLeft.x} ${cLeft.y} ${tl.x} ${tl.y} Z`
+    );
   }, [corners, metrics, screenCorner]);
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+      className="fixed inset-0 z-50 bg-black/95 flex flex-col select-none"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
+        WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none',
       }}
     >
       <div className="flex items-center justify-between p-3 text-white">
@@ -291,15 +334,16 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
               width="100%"
               height="100%"
             >
-              <polygon
-                points={polygonPoints}
+              <path
+                d={outlinePath}
                 fill="rgba(36, 63, 123, 0.18)"
                 stroke="#FFB300"
                 strokeWidth={2}
               />
             </svg>
-            {(['tl', 'tr', 'br', 'bl'] as CornerKey[]).map((key) => {
+            {(['tl', 'tr', 'br', 'bl', 'mt', 'mr', 'mb', 'ml'] as CornerKey[]).map((key) => {
               const p = screenCorner(corners[key]);
+              const isMid = key === 'mt' || key === 'mr' || key === 'mb' || key === 'ml';
               return (
                 <div
                   key={key}
@@ -311,11 +355,13 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
                     width: HANDLE_SIZE,
                     height: HANDLE_SIZE,
                     borderRadius: '50%',
-                    background: '#FFB300',
-                    border: '3px solid white',
+                    background: isMid ? '#FFFFFF' : '#FFB300',
+                    border: isMid ? '3px solid #FFB300' : '3px solid white',
                     boxShadow: '0 0 0 1px rgba(0,0,0,0.4)',
                     touchAction: 'none',
                     cursor: 'grab',
+                    WebkitUserSelect: 'none',
+                    WebkitTouchCallout: 'none',
                   }}
                   aria-label={key}
                 />
@@ -414,6 +460,33 @@ async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<B
     ]
   );
 
+  // Mid-edge perturbations: difference between the user's mid-handle and
+  // where the pure-perspective warp would have placed that midpoint. Each
+  // delta gets blended in with a hat function that's 1 at its mid-edge,
+  // 0 at all corners and the opposite edge.
+  const [pmtX, pmtY] = T.transformInverse(outW / 2, 0);
+  const [pmbX, pmbY] = T.transformInverse(outW / 2, outH);
+  const [pmlX, pmlY] = T.transformInverse(0, outH / 2);
+  const [pmrX, pmrY] = T.transformInverse(outW, outH / 2);
+  const dmt = { x: corners.mt.x - pmtX, y: corners.mt.y - pmtY };
+  const dmb = { x: corners.mb.x - pmbX, y: corners.mb.y - pmbY };
+  const dml = { x: corners.ml.x - pmlX, y: corners.ml.y - pmlY };
+  const dmr = { x: corners.mr.x - pmrX, y: corners.mr.y - pmrY };
+
+  const inverse = (dx: number, dy: number): [number, number] => {
+    const [bx, by] = T.transformInverse(dx, dy);
+    const u = dx / outW;
+    const v = dy / outH;
+    const wt = (1 - v) * 4 * u * (1 - u);
+    const wb = v * 4 * u * (1 - u);
+    const wl = (1 - u) * 4 * v * (1 - v);
+    const wr = u * 4 * v * (1 - v);
+    return [
+      bx + wt * dmt.x + wb * dmb.x + wl * dml.x + wr * dmr.x,
+      by + wt * dmt.y + wb * dmb.y + wl * dml.y + wr * dmr.y,
+    ];
+  };
+
   const N = WARP_GRID_N;
   for (let i = 0; i < N; i++) {
     for (let j = 0; j < N; j++) {
@@ -422,10 +495,10 @@ async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<B
       const dx1 = ((i + 1) * outW) / N;
       const dy1 = ((j + 1) * outH) / N;
 
-      const [sx00, sy00] = T.transformInverse(dx0, dy0);
-      const [sx10, sy10] = T.transformInverse(dx1, dy0);
-      const [sx11, sy11] = T.transformInverse(dx1, dy1);
-      const [sx01, sy01] = T.transformInverse(dx0, dy1);
+      const [sx00, sy00] = inverse(dx0, dy0);
+      const [sx10, sy10] = inverse(dx1, dy0);
+      const [sx11, sy11] = inverse(dx1, dy1);
+      const [sx01, sy01] = inverse(dx0, dy1);
 
       drawAffineTriangle(ctx, img,
         sx00, sy00, sx10, sy10, sx11, sy11,
