@@ -9,10 +9,3 @@
 # Use Netlify's Next.js runtime for SSR
 [[plugins]]
   package = "@netlify/plugin-nextjs"
-
-# Cache the self-hosted opencv.js aggressively. It's a fixed binary; if we ever
-# upgrade OpenCV we'll rename the file to bust caches.
-[[headers]]
-  for = "/opencv.js"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"

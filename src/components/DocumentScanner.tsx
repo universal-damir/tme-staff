@@ -1,89 +1,19 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, X, Check, RotateCcw } from 'lucide-react';
 import { TME_COLORS } from '@/lib/constants';
+import PerspT from 'perspective-transform';
 
-const OPENCV_URL = '/opencv.js';
-const MAX_OUTPUT_LONG_SIDE = 2000;
 const HANDLE_SIZE = 28;
+const MAX_OUTPUT_LONG_SIDE = 2000;
+const MAX_SOURCE_LONG_SIDE = 2400;
+const WARP_GRID_N = 20;
+const JPEG_QUALITY = 0.92;
 
 type Point = { x: number; y: number };
-type Corners = {
-  topLeftCorner: Point;
-  topRightCorner: Point;
-  bottomLeftCorner: Point;
-  bottomRightCorner: Point;
-};
+type Corners = { tl: Point; tr: Point; br: Point; bl: Point };
 type CornerKey = keyof Corners;
-
-declare global {
-  interface Window {
-    // OpenCV.js global, untyped.
-    cv?: unknown;
-  }
-}
-
-let opencvPromise: Promise<unknown> | null = null;
-
-export function preloadScanner(): void {
-  if (typeof window === 'undefined') return;
-  void ensureOpenCV().catch(() => {
-    /* swallow — modal will surface error to the user when they actually open it */
-  });
-}
-
-function ensureOpenCV(): Promise<unknown> {
-  if (typeof window === 'undefined') return Promise.reject(new Error('No window'));
-  if (opencvPromise) return opencvPromise;
-
-  opencvPromise = new Promise((resolve, reject) => {
-    const ready = () =>
-      Boolean((window.cv as { Mat?: unknown } | undefined)?.Mat);
-
-    if (ready()) return resolve(window.cv);
-
-    if (!document.querySelector('script[data-opencv]')) {
-      const script = document.createElement('script');
-      script.src = OPENCV_URL;
-      script.async = true;
-      script.dataset.opencv = '1';
-      script.onerror = () => {
-        opencvPromise = null;
-        reject(new Error('Failed to load OpenCV.js'));
-      };
-      document.head.appendChild(script);
-    }
-
-    const start = Date.now();
-    const tick = () => {
-      if (ready()) return resolve(window.cv);
-      if (Date.now() - start > 30000) {
-        opencvPromise = null;
-        return reject(new Error('OpenCV.js timed out loading'));
-      }
-      setTimeout(tick, 100);
-    };
-    tick();
-  });
-
-  return opencvPromise;
-}
-
-function clamp(v: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, v));
-}
-
-function insetCorners(w: number, h: number): Corners {
-  const ix = w * 0.08;
-  const iy = h * 0.08;
-  return {
-    topLeftCorner: { x: ix, y: iy },
-    topRightCorner: { x: w - ix, y: iy },
-    bottomLeftCorner: { x: ix, y: h - iy },
-    bottomRightCorner: { x: w - ix, y: h - iy },
-  };
-}
 
 interface DisplayMetrics {
   dispW: number;
@@ -93,11 +23,94 @@ interface DisplayMetrics {
   offsetY: number;
 }
 
-function useDisplayMetrics(
-  containerRef: React.RefObject<HTMLDivElement | null>,
-  imgSize: { w: number; h: number } | null
-): DisplayMetrics | null {
+interface DocumentScannerProps {
+  file: File;
+  onConfirm: (file: File) => void;
+  onCancel: () => void;
+}
+
+export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerProps) {
+  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [corners, setCorners] = useState<Corners | null>(null);
+  const [draggingKey, setDraggingKey] = useState<CornerKey | null>(null);
   const [metrics, setMetrics] = useState<DisplayMetrics | null>(null);
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const objectUrls: string[] = [];
+
+    async function load() {
+      try {
+        const rawUrl = URL.createObjectURL(file);
+        objectUrls.push(rawUrl);
+        const rawImg = new Image();
+        rawImg.src = rawUrl;
+        await rawImg.decode();
+        if (cancelled) return;
+
+        const longest = Math.max(rawImg.naturalWidth, rawImg.naturalHeight);
+        let finalImg = rawImg;
+        let finalUrl = rawUrl;
+        let w = rawImg.naturalWidth;
+        let h = rawImg.naturalHeight;
+
+        if (longest > MAX_SOURCE_LONG_SIDE) {
+          const k = MAX_SOURCE_LONG_SIDE / longest;
+          w = Math.round(w * k);
+          h = Math.round(h * k);
+          const c = document.createElement('canvas');
+          c.width = w;
+          c.height = h;
+          const cctx = c.getContext('2d');
+          if (!cctx) throw new Error('No 2D context');
+          cctx.drawImage(rawImg, 0, 0, w, h);
+          const blob = await new Promise<Blob>((resolve, reject) =>
+            c.toBlob(
+              (b) => (b ? resolve(b) : reject(new Error('Downscale failed'))),
+              'image/jpeg',
+              0.95
+            )
+          );
+          if (cancelled) return;
+          finalUrl = URL.createObjectURL(blob);
+          objectUrls.push(finalUrl);
+          finalImg = new Image();
+          finalImg.src = finalUrl;
+          await finalImg.decode();
+          if (cancelled) return;
+        }
+
+        imageRef.current = finalImg;
+        setImgUrl(finalUrl);
+        setImgSize({ w, h });
+
+        const ix = w * 0.08;
+        const iy = h * 0.08;
+        setCorners({
+          tl: { x: ix, y: iy },
+          tr: { x: w - ix, y: iy },
+          br: { x: w - ix, y: h - iy },
+          bl: { x: ix, y: h - iy },
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setErrMsg(e instanceof Error ? e.message : 'Failed to load image');
+        }
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+      for (const u of objectUrls) URL.revokeObjectURL(u);
+    };
+  }, [file]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -123,105 +136,7 @@ function useDisplayMetrics(
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [containerRef, imgSize]);
-
-  return metrics;
-}
-
-interface DocumentScannerProps {
-  file: File;
-  onConfirm: (file: File) => void;
-  onCancel: () => void;
-}
-
-export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerProps) {
-  const [status, setStatus] = useState<'loading' | 'ready' | 'processing' | 'error'>('loading');
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-  const [corners, setCorners] = useState<Corners | null>(null);
-  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
-  const [draggingKey, setDraggingKey] = useState<CornerKey | null>(null);
-
-  const imageRef = useRef<HTMLImageElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const scannerRef = useRef<unknown>(null);
-  const cvRef = useRef<unknown>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let createdUrl: string | null = null;
-
-    async function init() {
-      try {
-        const cv = await ensureOpenCV();
-        if (cancelled) return;
-        cvRef.current = cv;
-
-        const mod = await import('jscanify/client');
-        if (cancelled) return;
-        // jscanify exports the class as the default export under CJS interop.
-        const JscanifyCtor = (mod as { default?: unknown }).default ?? mod;
-        const Ctor = JscanifyCtor as new () => unknown;
-        scannerRef.current = new Ctor();
-
-        const img = new Image();
-        createdUrl = URL.createObjectURL(file);
-        img.src = createdUrl;
-        await img.decode();
-        if (cancelled) return;
-        imageRef.current = img;
-        setImgUrl(createdUrl);
-        setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
-
-        let detected: Corners | null = null;
-        const cvAny = cv as { imread: (i: HTMLImageElement) => { delete: () => void } };
-        const mat = cvAny.imread(img);
-        try {
-          const scanner = scannerRef.current as {
-            findPaperContour: (m: unknown) => unknown;
-            getCornerPoints: (c: unknown, m: unknown) => Partial<Corners>;
-          };
-          const contour = scanner.findPaperContour(mat);
-          if (contour) {
-            const c = scanner.getCornerPoints(contour, mat);
-            if (
-              c.topLeftCorner &&
-              c.topRightCorner &&
-              c.bottomLeftCorner &&
-              c.bottomRightCorner
-            ) {
-              detected = c as Corners;
-            }
-          }
-        } finally {
-          mat.delete();
-        }
-
-        if (!detected) {
-          detected = insetCorners(img.naturalWidth, img.naturalHeight);
-        }
-
-        if (!cancelled) {
-          setCorners(detected);
-          setStatus('ready');
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!cancelled) {
-          setErrMsg(msg);
-          setStatus('error');
-        }
-      }
-    }
-
-    init();
-    return () => {
-      cancelled = true;
-      if (createdUrl) URL.revokeObjectURL(createdUrl);
-    };
-  }, [file]);
-
-  const metrics = useDisplayMetrics(containerRef, imgSize);
+  }, [imgSize]);
 
   const onPointerDown = useCallback(
     (key: CornerKey) => (e: React.PointerEvent) => {
@@ -235,6 +150,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (!draggingKey || !metrics || !imgSize) return;
+      e.preventDefault();
       const container = containerRef.current;
       if (!container) return;
       const rect = container.getBoundingClientRect();
@@ -255,79 +171,57 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
   const handleReset = () => {
     if (!imgSize) return;
-    setCorners(insetCorners(imgSize.w, imgSize.h));
+    const ix = imgSize.w * 0.08;
+    const iy = imgSize.h * 0.08;
+    setCorners({
+      tl: { x: ix, y: iy },
+      tr: { x: imgSize.w - ix, y: iy },
+      br: { x: imgSize.w - ix, y: imgSize.h - iy },
+      bl: { x: ix, y: imgSize.h - iy },
+    });
   };
 
   const handleConfirm = async () => {
-    if (!corners || !imageRef.current || !scannerRef.current) return;
-    setStatus('processing');
+    if (!corners || !imageRef.current) return;
+    setProcessing(true);
     try {
-      const { topLeftCorner: tl, topRightCorner: tr, bottomLeftCorner: bl, bottomRightCorner: br } = corners;
-      const widthA = Math.hypot(br.x - bl.x, br.y - bl.y);
-      const widthB = Math.hypot(tr.x - tl.x, tr.y - tl.y);
-      const heightA = Math.hypot(tr.x - br.x, tr.y - br.y);
-      const heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
-      let outW = Math.max(widthA, widthB);
-      let outH = Math.max(heightA, heightB);
-      const longest = Math.max(outW, outH);
-      if (longest > MAX_OUTPUT_LONG_SIDE) {
-        const k = MAX_OUTPUT_LONG_SIDE / longest;
-        outW *= k;
-        outH *= k;
-      }
-      outW = Math.max(1, Math.round(outW));
-      outH = Math.max(1, Math.round(outH));
-
-      const scanner = scannerRef.current as {
-        extractPaper: (
-          image: HTMLImageElement,
-          w: number,
-          h: number,
-          c: Corners
-        ) => HTMLCanvasElement | null;
-      };
-      const canvas = scanner.extractPaper(imageRef.current, outW, outH, corners);
-      if (!canvas) throw new Error('Could not extract document');
-
-      const blob: Blob = await new Promise((resolve, reject) =>
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error('Failed to encode image'))),
-          'image/jpeg',
-          0.92
-        )
-      );
-
+      const blob = await warpAndExport(imageRef.current, corners);
       const baseName = file.name.replace(/\.[^.]+$/, '') || 'scan';
-      const scannedFile = new File([blob], `${baseName}-scanned.jpg`, { type: 'image/jpeg' });
+      const scannedFile = new File([blob], `${baseName}-scanned.jpg`, {
+        type: 'image/jpeg',
+      });
       onConfirm(scannedFile);
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : 'Failed to process scan');
-      setStatus('ready');
+      setProcessing(false);
     }
   };
-
-  const screenCorner = (p: Point) =>
-    metrics
-      ? { x: p.x * metrics.scale + metrics.offsetX, y: p.y * metrics.scale + metrics.offsetY }
-      : { x: 0, y: 0 };
-
-  const polygonPoints =
-    corners && metrics
-      ? (
-          [
-            screenCorner(corners.topLeftCorner),
-            screenCorner(corners.topRightCorner),
-            screenCorner(corners.bottomRightCorner),
-            screenCorner(corners.bottomLeftCorner),
-          ]
-            .map((p) => `${p.x},${p.y}`)
-            .join(' ')
-        )
-      : '';
 
   const handleUseOriginal = () => {
     onConfirm(file);
   };
+
+  const screenCorner = useCallback(
+    (p: Point) => {
+      if (!metrics) return { x: 0, y: 0 };
+      return {
+        x: p.x * metrics.scale + metrics.offsetX,
+        y: p.y * metrics.scale + metrics.offsetY,
+      };
+    },
+    [metrics]
+  );
+
+  const polygonPoints = useMemo(() => {
+    if (!corners || !metrics) return '';
+    const pts = [
+      screenCorner(corners.tl),
+      screenCorner(corners.tr),
+      screenCorner(corners.br),
+      screenCorner(corners.bl),
+    ];
+    return pts.map((p) => `${p.x},${p.y}`).join(' ');
+  }, [corners, metrics, screenCorner]);
 
   return (
     <div
@@ -346,11 +240,11 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         >
           <X className="w-5 h-5" />
         </button>
-        <span className="text-sm font-medium">Adjust corners</span>
+        <span className="text-sm font-medium">Drag corners to passport edges</span>
         <button
           type="button"
           onClick={handleReset}
-          disabled={status !== 'ready'}
+          disabled={!corners}
           className="p-2 -m-2 disabled:opacity-30"
           aria-label="Reset corners"
         >
@@ -360,28 +254,26 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
       <div
         ref={containerRef}
-        className="flex-1 relative overflow-hidden touch-none select-none"
+        className="flex-1 relative overflow-hidden select-none"
+        style={{ touchAction: 'none' }}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        {status === 'loading' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-sm px-6 text-center gap-2">
-            <Loader2 className="w-6 h-6 animate-spin" />
-            <span>Loading scanner…</span>
-            <span className="text-xs text-white/60">
-              First time can take ~30s on slow connections.
-            </span>
+        {!imgSize && !errMsg && (
+          <div className="absolute inset-0 flex items-center justify-center text-white text-sm">
+            <Loader2 className="w-6 h-6 animate-spin mr-2" />
+            Loading…
           </div>
         )}
 
-        {status === 'error' && (
-          <div className="absolute inset-0 flex items-center justify-center text-red-300 px-6 text-center text-sm">
+        {errMsg && (
+          <div className="absolute inset-0 flex items-center justify-center text-red-300 text-sm px-6 text-center">
             {errMsg}
           </div>
         )}
 
-        {imgUrl && metrics && (
+        {imgUrl && metrics && corners && (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -398,49 +290,45 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
                 pointerEvents: 'none',
               }}
             />
-            {corners && (
-              <>
-                <svg
-                  className="absolute inset-0 pointer-events-none"
-                  width="100%"
-                  height="100%"
-                >
-                  <polygon
-                    points={polygonPoints}
-                    fill="rgba(36, 63, 123, 0.18)"
-                    stroke="#FFB300"
-                    strokeWidth={2}
-                  />
-                </svg>
-                {(['topLeftCorner', 'topRightCorner', 'bottomRightCorner', 'bottomLeftCorner'] as CornerKey[]).map((key) => {
-                  const p = screenCorner(corners[key]);
-                  return (
-                    <div
-                      key={key}
-                      onPointerDown={onPointerDown(key)}
-                      style={{
-                        position: 'absolute',
-                        left: p.x - HANDLE_SIZE / 2,
-                        top: p.y - HANDLE_SIZE / 2,
-                        width: HANDLE_SIZE,
-                        height: HANDLE_SIZE,
-                        borderRadius: '50%',
-                        background: '#FFB300',
-                        border: '3px solid white',
-                        boxShadow: '0 0 0 1px rgba(0,0,0,0.4)',
-                        touchAction: 'none',
-                        cursor: 'grab',
-                      }}
-                      aria-label={key}
-                    />
-                  );
-                })}
-              </>
-            )}
+            <svg
+              className="absolute inset-0 pointer-events-none"
+              width="100%"
+              height="100%"
+            >
+              <polygon
+                points={polygonPoints}
+                fill="rgba(36, 63, 123, 0.18)"
+                stroke="#FFB300"
+                strokeWidth={2}
+              />
+            </svg>
+            {(['tl', 'tr', 'br', 'bl'] as CornerKey[]).map((key) => {
+              const p = screenCorner(corners[key]);
+              return (
+                <div
+                  key={key}
+                  onPointerDown={onPointerDown(key)}
+                  style={{
+                    position: 'absolute',
+                    left: p.x - HANDLE_SIZE / 2,
+                    top: p.y - HANDLE_SIZE / 2,
+                    width: HANDLE_SIZE,
+                    height: HANDLE_SIZE,
+                    borderRadius: '50%',
+                    background: '#FFB300',
+                    border: '3px solid white',
+                    boxShadow: '0 0 0 1px rgba(0,0,0,0.4)',
+                    touchAction: 'none',
+                    cursor: 'grab',
+                  }}
+                  aria-label={key}
+                />
+              );
+            })}
           </>
         )}
 
-        {status === 'processing' && (
+        {processing && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-sm">
             <Loader2 className="w-6 h-6 animate-spin mr-2" />
             Flattening…
@@ -460,7 +348,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={status !== 'ready'}
+            disabled={!corners || processing}
             className="flex-1 py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2 disabled:opacity-40"
             style={{ backgroundColor: TME_COLORS.primary }}
           >
@@ -468,7 +356,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
             Use scan
           </button>
         </div>
-        {(status === 'loading' || status === 'error') && (
+        {(errMsg || !imgSize) && (
           <button
             type="button"
             onClick={handleUseOriginal}
@@ -480,4 +368,119 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
       </div>
     </div>
   );
+}
+
+function clamp(v: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function dist(a: Point, b: Point) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<Blob> {
+  const widthTop = dist(corners.tl, corners.tr);
+  const widthBot = dist(corners.bl, corners.br);
+  const heightLeft = dist(corners.tl, corners.bl);
+  const heightRight = dist(corners.tr, corners.br);
+
+  let outW = Math.max(widthTop, widthBot);
+  let outH = Math.max(heightLeft, heightRight);
+  const longest = Math.max(outW, outH);
+  if (longest > MAX_OUTPUT_LONG_SIDE) {
+    const k = MAX_OUTPUT_LONG_SIDE / longest;
+    outW *= k;
+    outH *= k;
+  }
+  outW = Math.max(1, Math.round(outW));
+  outH = Math.max(1, Math.round(outH));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('No 2D context');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, outW, outH);
+
+  const T = PerspT(
+    [
+      corners.tl.x, corners.tl.y,
+      corners.tr.x, corners.tr.y,
+      corners.br.x, corners.br.y,
+      corners.bl.x, corners.bl.y,
+    ],
+    [
+      0, 0,
+      outW, 0,
+      outW, outH,
+      0, outH,
+    ]
+  );
+
+  // Subdivide destination rect into a grid of cells. For each cell, find the
+  // source preimage of its 4 corners via the inverse perspective transform,
+  // then render the cell as 2 affine triangles. This approximates a true
+  // perspective warp closely enough that text stays sharp at the warped scale.
+  const N = WARP_GRID_N;
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const dx0 = (i * outW) / N;
+      const dy0 = (j * outH) / N;
+      const dx1 = ((i + 1) * outW) / N;
+      const dy1 = ((j + 1) * outH) / N;
+
+      const [sx00, sy00] = T.transformInverse(dx0, dy0);
+      const [sx10, sy10] = T.transformInverse(dx1, dy0);
+      const [sx11, sy11] = T.transformInverse(dx1, dy1);
+      const [sx01, sy01] = T.transformInverse(dx0, dy1);
+
+      drawAffineTriangle(ctx, img,
+        sx00, sy00, sx10, sy10, sx11, sy11,
+        dx0, dy0, dx1, dy0, dx1, dy1);
+      drawAffineTriangle(ctx, img,
+        sx00, sy00, sx11, sy11, sx01, sy01,
+        dx0, dy0, dx1, dy1, dx0, dy1);
+    }
+  }
+
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('Encode failed'))),
+      'image/jpeg',
+      JPEG_QUALITY
+    )
+  );
+}
+
+function drawAffineTriangle(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  sx0: number, sy0: number,
+  sx1: number, sy1: number,
+  sx2: number, sy2: number,
+  dx0: number, dy0: number,
+  dx1: number, dy1: number,
+  dx2: number, dy2: number,
+) {
+  const denom = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0);
+  if (Math.abs(denom) < 1e-10) return;
+
+  const a = ((dx1 - dx0) * (sy2 - sy0) - (dx2 - dx0) * (sy1 - sy0)) / denom;
+  const c = ((dx2 - dx0) * (sx1 - sx0) - (dx1 - dx0) * (sx2 - sx0)) / denom;
+  const b = ((dy1 - dy0) * (sy2 - sy0) - (dy2 - dy0) * (sy1 - sy0)) / denom;
+  const d = ((dy2 - dy0) * (sx1 - sx0) - (dy1 - dy0) * (sx2 - sx0)) / denom;
+  const e = dx0 - a * sx0 - c * sy0;
+  const f = dy0 - b * sx0 - d * sy0;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(dx0, dy0);
+  ctx.lineTo(dx1, dy1);
+  ctx.lineTo(dx2, dy2);
+  ctx.closePath();
+  ctx.clip();
+  ctx.transform(a, b, c, d, e, f);
+  ctx.drawImage(img, 0, 0);
+  ctx.restore();
 }
