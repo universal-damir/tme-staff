@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { Upload, CheckCircle, AlertCircle, X, Loader2, FileText } from 'lucide-react';
+import { ImageLightbox } from '@/components/ImageLightbox';
 
 interface UploadSlotProps {
   label: string;
@@ -37,6 +38,12 @@ export function UploadSlot({
   void _file;
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  const isPdfPreview =
+    !!preview &&
+    (preview.startsWith('data:application/pdf') ||
+      preview.toLowerCase().endsWith('.pdf'));
 
   const MAX_FILE_SIZE = maxSizeMB * 1024 * 1024;
 
@@ -123,7 +130,7 @@ export function UploadSlot({
           <div className="relative p-2">
             {/* Images preview inline. PDFs don't preview — validation runs,
                 and once valid we just show a compact "PDF uploaded" card. */}
-            {preview.startsWith('data:application/pdf') || preview.toLowerCase().endsWith('.pdf') ? (
+            {isPdfPreview ? (
               <div className="w-full h-64 flex flex-col items-center justify-center rounded-lg bg-white">
                 <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
                 <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
@@ -133,7 +140,8 @@ export function UploadSlot({
               <img
                 src={preview}
                 alt={label}
-                className="w-full h-64 object-contain rounded-lg"
+                className="w-full h-64 object-contain rounded-lg cursor-zoom-in"
+                onClick={() => setLightboxOpen(true)}
               />
             )}
 
@@ -192,6 +200,15 @@ export function UploadSlot({
           <CheckCircle className="w-3 h-3" />
           Page verified
         </p>
+      )}
+
+      {preview && !isPdfPreview && (
+        <ImageLightbox
+          src={preview}
+          alt={label}
+          open={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+        />
       )}
     </div>
   );

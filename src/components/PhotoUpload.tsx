@@ -6,6 +6,7 @@ import { compressImageForAI } from '@/lib/utils';
 import { getDocumentUrl } from '@/lib/supabase';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import Image from 'next/image';
+import { ImageLightbox } from '@/components/ImageLightbox';
 
 interface PhotoUploadProps {
   value?: { path: string; filename: string; validated: boolean };
@@ -21,6 +22,7 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
   const [isValidating, setIsValidating] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,7 +170,13 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
             <X className="w-4 h-4 text-gray-500" />
           </button>
 
-          <div className="relative w-48 h-48 rounded-lg overflow-hidden bg-gray-100 mx-auto">
+          <button
+            type="button"
+            onClick={() => imageSrc && setLightboxOpen(true)}
+            disabled={!imageSrc}
+            className="relative w-48 h-48 rounded-lg overflow-hidden bg-gray-100 mx-auto block cursor-zoom-in disabled:cursor-default"
+            aria-label="View full-size photo"
+          >
             {imageSrc ? (
               <Image
                 src={imageSrc}
@@ -187,7 +195,7 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
                 <Loader2 className="w-8 h-8 animate-spin" style={{ color: TME_COLORS.primary }} />
               </div>
             )}
-          </div>
+          </button>
 
           <div className="mt-3">
             {isValidating && (
@@ -274,6 +282,15 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
 
       {(error || uploadError) && (
         <p className="mt-1 text-sm text-red-500">{error || uploadError}</p>
+      )}
+
+      {imageSrc && (
+        <ImageLightbox
+          src={imageSrc}
+          alt="ID photo"
+          open={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+        />
       )}
     </div>
   );
