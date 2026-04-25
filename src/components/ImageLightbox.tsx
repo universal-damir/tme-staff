@@ -2,6 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
+import { TME_COLORS } from '@/lib/constants';
 
 interface ImageLightboxProps {
   src: string;
@@ -17,7 +18,6 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    // Lock body scroll while the lightbox is open.
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
@@ -30,8 +30,9 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{
+        backgroundColor: TME_COLORS.background,
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
@@ -43,7 +44,8 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
       <button
         type="button"
         onClick={onClose}
-        className="absolute top-3 right-3 p-2 text-white/90 hover:text-white"
+        className="absolute top-3 right-3 p-2"
+        style={{ color: TME_COLORS.primary }}
         aria-label="Close preview"
       >
         <X className="w-6 h-6" />
