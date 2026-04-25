@@ -5,7 +5,6 @@ import { TME_COLORS } from '@/lib/constants';
 import { compressImageForAI } from '@/lib/utils';
 import { getDocumentUrl } from '@/lib/supabase';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import Image from 'next/image';
 import { ImageLightbox } from '@/components/ImageLightbox';
 
 interface PhotoUploadProps {
@@ -186,12 +185,13 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
             aria-label="View full-size photo"
           >
             {imageSrc ? (
-              <Image
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
                 src={imageSrc}
                 alt="Photo preview"
-                fill
-                className="object-cover"
-                unoptimized
+                loading="eager"
+                decoding="async"
+                className="absolute inset-0 w-full h-full object-cover"
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
