@@ -19,7 +19,7 @@ import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
-import { DocumentScanner } from '@/components/DocumentScanner';
+import { DocumentScanner, preloadScanner } from '@/components/DocumentScanner';
 import type { EmployeeFormData, EmployeeFormProps, PassportPageReference, VisaCategory } from '@/types';
 import {
   mergeStaffDocRefs,
@@ -406,10 +406,9 @@ export function EmployeeForm({
     file: null as File | null,
   });
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
-  // DEBUG: trace pendingCoverFile changes
   useEffect(() => {
-    alert(`[5 parent effect] pendingCoverFile=${pendingCoverFile ? pendingCoverFile.name : 'null'}`);
-  }, [pendingCoverFile]);
+    preloadScanner();
+  }, []);
   const [insideUI, setInsideUI] = useState({
     preview: initInside?.path ? getDocumentUrl(initInside.path) : null as string | null,
     validating: false,
@@ -1180,11 +1179,6 @@ export function EmployeeForm({
                 </div>
               </div>
 
-              {/* DEBUG-A: remove after diagnosis */}
-              <div style={{ background: '#fef3c7', color: '#92400e', padding: '6px 10px', fontSize: 11, fontFamily: 'monospace', marginBottom: 8, borderRadius: 4 }}>
-                SCANNER-DEBUG-A · pending: {pendingCoverFile?.name ?? 'none'} · size: {pendingCoverFile?.size ?? 0}b
-              </div>
-
               <UploadSlot
                 label="Passport Cover"
                 description="Spread open: front + back cover visible"
@@ -1195,7 +1189,6 @@ export function EmployeeForm({
                 validating={coverUI.validating}
                 error={coverUI.error || undefined}
                 onUpload={async (file) => {
-                  alert(`[1 wrap] ${file.name} ${(file.size / 1024 / 1024).toFixed(2)}MB type=${file.type}`);
                   setPendingCoverFile(file);
                   return true;
                 }}

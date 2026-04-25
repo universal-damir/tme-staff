@@ -26,6 +26,13 @@ declare global {
 
 let opencvPromise: Promise<unknown> | null = null;
 
+export function preloadScanner(): void {
+  if (typeof window === 'undefined') return;
+  void ensureOpenCV().catch(() => {
+    /* swallow — modal will surface error to the user when they actually open it */
+  });
+}
+
 function ensureOpenCV(): Promise<unknown> {
   if (typeof window === 'undefined') return Promise.reject(new Error('No window'));
   if (opencvPromise) return opencvPromise;
@@ -128,12 +135,6 @@ interface DocumentScannerProps {
 }
 
 export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerProps) {
-  // DEBUG: alert once on first render of this component
-  const debugRenderedRef = useRef(false);
-  if (!debugRenderedRef.current) {
-    debugRenderedRef.current = true;
-    if (typeof window !== 'undefined') alert(`[1.5 scanner render] file=${file.name}`);
-  }
   const [status, setStatus] = useState<'loading' | 'ready' | 'processing' | 'error'>('loading');
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [corners, setCorners] = useState<Corners | null>(null);
@@ -152,11 +153,9 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
     async function init() {
       try {
-        alert('[2 scanner] mounted, loading OpenCV…');
         const cv = await ensureOpenCV();
         if (cancelled) return;
         cvRef.current = cv;
-        alert('[3 scanner] OpenCV loaded, importing jscanify…');
 
         const mod = await import('jscanify/client');
         if (cancelled) return;
@@ -164,7 +163,6 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         const JscanifyCtor = (mod as { default?: unknown }).default ?? mod;
         const Ctor = JscanifyCtor as new () => unknown;
         scannerRef.current = new Ctor();
-        alert('[4 scanner] jscanify ready, decoding image…');
 
         const img = new Image();
         createdUrl = URL.createObjectURL(file);
@@ -209,7 +207,6 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        alert('[X scanner] init failed: ' + msg);
         if (!cancelled) {
           setErrMsg(msg);
           setStatus('error');
@@ -328,8 +325,18 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         )
       : '';
 
+  const handleUseOriginal = () => {
+    onConfirm(file);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
+    <div
+      className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
       <div className="flex items-center justify-between p-3 text-white">
         <button
           type="button"
@@ -359,9 +366,12 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         onPointerCancel={onPointerUp}
       >
         {status === 'loading' && (
-          <div className="absolute inset-0 flex items-center justify-center text-white text-sm">
-            <Loader2 className="w-6 h-6 animate-spin mr-2" />
-            Loading scanner…
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-sm px-6 text-center gap-2">
+            <Loader2 className="w-6 h-6 animate-spin" />
+            <span>Loading scanner…</span>
+            <span className="text-xs text-white/60">
+              First time can take ~30s on slow connections.
+            </span>
           </div>
         )}
 
@@ -438,24 +448,35 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         )}
       </div>
 
-      <div className="p-3 flex gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex-1 py-3 rounded-lg bg-white/10 text-white font-medium"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleConfirm}
-          disabled={status !== 'ready'}
-          className="flex-1 py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2 disabled:opacity-40"
-          style={{ backgroundColor: TME_COLORS.primary }}
-        >
-          <Check className="w-4 h-4" />
-          Use scan
-        </button>
+      <div className="p-3 flex flex-col gap-2">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 py-3 rounded-lg bg-white/10 text-white font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={status !== 'ready'}
+            className="flex-1 py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2 disabled:opacity-40"
+            style={{ backgroundColor: TME_COLORS.primary }}
+          >
+            <Check className="w-4 h-4" />
+            Use scan
+          </button>
+        </div>
+        {(status === 'loading' || status === 'error') && (
+          <button
+            type="button"
+            onClick={handleUseOriginal}
+            className="w-full py-2 text-white/80 text-sm underline"
+          >
+            Use original photo (skip scan)
+          </button>
+        )}
       </div>
     </div>
   );
