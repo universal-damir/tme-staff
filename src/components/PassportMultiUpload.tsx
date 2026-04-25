@@ -5,6 +5,7 @@ import { TME_COLORS } from '@/lib/constants';
 import { compressImageForAI } from '@/lib/utils';
 import { getDocumentUrl } from '@/lib/supabase';
 import { UploadSlot } from '@/components/UploadSlot';
+import { DocumentScanner } from '@/components/DocumentScanner';
 import { Info, CheckCircle, ChevronDown } from 'lucide-react';
 import type { PassportPageType } from '@/lib/passport-page-validation';
 import type { EmployeeFormData } from '@/types';
@@ -45,6 +46,7 @@ export function PassportMultiUpload({
   insideStepNumber,
 }: PassportMultiUploadProps) {
   void _submissionId;
+  const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
   const [pages, setPages] = useState<{
     cover: PassportPage;
     insidePages: PassportPage;
@@ -245,9 +247,23 @@ export function PassportMultiUpload({
           validated={pages.cover.validated}
           validating={pages.cover.validating}
           error={pages.cover.error || undefined}
-          onUpload={(file) => handleUpload('cover', 'COVER', file)}
+          onUpload={async (file) => {
+            setPendingCoverFile(file);
+            return true;
+          }}
           onRemove={() => handleRemove('cover')}
         />
+
+        {pendingCoverFile && (
+          <DocumentScanner
+            file={pendingCoverFile}
+            onConfirm={async (scannedFile) => {
+              setPendingCoverFile(null);
+              await handleUpload('cover', 'COVER', scannedFile);
+            }}
+            onCancel={() => setPendingCoverFile(null)}
+          />
+        )}
 
         {pages.cover.validated && !revealInsidePages && (
           <div className="mt-2 flex items-center gap-2 text-green-600 text-sm">
