@@ -146,9 +146,11 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
     async function init() {
       try {
+        alert('[2 scanner] mounted, loading OpenCV…');
         const cv = await ensureOpenCV();
         if (cancelled) return;
         cvRef.current = cv;
+        alert('[3 scanner] OpenCV loaded, importing jscanify…');
 
         const mod = await import('jscanify/client');
         if (cancelled) return;
@@ -156,6 +158,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         const JscanifyCtor = (mod as { default?: unknown }).default ?? mod;
         const Ctor = JscanifyCtor as new () => unknown;
         scannerRef.current = new Ctor();
+        alert('[4 scanner] jscanify ready, decoding image…');
 
         const img = new Image();
         createdUrl = URL.createObjectURL(file);
@@ -199,8 +202,10 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
           setStatus('ready');
         }
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        alert('[X scanner] init failed: ' + msg);
         if (!cancelled) {
-          setErrMsg(e instanceof Error ? e.message : 'Failed to load scanner');
+          setErrMsg(msg);
           setStatus('error');
         }
       }

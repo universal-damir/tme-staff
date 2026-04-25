@@ -1176,6 +1176,11 @@ export function EmployeeForm({
                 </div>
               </div>
 
+              {/* DEBUG-A: remove after diagnosis */}
+              <div style={{ background: '#fef3c7', color: '#92400e', padding: '6px 10px', fontSize: 11, fontFamily: 'monospace', marginBottom: 8, borderRadius: 4 }}>
+                SCANNER-DEBUG-A · pending: {pendingCoverFile?.name ?? 'none'} · size: {pendingCoverFile?.size ?? 0}b
+              </div>
+
               <UploadSlot
                 label="Passport Cover"
                 description="Spread open: front + back cover visible"
@@ -1186,6 +1191,7 @@ export function EmployeeForm({
                 validating={coverUI.validating}
                 error={coverUI.error || undefined}
                 onUpload={async (file) => {
+                  alert(`[1 wrap] ${file.name} ${(file.size / 1024 / 1024).toFixed(2)}MB type=${file.type}`);
                   setPendingCoverFile(file);
                   return true;
                 }}
