@@ -10,6 +10,11 @@ const MAX_OUTPUT_LONG_SIDE = 2000;
 const MAX_SOURCE_LONG_SIDE = 2400;
 const WARP_GRID_N = 20;
 const JPEG_QUALITY = 0.92;
+// Cylindrical book-scan dewarp. theta_max controls how much curl we
+// compensate for; pi/6 = 30° gives a mild correction that meaningfully
+// flattens passport-spread book bend without over-correcting documents
+// that are already flat.
+const DEWARP_THETA_MAX = Math.PI / 6;
 
 type Point = { x: number; y: number };
 type Corners = {
@@ -325,6 +330,15 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         )}
       </div>
 
+      {mode === 'edit' && (
+        <div
+          className="px-4 pb-2 text-xs text-center"
+          style={{ color: TME_COLORS.primary, opacity: 0.7 }}
+        >
+          Tip: press the passport flat against a surface for sharpest results.
+        </div>
+      )}
+
       <div
         ref={containerRef}
         className="flex-1 relative overflow-hidden select-none"
@@ -578,6 +592,30 @@ async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<B
     ];
   };
 
+  // Cylindrical book dewarp wrapper around `inverse`. For each output pixel,
+  // shift its perspective-pre-image along the spine-perpendicular axis using
+  // c = sin(s · θ_max) / sin(θ_max). Pages near the spine get pulled outward,
+  // undoing the foreshortening of a curled spread. Spine axis is auto-picked
+  // perpendicular to the long edge of the output rectangle.
+  const spineHorizontal = outH >= outW;
+  const halfDim = (spineHorizontal ? outH : outW) / 2;
+  const sinThetaMax = Math.sin(DEWARP_THETA_MAX);
+
+  const dewarpInverse = (dx: number, dy: number): [number, number] => {
+    let cx = dx;
+    let cy = dy;
+    if (spineHorizontal) {
+      const up = (dy - halfDim) / halfDim;
+      const uc = Math.sin(up * DEWARP_THETA_MAX) / sinThetaMax;
+      cy = halfDim + uc * halfDim;
+    } else {
+      const up = (dx - halfDim) / halfDim;
+      const uc = Math.sin(up * DEWARP_THETA_MAX) / sinThetaMax;
+      cx = halfDim + uc * halfDim;
+    }
+    return inverse(cx, cy);
+  };
+
   const N = WARP_GRID_N;
   for (let i = 0; i < N; i++) {
     for (let j = 0; j < N; j++) {
@@ -586,10 +624,10 @@ async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<B
       const dx1 = ((i + 1) * outW) / N;
       const dy1 = ((j + 1) * outH) / N;
 
-      const [sx00, sy00] = inverse(dx0, dy0);
-      const [sx10, sy10] = inverse(dx1, dy0);
-      const [sx11, sy11] = inverse(dx1, dy1);
-      const [sx01, sy01] = inverse(dx0, dy1);
+      const [sx00, sy00] = dewarpInverse(dx0, dy0);
+      const [sx10, sy10] = dewarpInverse(dx1, dy0);
+      const [sx11, sy11] = dewarpInverse(dx1, dy1);
+      const [sx01, sy01] = dewarpInverse(dx0, dy1);
 
       drawAffineTriangle(ctx, img,
         sx00, sy00, sx10, sy10, sx11, sy11,
