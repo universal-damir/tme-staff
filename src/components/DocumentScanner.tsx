@@ -12,8 +12,32 @@ const WARP_GRID_N = 20;
 const JPEG_QUALITY = 0.92;
 
 type Point = { x: number; y: number };
-type Corners = { tl: Point; tr: Point; br: Point; bl: Point };
+type Corners = {
+  tl: Point;
+  tr: Point;
+  br: Point;
+  bl: Point;
+  // Spine handles. For a flat document leave these at midpoints of the top
+  // and bottom edges. For a passport spread, drag them onto the visible spine
+  // so the warp can split the page into two flat halves.
+  mt: Point;
+  mb: Point;
+};
 type CornerKey = keyof Corners;
+
+function midpoint(a: Point, b: Point): Point {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function defaultCorners(w: number, h: number): Corners {
+  const ix = w * 0.08;
+  const iy = h * 0.08;
+  const tl = { x: ix, y: iy };
+  const tr = { x: w - ix, y: iy };
+  const br = { x: w - ix, y: h - iy };
+  const bl = { x: ix, y: h - iy };
+  return { tl, tr, br, bl, mt: midpoint(tl, tr), mb: midpoint(bl, br) };
+}
 
 interface DisplayMetrics {
   dispW: number;
@@ -89,15 +113,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         imageRef.current = finalImg;
         setImgUrl(finalUrl);
         setImgSize({ w, h });
-
-        const ix = w * 0.08;
-        const iy = h * 0.08;
-        setCorners({
-          tl: { x: ix, y: iy },
-          tr: { x: w - ix, y: iy },
-          br: { x: w - ix, y: h - iy },
-          bl: { x: ix, y: h - iy },
-        });
+        setCorners(defaultCorners(w, h));
       } catch (e) {
         if (!cancelled) {
           setErrMsg(e instanceof Error ? e.message : 'Failed to load image');
@@ -171,14 +187,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
   const handleReset = () => {
     if (!imgSize) return;
-    const ix = imgSize.w * 0.08;
-    const iy = imgSize.h * 0.08;
-    setCorners({
-      tl: { x: ix, y: iy },
-      tr: { x: imgSize.w - ix, y: iy },
-      br: { x: imgSize.w - ix, y: imgSize.h - iy },
-      bl: { x: ix, y: imgSize.h - iy },
-    });
+    setCorners(defaultCorners(imgSize.w, imgSize.h));
   };
 
   const handleConfirm = async () => {
@@ -216,11 +225,20 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
     if (!corners || !metrics) return '';
     const pts = [
       screenCorner(corners.tl),
+      screenCorner(corners.mt),
       screenCorner(corners.tr),
       screenCorner(corners.br),
+      screenCorner(corners.mb),
       screenCorner(corners.bl),
     ];
     return pts.map((p) => `${p.x},${p.y}`).join(' ');
+  }, [corners, metrics, screenCorner]);
+
+  const spineLine = useMemo(() => {
+    if (!corners || !metrics) return null;
+    const a = screenCorner(corners.mt);
+    const b = screenCorner(corners.mb);
+    return { a, b };
   }, [corners, metrics, screenCorner]);
 
   return (
@@ -240,7 +258,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         >
           <X className="w-5 h-5" />
         </button>
-        <span className="text-sm font-medium">Drag corners to passport edges</span>
+        <span className="text-sm font-medium">Align corners + spine</span>
         <button
           type="button"
           onClick={handleReset}
@@ -301,9 +319,22 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
                 stroke="#FFB300"
                 strokeWidth={2}
               />
+              {spineLine && (
+                <line
+                  x1={spineLine.a.x}
+                  y1={spineLine.a.y}
+                  x2={spineLine.b.x}
+                  y2={spineLine.b.y}
+                  stroke="#FFB300"
+                  strokeWidth={1}
+                  strokeDasharray="4 4"
+                  opacity={0.6}
+                />
+              )}
             </svg>
-            {(['tl', 'tr', 'br', 'bl'] as CornerKey[]).map((key) => {
+            {(['tl', 'tr', 'br', 'bl', 'mt', 'mb'] as CornerKey[]).map((key) => {
               const p = screenCorner(corners[key]);
+              const isMid = key === 'mt' || key === 'mb';
               return (
                 <div
                   key={key}
@@ -315,8 +346,8 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
                     width: HANDLE_SIZE,
                     height: HANDLE_SIZE,
                     borderRadius: '50%',
-                    background: '#FFB300',
-                    border: '3px solid white',
+                    background: isMid ? '#FFFFFF' : '#FFB300',
+                    border: isMid ? '3px solid #FFB300' : '3px solid white',
                     boxShadow: '0 0 0 1px rgba(0,0,0,0.4)',
                     touchAction: 'none',
                     cursor: 'grab',
@@ -379,56 +410,107 @@ function dist(a: Point, b: Point) {
 }
 
 async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<Blob> {
-  const widthTop = dist(corners.tl, corners.tr);
-  const widthBot = dist(corners.bl, corners.br);
-  const heightLeft = dist(corners.tl, corners.bl);
-  const heightRight = dist(corners.tr, corners.br);
+  // Left half: tl-mt-mb-bl. Right half: mt-tr-br-mb. Each warps to its own
+  // rectangle; they're stitched along a common spine in the output canvas.
+  const leftWidth = Math.max(
+    dist(corners.tl, corners.mt),
+    dist(corners.bl, corners.mb)
+  );
+  const rightWidth = Math.max(
+    dist(corners.mt, corners.tr),
+    dist(corners.mb, corners.br)
+  );
+  const heightLeft = Math.max(
+    dist(corners.tl, corners.bl),
+    dist(corners.mt, corners.mb)
+  );
+  const heightRight = Math.max(
+    dist(corners.mt, corners.mb),
+    dist(corners.tr, corners.br)
+  );
 
-  let outW = Math.max(widthTop, widthBot);
-  let outH = Math.max(heightLeft, heightRight);
-  const longest = Math.max(outW, outH);
+  let totalW = leftWidth + rightWidth;
+  let totalH = Math.max(heightLeft, heightRight);
+  const longest = Math.max(totalW, totalH);
   if (longest > MAX_OUTPUT_LONG_SIDE) {
     const k = MAX_OUTPUT_LONG_SIDE / longest;
-    outW *= k;
-    outH *= k;
+    totalW *= k;
+    totalH *= k;
   }
-  outW = Math.max(1, Math.round(outW));
-  outH = Math.max(1, Math.round(outH));
+  totalW = Math.max(2, Math.round(totalW));
+  totalH = Math.max(1, Math.round(totalH));
+
+  // Allocate widths proportionally so the spine lands at the correct
+  // boundary in the output rectangle.
+  const splitX = Math.max(1, Math.min(totalW - 1,
+    Math.round((leftWidth / (leftWidth + rightWidth)) * totalW)
+  ));
 
   const canvas = document.createElement('canvas');
-  canvas.width = outW;
-  canvas.height = outH;
+  canvas.width = totalW;
+  canvas.height = totalH;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('No 2D context');
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, outW, outH);
+  ctx.fillRect(0, 0, totalW, totalH);
 
+  warpQuadIntoRect(
+    ctx, img,
+    corners.tl, corners.mt, corners.mb, corners.bl,
+    0, 0, splitX, totalH
+  );
+  warpQuadIntoRect(
+    ctx, img,
+    corners.mt, corners.tr, corners.br, corners.mb,
+    splitX, 0, totalW - splitX, totalH
+  );
+
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('Encode failed'))),
+      'image/jpeg',
+      JPEG_QUALITY
+    )
+  );
+}
+
+// Warps a source quad (4 image-space points, clockwise from top-left) into
+// the rectangle (rx, ry, rw, rh) of the destination canvas. Uses a grid of
+// affine triangles so text stays sharp.
+function warpQuadIntoRect(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  topLeft: Point,
+  topRight: Point,
+  botRight: Point,
+  botLeft: Point,
+  rx: number,
+  ry: number,
+  rw: number,
+  rh: number
+) {
   const T = PerspT(
     [
-      corners.tl.x, corners.tl.y,
-      corners.tr.x, corners.tr.y,
-      corners.br.x, corners.br.y,
-      corners.bl.x, corners.bl.y,
+      topLeft.x, topLeft.y,
+      topRight.x, topRight.y,
+      botRight.x, botRight.y,
+      botLeft.x, botLeft.y,
     ],
     [
-      0, 0,
-      outW, 0,
-      outW, outH,
-      0, outH,
+      rx, ry,
+      rx + rw, ry,
+      rx + rw, ry + rh,
+      rx, ry + rh,
     ]
   );
 
-  // Subdivide destination rect into a grid of cells. For each cell, find the
-  // source preimage of its 4 corners via the inverse perspective transform,
-  // then render the cell as 2 affine triangles. This approximates a true
-  // perspective warp closely enough that text stays sharp at the warped scale.
   const N = WARP_GRID_N;
   for (let i = 0; i < N; i++) {
     for (let j = 0; j < N; j++) {
-      const dx0 = (i * outW) / N;
-      const dy0 = (j * outH) / N;
-      const dx1 = ((i + 1) * outW) / N;
-      const dy1 = ((j + 1) * outH) / N;
+      const dx0 = rx + (i * rw) / N;
+      const dy0 = ry + (j * rh) / N;
+      const dx1 = rx + ((i + 1) * rw) / N;
+      const dy1 = ry + ((j + 1) * rh) / N;
 
       const [sx00, sy00] = T.transformInverse(dx0, dy0);
       const [sx10, sy10] = T.transformInverse(dx1, dy0);
@@ -443,14 +525,6 @@ async function warpAndExport(img: HTMLImageElement, corners: Corners): Promise<B
         dx0, dy0, dx1, dy1, dx0, dy1);
     }
   }
-
-  return new Promise((resolve, reject) =>
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('Encode failed'))),
-      'image/jpeg',
-      JPEG_QUALITY
-    )
-  );
 }
 
 function drawAffineTriangle(
