@@ -19,7 +19,7 @@ import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
-import { DocumentScanner, preloadScanner } from '@/components/DocumentScanner';
+import { DocumentScanner } from '@/components/DocumentScanner';
 import type { EmployeeFormData, EmployeeFormProps, PassportPageReference, VisaCategory } from '@/types';
 import {
   mergeStaffDocRefs,
@@ -406,9 +406,6 @@ export function EmployeeForm({
     file: null as File | null,
   });
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
-  useEffect(() => {
-    preloadScanner();
-  }, []);
   const [insideUI, setInsideUI] = useState({
     preview: initInside?.path ? getDocumentUrl(initInside.path) : null as string | null,
     validating: false,
