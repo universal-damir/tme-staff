@@ -406,6 +406,7 @@ export function EmployeeForm({
     file: null as File | null,
   });
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
+  const [pendingInsideFile, setPendingInsideFile] = useState<File | null>(null);
   const [insideUI, setInsideUI] = useState({
     preview: initInside?.path ? getDocumentUrl(initInside.path) : null as string | null,
     validating: false,
@@ -1248,9 +1249,23 @@ export function EmployeeForm({
                 validated={!!passportPages.insidePages?.validated}
                 validating={insideUI.validating}
                 error={insideUI.error || undefined}
-                onUpload={handleInsideUpload}
+                onUpload={async (file) => {
+                  setPendingInsideFile(file);
+                  return true;
+                }}
                 onRemove={handleInsideRemove}
               />
+
+              {pendingInsideFile && (
+                <DocumentScanner
+                  file={pendingInsideFile}
+                  onConfirm={async (scannedFile) => {
+                    setPendingInsideFile(null);
+                    await handleInsideUpload(scannedFile);
+                  }}
+                  onCancel={() => setPendingInsideFile(null)}
+                />
+              )}
             </div>
           </FormSection>
 
