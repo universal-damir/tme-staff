@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, X, Check, RotateCcw } from 'lucide-react';
 import { TME_COLORS } from '@/lib/constants';
 
-const OPENCV_URL = 'https://docs.opencv.org/4.10.0/opencv.js';
+const OPENCV_URL = '/opencv.js';
 const MAX_OUTPUT_LONG_SIDE = 2000;
 const HANDLE_SIZE = 28;
 
