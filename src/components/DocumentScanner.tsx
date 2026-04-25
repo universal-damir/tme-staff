@@ -677,7 +677,7 @@ function applyScanFilter(
   let acc = 0;
   for (let i = 0; i < 256; i++) {
     acc += hist[i];
-    if (acc >= sampled * 0.02) {
+    if (acc >= sampled * 0.05) {
       pLo = i;
       break;
     }
@@ -685,7 +685,7 @@ function applyScanFilter(
   acc = 0;
   for (let i = 255; i >= 0; i--) {
     acc += hist[i];
-    if (acc >= sampled * 0.02) {
+    if (acc >= sampled * 0.05) {
       pHi = i;
       break;
     }
@@ -693,10 +693,11 @@ function applyScanFilter(
 
   if (pHi - pLo < 20) return;
 
-  // Stretch percentile range into [4, 251] — leave a touch of headroom so
-  // we don't clip too aggressively.
-  const dstLo = 4;
-  const dstHi = 251;
+  // Stretch the 5th–95th percentile range into [20, 235]. This brightens the
+  // paper and pops dark text without crushing blacks or blowing highlights —
+  // earlier [4, 251] was too aggressive on passport stamps.
+  const dstLo = 20;
+  const dstHi = 235;
   const scale = (dstHi - dstLo) / (pHi - pLo);
 
   for (let i = 0; i < data.length; i += 4) {
@@ -713,6 +714,11 @@ function applyScanFilter(
 
   ctx.putImageData(imgData, 0, 0);
 }
+
+// Dilate triangle vertices outward from the centroid by a small fixed pixel
+// amount before clipping. Neighboring triangles overlap by ~2 px, which masks
+// the anti-aliased seams that otherwise show as a faint grid pattern.
+const TRIANGLE_DILATE_PX = 0.7;
 
 function drawAffineTriangle(
   ctx: CanvasRenderingContext2D,
@@ -734,11 +740,27 @@ function drawAffineTriangle(
   const e = dx0 - a * sx0 - c * sy0;
   const f = dy0 - b * sx0 - d * sy0;
 
+  // Expand each clip vertex outward from the centroid so adjacent triangles
+  // overlap. The transform is unchanged — we just clip a bigger region.
+  const cxd = (dx0 + dx1 + dx2) / 3;
+  const cyd = (dy0 + dy1 + dy2) / 3;
+  const dilate = (x: number, y: number): [number, number] => {
+    const vx = x - cxd;
+    const vy = y - cyd;
+    const len = Math.hypot(vx, vy);
+    if (len < 1e-3) return [x, y];
+    const k = 1 + TRIANGLE_DILATE_PX / len;
+    return [cxd + vx * k, cyd + vy * k];
+  };
+  const [edx0, edy0] = dilate(dx0, dy0);
+  const [edx1, edy1] = dilate(dx1, dy1);
+  const [edx2, edy2] = dilate(dx2, dy2);
+
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(dx0, dy0);
-  ctx.lineTo(dx1, dy1);
-  ctx.lineTo(dx2, dy2);
+  ctx.moveTo(edx0, edy0);
+  ctx.lineTo(edx1, edy1);
+  ctx.lineTo(edx2, edy2);
   ctx.closePath();
   ctx.clip();
   ctx.transform(a, b, c, d, e, f);
