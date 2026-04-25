@@ -33,37 +33,40 @@ export interface PassportExtractionResult {
 /**
  * Passport extraction prompt.
  *
- * Principle: read labeled fields as labeled. The passport already tells you
- * which text is the surname and which is the given names — don't re-derive
- * that from string-splitting. The MRZ at the bottom is the unambiguous
- * machine-encoded source for disambiguating anything the visual text makes
- * unclear (characters with diacritics, low-contrast prints, etc).
+ * Principle: NAMES come from the MRZ (ICAO ASCII transliteration, no
+ * diacritics) — that's what UAE government forms downstream require, and
+ * the visual zone may carry locale-specific characters like ć, š, đ, ñ, ü
+ * that downstream systems cannot render. Other fields (dates, place of
+ * birth, etc.) come from the visual labeled zone because the MRZ either
+ * omits them or encodes them in a lossier form (2-digit year, etc.).
  *
  * Kept nationality-agnostic on purpose: a SOTA vision model does not need
- * per-country crutches, and layering them only hides the real failure mode
- * (which is usually "Claude ignored the Surname field and split the Given
- * Names string by spaces instead").
+ * per-country crutches.
  */
 const PASSPORT_EXTRACTION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their passport with explicit consent for employment visa processing as required by UAE labor law.
 
-Extract the following fields. Two rules:
-- Read each LABELED field on the passport and copy it into the matching output field. The passport's own labels (Surname, Given Names, Nationality, Date of Birth, Date of Issue, Date of Expiry, Place of Birth, Sex, Passport No.) are authoritative.
-- If the visible text is ambiguous, use the MRZ (two <-separated lines at the bottom) to disambiguate. MRZ layout: line 1 = \`P<CCC<SURNAME<<GIVEN<NAMES<<<<\`, line 2 = \`<passport_no><CCC><YYMMDD_dob><SEX><YYMMDD_expiry>...\`.
+The passport has two zones:
+- VISUAL ZONE: the human-readable labeled fields (Surname, Given Names, Date of Birth, Place of Birth, etc.). May contain diacritics (ć, č, š, đ, ñ, ü, ö, å, etc.).
+- MRZ: the two <-separated lines at the bottom. ICAO standard, plain ASCII only, no diacritics. MRZ line 1: \`P<CCC<SURNAME<<GIVEN<NAMES<<<<\`. MRZ line 2: \`<passport_no><CCC><YYMMDD_dob><SEX><YYMMDD_expiry>...\`.
 
-Fields:
-- first_name: the first/primary given name from the Given Names field only
-- middle_name: all remaining names in the Given Names field, space-joined
-- family_name: whatever is in the Surname / Family Name field. Do NOT derive this by splitting the Given Names string
-- passport_no: exactly as printed, preserving any letter prefix (e.g. \`AB5981404\`, \`X12345678\`)
-- passport_issue_date: DD.MM.YYYY with dots
-- passport_expiry_date: DD.MM.YYYY with dots
-- date_of_birth: DD.MM.YYYY with dots
+Field-by-field source:
+
+NAMES — read from MRZ (line 1). Output the plain ASCII form exactly as the MRZ encodes it. NEVER output diacritic characters; the downstream UAE government systems require ASCII. If the MRZ is unreadable, transliterate the visual zone to ASCII (ć→c, č→c, š→s, đ→d, ñ→n, ü→u, ö→o, å→a, etc.).
+- first_name: first/primary given name from MRZ line 1, Title Case
+- middle_name: remaining given names from MRZ line 1, space-joined, Title Case
+- family_name: surname from MRZ line 1, Title Case. Do NOT derive this by splitting the given names string.
+
+OTHER FIELDS — read from the visible labeled zone (more complete than MRZ):
+- passport_no: exactly as printed in the visual zone, preserving any letter prefix (e.g. \`AB5981404\`, \`X12345678\`)
+- passport_issue_date: DD.MM.YYYY with dots (visual zone — has full year)
+- passport_expiry_date: DD.MM.YYYY with dots (visual zone — has full year)
+- date_of_birth: DD.MM.YYYY with dots (visual zone — has full year)
 - nationality: full country name, not the 3-letter code (e.g. \`PAK\` → Pakistan)
 - gender: Male or Female (from Sex field; M → Male, F → Female)
-- place_of_birth: copy from the labeled Place of Birth field (title case if it was all caps)
+- place_of_birth: copy from the labeled Place of Birth field (title case if it was all caps; transliterate diacritics to ASCII)
 - title: infer from gender only — Male → Mr, Female → Ms
 
-Formatting: convert ALL CAPS names to Title Case. Convert any date separator to dots. Don't invent values for fields you cannot read — omit them.
+Don't invent values for fields you cannot read — omit them.
 
 Call the \`extract_passport_data\` tool.`;
 
