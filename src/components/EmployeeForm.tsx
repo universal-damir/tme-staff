@@ -19,6 +19,7 @@ import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
+import { DocumentScanner } from '@/components/DocumentScanner';
 import type { EmployeeFormData, EmployeeFormProps, PassportPageReference, VisaCategory } from '@/types';
 import {
   mergeStaffDocRefs,
@@ -404,6 +405,7 @@ export function EmployeeForm({
     error: null as string | null,
     file: null as File | null,
   });
+  const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
   const [insideUI, setInsideUI] = useState({
     preview: initInside?.path ? getDocumentUrl(initInside.path) : null as string | null,
     validating: false,
@@ -1183,9 +1185,23 @@ export function EmployeeForm({
                 validated={!!passportPages.cover?.validated}
                 validating={coverUI.validating}
                 error={coverUI.error || undefined}
-                onUpload={handleCoverUpload}
+                onUpload={async (file) => {
+                  setPendingCoverFile(file);
+                  return true;
+                }}
                 onRemove={handleCoverRemove}
               />
+
+              {pendingCoverFile && (
+                <DocumentScanner
+                  file={pendingCoverFile}
+                  onConfirm={async (scannedFile) => {
+                    setPendingCoverFile(null);
+                    await handleCoverUpload(scannedFile);
+                  }}
+                  onCancel={() => setPendingCoverFile(null)}
+                />
+              )}
             </div>
             {passportError && (
               <p className="mt-2 text-sm text-red-500">{passportError}</p>
