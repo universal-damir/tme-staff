@@ -68,6 +68,43 @@ interface DocumentScannerProps {
   onCancel: () => void;
 }
 
+/**
+ * Wraps an `onUpload(file) => Promise<boolean>` handler with the scanner.
+ * When the user picks an image, the scanner modal opens; on Use scan, the
+ * flattened image is fed to the wrapped handler. PDFs and non-image files
+ * pass straight through to the handler unchanged.
+ *
+ * Returns `intercepted` to use as the UploadSlot's onUpload prop, and
+ * `scannerModal` to render somewhere in the same component tree (it's null
+ * when no scanner is active).
+ */
+export function useScannerIntercept(
+  handler: (file: File) => Promise<boolean>
+) {
+  const [pending, setPending] = useState<File | null>(null);
+
+  const intercepted = async (file: File): Promise<boolean> => {
+    if (!file.type.startsWith('image/')) {
+      return handler(file);
+    }
+    setPending(file);
+    return true;
+  };
+
+  const scannerModal = pending ? (
+    <DocumentScanner
+      file={pending}
+      onConfirm={async (scanned) => {
+        setPending(null);
+        await handler(scanned);
+      }}
+      onCancel={() => setPending(null)}
+    />
+  ) : null;
+
+  return { intercepted, scannerModal };
+}
+
 export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerProps) {
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [imgUrl, setImgUrl] = useState<string | null>(null);

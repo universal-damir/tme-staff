@@ -143,7 +143,7 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
             <Upload className="w-8 h-8 text-gray-400" />
           </div>
           <p className="text-gray-600 mb-2">Upload your studio passport photo</p>
-          <p className="text-sm text-gray-400">JPG, PNG, HEIC up to 5MB. Studio-quality only — selfies will be rejected.</p>
+          <p className="text-sm text-gray-400">JPG, PNG, HEIC up to 5MB. Studio-quality only — self-taken photos from the front camera on the phone will be rejected.</p>
           <input
             ref={inputRef}
             type="file"
