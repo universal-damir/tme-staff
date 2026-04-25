@@ -4,7 +4,7 @@ import React, { useState, useRef } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { compressImageForAI } from '@/lib/utils';
 import { getDocumentUrl } from '@/lib/supabase';
-import { Camera, Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 
 interface PhotoUploadProps {
@@ -140,109 +140,109 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
           <div
             className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center border-2 border-dashed border-gray-300"
           >
-            <Camera className="w-8 h-8 text-gray-400" />
+            <Upload className="w-8 h-8 text-gray-400" />
           </div>
-          <p className="text-gray-600 mb-2">Click to upload your photo</p>
-          <p className="text-sm text-gray-400">JPG, PNG up to 5MB</p>
+          <p className="text-gray-600 mb-2">Upload your studio passport photo</p>
+          <p className="text-sm text-gray-400">JPG, PNG, HEIC up to 5MB. Studio-quality only — selfies will be rejected.</p>
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept=".jpg,.jpeg,.png,.heic,.webp"
             onChange={handleFileSelect}
             className="hidden"
           />
         </div>
       ) : (
-        // Preview area
-        <div className="relative border-2 rounded-lg p-4" style={{ borderColor: isValidated ? '#22c55e' : '#e5e7eb' }}>
-          <div className="flex items-start gap-4">
-            <div className="relative w-48 h-48 rounded-lg overflow-hidden bg-gray-100">
-              {imageSrc ? (
-                <Image
-                  src={imageSrc}
-                  alt="Photo preview"
-                  fill
-                  className="object-cover"
-                  unoptimized
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <Camera className="w-8 h-8 text-gray-300" />
-                </div>
-              )}
-              {(isUploading || isValidating) && (
-                <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
-                  <Loader2 className="w-8 h-8 animate-spin" style={{ color: TME_COLORS.primary }} />
-                </div>
-              )}
-            </div>
+        // Preview area: photo on top, status/errors below — keeps long AI
+        // feedback readable instead of squeezing it next to the thumbnail.
+        <div
+          className="relative border-2 rounded-lg p-4"
+          style={{ borderColor: isValidated ? '#22c55e' : '#e5e7eb' }}
+        >
+          <button
+            type="button"
+            onClick={handleRemove}
+            className="absolute top-2 right-2 p-1 hover:bg-gray-100 rounded z-10"
+            aria-label="Remove photo"
+          >
+            <X className="w-4 h-4 text-gray-500" />
+          </button>
 
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-medium text-sm">{value?.filename || 'Photo'}</span>
+          <div className="relative w-48 h-48 rounded-lg overflow-hidden bg-gray-100 mx-auto">
+            {imageSrc ? (
+              <Image
+                src={imageSrc}
+                alt="Photo preview"
+                fill
+                className="object-cover"
+                unoptimized
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <Upload className="w-8 h-8 text-gray-300" />
+              </div>
+            )}
+            {(isUploading || isValidating) && (
+              <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin" style={{ color: TME_COLORS.primary }} />
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3">
+            {isValidating && (
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                Validating photo…
+              </div>
+            )}
+
+            {isValidated && !isValidating && (
+              <div className="flex items-center gap-2 text-sm text-green-600">
+                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                Photo validated
+              </div>
+            )}
+
+            {!isValidated && !isValidating && !isUploading && value && validationErrors.length === 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-sm text-amber-600">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>Photo needs re-upload for validation</span>
                 <button
                   type="button"
-                  onClick={handleRemove}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  onClick={() => inputRef.current?.click()}
+                  className="text-sm underline"
+                  style={{ color: TME_COLORS.primary }}
                 >
-                  <X className="w-4 h-4 text-gray-500" />
+                  Re-upload
                 </button>
               </div>
+            )}
 
-              {isValidating && (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Validating photo...
-                </div>
-              )}
-
-              {isValidated && !isValidating && (
-                <div className="flex items-center gap-2 text-sm text-green-600">
-                  <CheckCircle className="w-4 h-4" />
-                  Photo validated
-                </div>
-              )}
-
-              {!isValidated && !isValidating && !isUploading && value && validationErrors.length === 0 && (
-                <div className="flex items-center gap-2 text-sm text-amber-600">
-                  <AlertCircle className="w-4 h-4" />
-                  Photo needs re-upload for validation
-                  <button
-                    type="button"
-                    onClick={() => inputRef.current?.click()}
-                    className="ml-1 text-sm underline"
-                    style={{ color: TME_COLORS.primary }}
-                  >
-                    Re-upload
-                  </button>
-                </div>
-              )}
-
-              {validationErrors.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {validationErrors.map((err, i) => (
-                    <div key={i} className="flex items-center gap-2 text-sm text-red-500">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      {err}
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => inputRef.current?.click()}
-                    className="mt-2 text-sm underline"
-                    style={{ color: TME_COLORS.primary }}
-                  >
-                    Upload a new photo
-                  </button>
-                </div>
-              )}
-            </div>
+            {validationErrors.length > 0 && (
+              <div className="space-y-2">
+                {validationErrors.map((err, i) => (
+                  <div key={i} className="flex items-start gap-2 text-sm text-red-500">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{err}</span>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  className="text-sm underline"
+                  style={{ color: TME_COLORS.primary }}
+                >
+                  Upload a new photo
+                </button>
+              </div>
+            )}
           </div>
 
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept=".jpg,.jpeg,.png,.heic,.webp"
             onChange={handleFileSelect}
             className="hidden"
           />
