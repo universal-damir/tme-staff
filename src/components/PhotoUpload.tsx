@@ -44,67 +44,75 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
     setUploadError(null);
     setValidationErrors([]);
 
-    // Create preview
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPreview(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    // Create preview ONCE; reuse the base64 for AI validation below.
+    const previewDataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+    setPreview(previewDataUrl);
 
-    // Upload file
+    // Run upload + AI validation in PARALLEL — they don't depend on each
+    // other and used to be serial, doubling the perceived wait. Both also
+    // share the same already-decoded base64.
     setIsUploading(true);
-    try {
-      const result = await onUpload(file);
-      if (result) {
-        // Call AI validation API
-        setIsValidating(true);
+    setIsValidating(true);
 
-        // Read file as base64 for API
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          const base64Image = e.target?.result as string;
-
-          try {
-            // Compress image to fit Claude API limits
-            const compressedImage = await compressImageForAI(base64Image);
-
-            const response = await fetch('/api/validate-photo', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ image: compressedImage }),
-            });
-
-            const validation = await response.json();
-
-            setIsValidating(false);
-
-            if (validation.valid) {
-              setValidationErrors([]);
-              onValidated?.(true, []);
-            } else {
-              // Combine errors and suggestions for display
-              const errorMessages = validation.errors.map((err: string, i: number) => {
-                const suggestion = validation.suggestions?.[i];
-                return suggestion ? `${err} - ${suggestion}` : err;
-              });
-              setValidationErrors(errorMessages);
-              onValidated?.(false, errorMessages);
-            }
-          } catch (apiError) {
-            console.error('Photo validation API error:', apiError);
-            setIsValidating(false);
-            setValidationErrors(['Unable to validate photo. Please try again.']);
-            onValidated?.(false, ['Validation service unavailable']);
-          }
-        };
-        reader.readAsDataURL(file);
-      } else {
-        setUploadError('Failed to upload file');
+    const uploadPromise = (async () => {
+      try {
+        return await onUpload(file);
+      } catch {
+        return null;
       }
-    } catch {
+    })();
+
+    const validatePromise = (async () => {
+      try {
+        const compressedImage = await compressImageForAI(previewDataUrl);
+        const response = await fetch('/api/validate-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: compressedImage }),
+        });
+        return await response.json();
+      } catch (err) {
+        console.error('Photo validation API error:', err);
+        return null;
+      }
+    })();
+
+    const [uploadResult, validation] = await Promise.all([
+      uploadPromise,
+      validatePromise,
+    ]);
+
+    setIsUploading(false);
+    setIsValidating(false);
+
+    if (!uploadResult) {
       setUploadError('Failed to upload file');
-    } finally {
-      setIsUploading(false);
+      return;
+    }
+
+    if (!validation) {
+      setValidationErrors(['Unable to validate photo. Please try again.']);
+      onValidated?.(false, ['Validation service unavailable']);
+      return;
+    }
+
+    if (validation.valid) {
+      setValidationErrors([]);
+      onValidated?.(true, []);
+    } else {
+      const errorMessages = (validation.errors as string[]).map(
+        (err: string, i: number) => {
+          const suggestion = validation.suggestions?.[i];
+          return suggestion ? `${err} - ${suggestion}` : err;
+        }
+      );
+      setValidationErrors(errorMessages);
+      onValidated?.(false, errorMessages);
     }
   };
 
