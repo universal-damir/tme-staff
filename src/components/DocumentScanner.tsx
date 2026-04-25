@@ -67,7 +67,9 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
-  const [processing, setProcessing] = useState(false);
+  const [mode, setMode] = useState<'edit' | 'processing' | 'preview'>('edit');
+  const [scannedFile, setScannedFile] = useState<File | null>(null);
+  const [scannedUrl, setScannedUrl] = useState<string | null>(null);
   const [corners, setCorners] = useState<Corners | null>(null);
   const [draggingKey, setDraggingKey] = useState<CornerKey | null>(null);
   const [metrics, setMetrics] = useState<DisplayMetrics | null>(null);
@@ -202,19 +204,41 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
   const handleConfirm = async () => {
     if (!corners || !imageRef.current) return;
-    setProcessing(true);
+    setMode('processing');
     try {
       const blob = await warpAndExport(imageRef.current, corners);
       const baseName = file.name.replace(/\.[^.]+$/, '') || 'scan';
-      const scannedFile = new File([blob], `${baseName}-scanned.jpg`, {
-        type: 'image/jpeg',
-      });
-      onConfirm(scannedFile);
+      const f = new File([blob], `${baseName}-scanned.jpg`, { type: 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      // Revoke any previous preview URL.
+      if (scannedUrl) URL.revokeObjectURL(scannedUrl);
+      setScannedFile(f);
+      setScannedUrl(url);
+      setMode('preview');
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : 'Failed to process scan');
-      setProcessing(false);
+      setMode('edit');
     }
   };
+
+  const handleAdjust = () => {
+    if (scannedUrl) URL.revokeObjectURL(scannedUrl);
+    setScannedUrl(null);
+    setScannedFile(null);
+    setMode('edit');
+  };
+
+  const handleApprove = () => {
+    if (!scannedFile) return;
+    onConfirm(scannedFile);
+  };
+
+  // Cleanup preview URL on unmount.
+  useEffect(() => {
+    return () => {
+      if (scannedUrl) URL.revokeObjectURL(scannedUrl);
+    };
+  }, [scannedUrl]);
 
   const handleUseOriginal = () => {
     onConfirm(file);
@@ -279,16 +303,22 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         >
           <X className="w-5 h-5" />
         </button>
-        <span className="text-sm font-medium">Drag corners to passport edges</span>
-        <button
-          type="button"
-          onClick={handleReset}
-          disabled={!corners}
-          className="p-2 -m-2 disabled:opacity-30"
-          aria-label="Reset corners"
-        >
-          <RotateCcw className="w-5 h-5" />
-        </button>
+        <span className="text-sm font-medium">
+          {mode === 'preview' ? 'Preview' : 'Drag corners to passport edges'}
+        </span>
+        {mode === 'edit' || mode === 'processing' ? (
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={!corners}
+            className="p-2 -m-2 disabled:opacity-30"
+            aria-label="Reset corners"
+          >
+            <RotateCcw className="w-5 h-5" />
+          </button>
+        ) : (
+          <span className="w-5 h-5 inline-block" />
+        )}
       </div>
 
       <div
@@ -299,20 +329,39 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        {!imgSize && !errMsg && (
+        {mode === 'preview' && scannedUrl && (
+          <div className="absolute inset-0 flex items-center justify-center p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={scannedUrl}
+              alt="Scanned preview"
+              draggable={false}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                objectFit: 'contain',
+                userSelect: 'none',
+                pointerEvents: 'none',
+                background: '#fff',
+              }}
+            />
+          </div>
+        )}
+
+        {!imgSize && !errMsg && mode !== 'preview' && (
           <div className="absolute inset-0 flex items-center justify-center text-white text-sm">
             <Loader2 className="w-6 h-6 animate-spin mr-2" />
             Loading…
           </div>
         )}
 
-        {errMsg && (
+        {errMsg && mode !== 'preview' && (
           <div className="absolute inset-0 flex items-center justify-center text-red-300 text-sm px-6 text-center">
             {errMsg}
           </div>
         )}
 
-        {imgUrl && metrics && corners && (
+        {mode !== 'preview' && imgUrl && metrics && corners && (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -370,7 +419,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
           </>
         )}
 
-        {processing && (
+        {mode === 'processing' && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-sm">
             <Loader2 className="w-6 h-6 animate-spin mr-2" />
             Flattening…
@@ -379,26 +428,47 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
       </div>
 
       <div className="p-3 flex flex-col gap-2">
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 py-3 rounded-lg bg-white/10 text-white font-medium"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={!corners || processing}
-            className="flex-1 py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2 disabled:opacity-40"
-            style={{ backgroundColor: TME_COLORS.primary }}
-          >
-            <Check className="w-4 h-4" />
-            Use scan
-          </button>
-        </div>
-        {(errMsg || !imgSize) && (
+        {mode === 'preview' ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleAdjust}
+              className="flex-1 py-3 rounded-lg bg-white/10 text-white font-medium"
+            >
+              Adjust
+            </button>
+            <button
+              type="button"
+              onClick={handleApprove}
+              className="flex-1 py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2"
+              style={{ backgroundColor: TME_COLORS.primary }}
+            >
+              <Check className="w-4 h-4" />
+              Upload
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 py-3 rounded-lg bg-white/10 text-white font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={!corners || mode === 'processing'}
+              className="flex-1 py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2 disabled:opacity-40"
+              style={{ backgroundColor: TME_COLORS.primary }}
+            >
+              <Check className="w-4 h-4" />
+              Use scan
+            </button>
+          </div>
+        )}
+        {(errMsg || !imgSize) && mode !== 'preview' && (
           <button
             type="button"
             onClick={handleUseOriginal}
