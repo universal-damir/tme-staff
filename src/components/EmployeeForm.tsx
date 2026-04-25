@@ -406,6 +406,10 @@ export function EmployeeForm({
     file: null as File | null,
   });
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
+  // DEBUG: trace pendingCoverFile changes
+  useEffect(() => {
+    alert(`[5 parent effect] pendingCoverFile=${pendingCoverFile ? pendingCoverFile.name : 'null'}`);
+  }, [pendingCoverFile]);
   const [insideUI, setInsideUI] = useState({
     preview: initInside?.path ? getDocumentUrl(initInside.path) : null as string | null,
     validating: false,

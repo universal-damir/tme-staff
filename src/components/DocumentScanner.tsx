@@ -128,6 +128,12 @@ interface DocumentScannerProps {
 }
 
 export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerProps) {
+  // DEBUG: alert once on first render of this component
+  const debugRenderedRef = useRef(false);
+  if (!debugRenderedRef.current) {
+    debugRenderedRef.current = true;
+    if (typeof window !== 'undefined') alert(`[1.5 scanner render] file=${file.name}`);
+  }
   const [status, setStatus] = useState<'loading' | 'ready' | 'processing' | 'error'>('loading');
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [corners, setCorners] = useState<Corners | null>(null);
