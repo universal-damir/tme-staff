@@ -168,36 +168,57 @@ function StepNavButtons({
 }
 
 // --- Sticky Step Progress Bar ---
+// Internal step indices (1..8) are stable so the existing show/hide guards
+// keep working. The indicator uses `visibleStepIndices` to renumber dynamically
+// — e.g. on renewal the "Identity & Visa Documents" step is empty and is
+// hidden entirely, so a 7-step display replaces "Step 4 of 8 (empty)".
 function StepProgress({
   currentStep,
   viewingStep,
-  totalSteps,
+  visibleStepIndices,
   onStepClick,
 }: {
   currentStep: number;
   viewingStep: number;
-  totalSteps: number;
+  visibleStepIndices: number[];
   onStepClick: (step: number) => void;
 }) {
+  const totalSteps = visibleStepIndices.length;
+  const visiblePos = (internal: number) => {
+    const idx = visibleStepIndices.indexOf(internal);
+    return idx < 0 ? 0 : idx + 1; // 1-based; 0 means hidden
+  };
+  const prevVisible = (() => {
+    const idx = visibleStepIndices.indexOf(viewingStep);
+    return idx > 0 ? visibleStepIndices[idx - 1] : viewingStep;
+  })();
+  const nextVisible = (() => {
+    const idx = visibleStepIndices.indexOf(viewingStep);
+    return idx >= 0 && idx < visibleStepIndices.length - 1
+      ? visibleStepIndices[idx + 1]
+      : viewingStep;
+  })();
+  const isAtFirstVisible = visibleStepIndices.indexOf(viewingStep) <= 0;
+  const isAtLastVisibleReached = visiblePos(viewingStep) >= visiblePos(currentStep);
   return (
     <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-sm mb-2">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => onStepClick(Math.max(1, viewingStep - 1))}
-            disabled={viewingStep <= 1}
+            onClick={() => onStepClick(prevVisible)}
+            disabled={isAtFirstVisible}
             className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
           >
             <ChevronLeft className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
           </button>
           <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: TME_COLORS.primary }}>
-            Step {viewingStep} of {totalSteps}
+            Step {visiblePos(viewingStep) || 1} of {totalSteps}
           </span>
           <button
             type="button"
-            onClick={() => onStepClick(Math.min(currentStep, viewingStep + 1))}
-            disabled={viewingStep >= currentStep}
+            onClick={() => onStepClick(nextVisible)}
+            disabled={isAtLastVisibleReached}
             className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
           >
             <ChevronRight className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
@@ -207,9 +228,10 @@ function StepProgress({
           {STEP_LABELS[viewingStep - 1] || ''}
         </span>
       </div>
-      {/* Clickable step dots */}
+      {/* Clickable step dots — only visible steps get a dot, so the user
+          never sees a placeholder for an empty step. */}
       <div className="flex items-center gap-1.5 mb-2">
-        {Array.from({ length: totalSteps }, (_, i) => i + 1).map((step) => {
+        {visibleStepIndices.map((step) => {
           const isCompleted = step < currentStep;
           const isCurrent = step === currentStep;
           const isViewing = step === viewingStep;
@@ -630,8 +652,36 @@ export function EmployeeForm({
   }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, isAdditionalPageUploaded, requiresAdditionalPage, passportDataReady, isPersonalComplete, isStep4Complete, isFamilyComplete, isContactComplete, isEducationComplete]);
 
   const currentStep = computeCurrentStep();
-  const totalSteps = STEP_LABELS.length;
+
+  // Step 4 ("Identity & Visa Documents") has two sub-sections:
+  //   - UAE Visa Status picker — only shown when the employer answered
+  //     "Yes, applicant is in the UAE" (new-hire only).
+  //   - Previous UAE Visa + Emirates ID — new-hire only.
+  // On renewal where the employer didn't enable the visa picker, both are
+  // gone and step 4 has no UI at all. Drop it from the indicator so the
+  // user doesn't land on a blank screen.
+  const isStep4Empty = !showVisaCategoryPicker && isRenewal;
+  const visibleStepIndices = isStep4Empty
+    ? [1, 2, 3, 5, 6, 7, 8]
+    : [1, 2, 3, 4, 5, 6, 7, 8];
+
+  // Map an internal step number (1..8) to the displayed position (1..N) so
+  // the FormSection badges and the "Step X of Y" header match the dot row.
+  const displayedStepNumber = (internal: number): number => {
+    const idx = visibleStepIndices.indexOf(internal);
+    return idx < 0 ? internal : idx + 1;
+  };
   const [viewingStep, setViewingStep] = useState(currentStep);
+
+  // If viewingStep ever lands on a hidden internal step (e.g. user navigated
+  // there before the renewal flow was loaded), advance to the next visible.
+  useEffect(() => {
+    if (!visibleStepIndices.includes(viewingStep)) {
+      const next = visibleStepIndices.find((s) => s >= viewingStep) ?? visibleStepIndices[visibleStepIndices.length - 1];
+      setViewingStep(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStep4Empty]);
 
   // No auto-advance — user controls navigation via "Continue" button or arrows
 
@@ -1259,8 +1309,20 @@ export function EmployeeForm({
       <StepProgress
         currentStep={currentStep}
         viewingStep={viewingStep}
-        totalSteps={totalSteps}
-        onStepClick={(step) => { setViewingStep(step); if (step === 8) { window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); } }}
+        visibleStepIndices={visibleStepIndices}
+        onStepClick={(step) => {
+          setViewingStep(step);
+          // Always scroll to top on navigation. Without this, the page keeps
+          // its previous scroll position from the prior step — and steps with
+          // shorter content (Education in particular, which is shorter than
+          // Address & Contact above it) leave the user looking at empty
+          // space below the section. RevealSection's onReveal only fires on
+          // the first visit (gated by hasBeenShown) so it can't be relied on
+          // for re-visits. We also re-scroll after the reveal animation
+          // (~300ms) because the page height changes mid-animation.
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          setTimeout(() => window.scrollTo({ top: 0 }), 300);
+        }}
       />
 
       {/* Step 1: Photo Upload */}
@@ -1268,7 +1330,7 @@ export function EmployeeForm({
         <FormSection
           title="ID Photo"
           icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-          stepNumber={1}
+          stepNumber={displayedStepNumber(1)}
         >
           <PhotoUpload
             value={photoDoc}
@@ -1410,7 +1472,7 @@ export function EmployeeForm({
           <FormSection
             title="Passport Cover (OUTSIDE)"
             icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={2}
+            stepNumber={displayedStepNumber(2)}
           >
             <div className="space-y-4">
               <div
@@ -1473,7 +1535,7 @@ export function EmployeeForm({
           <FormSection
             title="Passport Data (INSIDE)"
             icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={3}
+            stepNumber={displayedStepNumber(3)}
           >
             <div className="space-y-4">
               <div
@@ -1973,7 +2035,7 @@ export function EmployeeForm({
           <FormSection
             title="UAE Visa and Emirates ID"
             icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={4}
+            stepNumber={displayedStepNumber(4)}
           >
             <div className="space-y-4">
               <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
@@ -2187,7 +2249,7 @@ export function EmployeeForm({
           <FormSection
             title="Family Details"
             icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={5}
+            stepNumber={displayedStepNumber(5)}
           >
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2253,7 +2315,7 @@ export function EmployeeForm({
           <FormSection
             title="Home Country Address"
             icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={6}
+            stepNumber={displayedStepNumber(6)}
           >
             <div className="space-y-4">
               <Input
@@ -2423,7 +2485,7 @@ export function EmployeeForm({
           <FormSection
             title="Education & Languages"
             icon={<GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-            stepNumber={7}
+            stepNumber={displayedStepNumber(7)}
           >
             <div className="space-y-4">
               <CustomDropdown
@@ -2732,7 +2794,7 @@ export function EmployeeForm({
             <FormSection
               title="Review & Sign"
               icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-              stepNumber={8}
+              stepNumber={displayedStepNumber(8)}
             >
               <div className="space-y-4">
                 <p className="text-sm text-gray-600">

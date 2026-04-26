@@ -5,6 +5,34 @@ import { Loader2, X, Check, RotateCcw } from 'lucide-react';
 import { TME_COLORS } from '@/lib/constants';
 import PerspT from 'perspective-transform';
 
+/**
+ * The drag-corners scanner is only useful on phones (where a camera capture
+ * with imperfect framing is the normal flow). On desktop, users upload
+ * files directly from disk — already cropped, scanned, or PDF'd — so the
+ * scanner UI just adds friction. This hook gates the scanner: when it
+ * returns false, both the wrapper (`useScannerIntercept`) and the modal
+ * (`DocumentScanner`) bypass and pass the file straight through to the
+ * upload handler.
+ *
+ * Initialised synchronously on the client to avoid a flicker between the
+ * default desktop render and the first effect tick.
+ */
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window !== 'undefined' &&
+    'ontouchstart' in window &&
+    window.innerWidth < 768
+  );
+  useEffect(() => {
+    const check = () => {
+      setIsMobile('ontouchstart' in window && window.innerWidth < 768);
+    };
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  return isMobile;
+}
+
 const HANDLE_SIZE = 28;
 const MAX_OUTPUT_LONG_SIDE = 2000;
 const MAX_SOURCE_LONG_SIDE = 2400;
@@ -81,10 +109,12 @@ interface DocumentScannerProps {
 export function useScannerIntercept(
   handler: (file: File) => Promise<boolean>
 ) {
+  const isMobile = useIsMobile();
   const [pending, setPending] = useState<File | null>(null);
 
   const intercepted = async (file: File): Promise<boolean> => {
-    if (!file.type.startsWith('image/')) {
+    // Bypass on desktop or for non-images: pass straight to the handler.
+    if (!file.type.startsWith('image/') || !isMobile) {
       return handler(file);
     }
     setPending(file);
@@ -106,6 +136,20 @@ export function useScannerIntercept(
 }
 
 export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerProps) {
+  const isMobile = useIsMobile();
+  const desktopBypassFiredRef = useRef(false);
+
+  // Desktop bypass: auto-confirm with the original file and render nothing.
+  // Lets every caller (useScannerIntercept and the direct-JSX usages in
+  // EmployeeForm cover/inside + PassportMultiUpload) drop the scanner UI
+  // automatically without touching their code.
+  useEffect(() => {
+    if (!isMobile && !desktopBypassFiredRef.current) {
+      desktopBypassFiredRef.current = true;
+      onConfirm(file);
+    }
+  }, [isMobile, file, onConfirm]);
+
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -374,6 +418,11 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
       ` Q ${cLeft.x} ${cLeft.y} ${tl.x} ${tl.y} Z`
     );
   }, [corners, metrics, screenCorner]);
+
+  // Desktop: render nothing — the bypass effect above already auto-confirmed
+  // the file. Keep the hook calls above this guard so React hook order stays
+  // stable across renders.
+  if (!isMobile) return null;
 
   return (
     <div

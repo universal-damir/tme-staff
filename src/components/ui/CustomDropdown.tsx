@@ -46,7 +46,16 @@ export default function CustomDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
+  // top is set when the popup opens DOWNWARD (top edge anchored below the
+  // trigger). bottom is set when it opens UPWARD (bottom edge anchored just
+  // above the trigger) — anchoring by bottom keeps short popups visually
+  // attached to the trigger instead of floating up to the max-height mark.
+  const [dropdownPosition, setDropdownPosition] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    width: number;
+  }>({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -94,14 +103,18 @@ export default function CustomDropdown({
       const spaceAbove = rect.top;
       const dropdownMaxHeight = 240;
 
-      let top: number;
+      // Open upward when there isn't enough room below AND there's more room
+      // above. Anchor by `bottom` (distance from viewport bottom to the
+      // trigger top) so the popup hugs the trigger regardless of how many
+      // options it ends up rendering — fixes the "popup floats in the
+      // middle" issue for short option lists.
       if (spaceBelow < dropdownMaxHeight && spaceAbove > spaceBelow) {
-        top = rect.top - Math.min(dropdownMaxHeight, spaceAbove - 8) - 4;
+        const bottom = viewportHeight - rect.top + 4;
+        setDropdownPosition({ bottom, left, width });
       } else {
-        top = rect.bottom + 4;
+        const top = rect.bottom + 4;
+        setDropdownPosition({ top, left, width });
       }
-
-      setDropdownPosition({ top, left, width });
     }
   };
 
@@ -372,7 +385,8 @@ export default function CustomDropdown({
             style={{
               borderColor: TME_COLORS.primary,
               fontFamily: 'Inter, sans-serif',
-              top: `${dropdownPosition.top}px`,
+              ...(dropdownPosition.top !== undefined ? { top: `${dropdownPosition.top}px` } : {}),
+              ...(dropdownPosition.bottom !== undefined ? { bottom: `${dropdownPosition.bottom}px` } : {}),
               left: `${dropdownPosition.left}px`,
               width: `${dropdownPosition.width}px`,
               zIndex: 9999,

@@ -13,7 +13,7 @@ import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/compo
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
-import { isDmccAuthority } from '@/lib/staff-form-logic';
+import { isDmccAuthority, pluralizePeriod } from '@/lib/staff-form-logic';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
 import { uploadDocument, updateDocumentReferences } from '@/lib/supabase';
 import type { StaffDocumentReferences } from '@/types';
@@ -87,11 +87,10 @@ function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
   );
 }
 
-// Helper function to pluralize time units
-function pluralize(value: number | undefined, singular: string): string {
-  if (value === undefined || value === null) return singular + 's';
-  return value === 1 ? singular : singular + 's';
-}
+const TIME_PERIOD_UNIT_OPTIONS = [
+  { value: 'days', label: 'Day(s)' },
+  { value: 'months', label: 'Month(s)' },
+];
 
 export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: EmployerFormProps) {
   const { professions: jobTitleOptions, loading: jobTitlesLoading } = useMohreProfessions();
@@ -134,6 +133,12 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       notice_period_value: 1,
       probation_period_value: 6,
       sponsor: 'Company',
+      // Default to 'allowance' for accommodation/transport (matches the typical
+      // UAE 60/30/10 split) and 'no' for food (rarely provided as cash). AI
+      // extraction or saved data overrides these.
+      accommodation_provided: 'allowance',
+      transport_provided: 'allowance',
+      food_provided: 'no',
       // Merge pre-fill data from TME Portal (renewals) — overrides defaults, but saved data overrides prefill
       ...submission.prefill_employer_data,
     },
@@ -162,7 +167,12 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const annualLeaveType = watch('annual_leave_type');
   const weeklyOff = watch('weekly_off');
   const noticePeriodValue = watch('notice_period_value');
+  const noticePeriodUnit = watch('notice_period_unit');
   const probationPeriodValue = watch('probation_period_value');
+  const probationPeriodUnit = watch('probation_period_unit');
+  const accommodationProvided = watch('accommodation_provided');
+  const transportProvided = watch('transport_provided');
+  const foodProvided = watch('food_provided');
 
   const handleFormSubmit = async (data: EmployerFormData) => {
     if (!isRenewal && applicantInUAE === null) {
@@ -187,6 +197,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     salary_food?: number | undefined;
     salary_other?: number | undefined;
     salary_prepay_card?: number | undefined;
+    accommodation_provided?: 'yes' | 'no' | 'allowance';
+    transport_provided?: 'yes' | 'no' | 'allowance';
+    food_provided?: 'yes' | 'no' | 'allowance';
   }) => {
     setValue('salary_currency', values.salary_currency);
     setValue('salary_total', values.salary_total as number);
@@ -196,6 +209,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('salary_food', values.salary_food);
     setValue('salary_other', values.salary_other);
     setValue('salary_prepay_card', values.salary_prepay_card);
+    if (values.accommodation_provided !== undefined) setValue('accommodation_provided', values.accommodation_provided);
+    if (values.transport_provided !== undefined) setValue('transport_provided', values.transport_provided);
+    if (values.food_provided !== undefined) setValue('food_provided', values.food_provided);
   };
 
   const showMatchFeedback = (label: string) => {
@@ -420,6 +436,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
           food={salaryFood}
           other={salaryOther}
           prepayCard={salaryPrepayCard}
+          accommodationProvided={accommodationProvided || 'no'}
+          transportProvided={transportProvided || 'no'}
+          foodProvided={foodProvided || 'no'}
           onChange={handleSalaryChange}
           errors={{
             total: errors.salary_total?.message,
@@ -528,20 +547,31 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               <label className="block text-sm mb-1">
                 <span className="font-medium" style={{ color: TME_COLORS.primary }}>Notice Period</span>
                 {' '}
-                <span className="text-gray-400">({pluralize(Number(noticePeriodValue), 'month')})</span>
+                <span className="text-gray-400">
+                  ({Number(noticePeriodValue) || 0} {pluralizePeriod(Number(noticePeriodValue), noticePeriodUnit)})
+                </span>
               </label>
-              <div className="w-20">
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  placeholder="1"
-                  error={errors.notice_period_value?.message}
-                  {...register('notice_period_value', {
-                    required: 'Required',
-                    pattern: { value: /^\d+$/, message: 'Enter a number' },
-                  })}
-                />
+              <div className="flex gap-2">
+                <div className="w-20 flex-shrink-0">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="1"
+                    error={errors.notice_period_value?.message}
+                    {...register('notice_period_value', {
+                      required: 'Required',
+                      pattern: { value: /^\d+$/, message: 'Enter a number' },
+                    })}
+                  />
+                </div>
+                <div className="flex-1">
+                  <CustomDropdown
+                    options={TIME_PERIOD_UNIT_OPTIONS}
+                    value={noticePeriodUnit || 'months'}
+                    onChange={(val) => setValue('notice_period_unit', val as 'days' | 'weeks' | 'months')}
+                  />
+                </div>
               </div>
             </div>
 
@@ -549,20 +579,31 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               <label className="block text-sm mb-1">
                 <span className="font-medium" style={{ color: TME_COLORS.primary }}>Probation</span>
                 {' '}
-                <span className="text-gray-400">({pluralize(Number(probationPeriodValue), 'month')})</span>
+                <span className="text-gray-400">
+                  ({Number(probationPeriodValue) || 0} {pluralizePeriod(Number(probationPeriodValue), probationPeriodUnit)})
+                </span>
               </label>
-              <div className="w-20">
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  placeholder="6"
-                  error={errors.probation_period_value?.message}
-                  {...register('probation_period_value', {
-                    required: 'Required',
-                    pattern: { value: /^\d+$/, message: 'Enter a number' },
-                  })}
-                />
+              <div className="flex gap-2">
+                <div className="w-20 flex-shrink-0">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="6"
+                    error={errors.probation_period_value?.message}
+                    {...register('probation_period_value', {
+                      required: 'Required',
+                      pattern: { value: /^\d+$/, message: 'Enter a number' },
+                    })}
+                  />
+                </div>
+                <div className="flex-1">
+                  <CustomDropdown
+                    options={TIME_PERIOD_UNIT_OPTIONS}
+                    value={probationPeriodUnit || 'months'}
+                    onChange={(val) => setValue('probation_period_unit', val as 'days' | 'weeks' | 'months')}
+                  />
+                </div>
               </div>
             </div>
           </div>

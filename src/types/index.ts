@@ -25,6 +25,13 @@ export interface EmployerFormData {
   salary_food?: number;
   salary_other?: number;
   salary_prepay_card?: number;
+
+  // Provided-benefit flags — 'yes' = company provides directly (FIRST PARTY),
+  // 'allowance' = paid as cash (amount lives in the matching salary_* field),
+  // 'no' = not provided. Default 'no' when AI extraction can't determine.
+  accommodation_provided: 'yes' | 'no' | 'allowance';
+  transport_provided: 'yes' | 'no' | 'allowance';
+  food_provided: 'yes' | 'no' | 'allowance';
   payroll_salary_currency?: string;
   payroll_salary_total?: number;
   payroll_salary_basic?: number;

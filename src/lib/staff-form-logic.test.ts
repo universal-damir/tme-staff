@@ -5,6 +5,8 @@ import {
   isDmccAuthority,
   visaDocumentRequirement,
   requiresArrivalDate,
+  pluralizePeriod,
+  normalizeProvidedFlag,
 } from './staff-form-logic';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -159,5 +161,68 @@ describe('requiresArrivalDate', () => {
   it('is false for undefined / null', () => {
     expect(requiresArrivalDate(undefined)).toBe(false);
     expect(requiresArrivalDate(null)).toBe(false);
+  });
+});
+
+describe('pluralizePeriod', () => {
+  it('uses singular for 1 across all units', () => {
+    expect(pluralizePeriod(1, 'days')).toBe('day');
+    expect(pluralizePeriod(1, 'weeks')).toBe('week');
+    expect(pluralizePeriod(1, 'months')).toBe('month');
+  });
+
+  it('uses plural for any count != 1', () => {
+    expect(pluralizePeriod(0, 'days')).toBe('days');
+    expect(pluralizePeriod(2, 'weeks')).toBe('weeks');
+    expect(pluralizePeriod(30, 'days')).toBe('days');
+    expect(pluralizePeriod(6, 'months')).toBe('months');
+  });
+
+  it('defaults to "month(s)" when unit is missing or unknown', () => {
+    expect(pluralizePeriod(2, undefined)).toBe('months');
+    expect(pluralizePeriod(2, null)).toBe('months');
+    expect(pluralizePeriod(2, 'years')).toBe('months');
+  });
+
+  it('falls back to plural for invalid values (NaN/missing)', () => {
+    expect(pluralizePeriod(undefined, 'days')).toBe('days');
+    expect(pluralizePeriod(null, 'months')).toBe('months');
+    expect(pluralizePeriod(NaN, 'weeks')).toBe('weeks');
+  });
+
+  it('regression: "30 days" stays as "days" (not "months")', () => {
+    // The original bug: contracts that say "30 days notice" were being
+    // displayed as "30 months". With value=30 + unit='days' the helper must
+    // return "days", proving the unit is honored.
+    expect(pluralizePeriod(30, 'days')).toBe('days');
+  });
+});
+
+describe('normalizeProvidedFlag', () => {
+  it('passes through valid tri-state values', () => {
+    expect(normalizeProvidedFlag('yes')).toBe('yes');
+    expect(normalizeProvidedFlag('no')).toBe('no');
+    expect(normalizeProvidedFlag('allowance')).toBe('allowance');
+  });
+
+  it('is case-insensitive and trims whitespace', () => {
+    expect(normalizeProvidedFlag('YES')).toBe('yes');
+    expect(normalizeProvidedFlag(' Allowance ')).toBe('allowance');
+    expect(normalizeProvidedFlag('No')).toBe('no');
+  });
+
+  it('defaults to "no" for missing / null / undefined / empty', () => {
+    // Per product spec: "if AI cannot find or contract is silent, leave No".
+    expect(normalizeProvidedFlag(undefined)).toBe('no');
+    expect(normalizeProvidedFlag(null)).toBe('no');
+    expect(normalizeProvidedFlag('')).toBe('no');
+  });
+
+  it('defaults to "no" for unrecognized strings or non-strings', () => {
+    expect(normalizeProvidedFlag('maybe')).toBe('no');
+    expect(normalizeProvidedFlag('true')).toBe('no');
+    expect(normalizeProvidedFlag(1)).toBe('no');
+    expect(normalizeProvidedFlag(true)).toBe('no');
+    expect(normalizeProvidedFlag({})).toBe('no');
   });
 });

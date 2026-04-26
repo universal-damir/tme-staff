@@ -5,6 +5,14 @@ import { TME_COLORS, SALARY_BREAKDOWN_EXPLANATION, DEFAULT_SALARY_BREAKDOWN } fr
 import { CustomDropdown } from '@/components/ui';
 import { ChevronDown, ChevronUp, Info, AlertTriangle } from 'lucide-react';
 
+type ProvidedFlag = 'yes' | 'no' | 'allowance';
+
+const PROVIDED_OPTIONS: { value: ProvidedFlag; label: string }[] = [
+  { value: 'allowance', label: 'Allowance' },
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' },
+];
+
 // Abbreviated currency options
 const CURRENCY_OPTIONS = [
   { value: 'AED', label: 'AED' },
@@ -37,6 +45,9 @@ interface SalaryBreakdownProps {
   food?: number | undefined;
   other?: number | undefined;
   prepayCard?: number | undefined;
+  accommodationProvided: ProvidedFlag;
+  transportProvided: ProvidedFlag;
+  foodProvided: ProvidedFlag;
   onChange: (values: {
     salary_currency: string;
     salary_total: number | undefined;
@@ -46,6 +57,9 @@ interface SalaryBreakdownProps {
     salary_food?: number | undefined;
     salary_other?: number | undefined;
     salary_prepay_card?: number | undefined;
+    accommodation_provided?: ProvidedFlag;
+    transport_provided?: ProvidedFlag;
+    food_provided?: ProvidedFlag;
   }) => void;
   errors?: {
     currency?: string;
@@ -64,9 +78,10 @@ interface SalaryInputProps {
   error?: string;
   placeholder?: string;
   required?: boolean;
+  disabled?: boolean;
 }
 
-function SalaryInput({ label, value, onChange, error, placeholder, required }: SalaryInputProps) {
+function SalaryInput({ label, value, onChange, error, placeholder, required, disabled }: SalaryInputProps) {
   const [displayValue, setDisplayValue] = useState(formatNumber(value));
 
   // Sync display value when external value changes
@@ -75,6 +90,7 @@ function SalaryInput({ label, value, onChange, error, placeholder, required }: S
   }, [value]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
     const inputValue = e.target.value;
     // Remove all non-numeric except decimal
     const cleaned = inputValue.replace(/[^0-9.]/g, '');
@@ -108,9 +124,10 @@ function SalaryInput({ label, value, onChange, error, placeholder, required }: S
         value={displayValue}
         onChange={handleChange}
         placeholder={placeholder}
+        disabled={disabled}
         className={`w-full px-3 py-2 rounded-lg border-2 transition-all duration-200 h-[42px] ${
           error ? 'border-red-500' : 'border-gray-200'
-        } focus:outline-none focus:border-[#243F7B]`}
+        } focus:outline-none focus:border-[#243F7B] ${disabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`}
         style={{ fontFamily: 'Inter, sans-serif' }}
       />
       {error && <p className="mt-1 text-sm text-red-500">{error}</p>}
@@ -127,6 +144,9 @@ export function SalaryBreakdown({
   food,
   other,
   prepayCard,
+  accommodationProvided,
+  transportProvided,
+  foodProvided,
   onChange,
   errors,
 }: SalaryBreakdownProps) {
@@ -144,7 +164,9 @@ export function SalaryBreakdown({
     }
   }, [hasDiscrepancy]);
 
-  // Auto-calculate breakdown when total changes
+  // Auto-calculate breakdown when total changes. Only allocate to fields whose
+  // provided flag is 'allowance'; the rest are forced to 0 (their flag means
+  // either company-provided in-kind, or not provided at all).
   const handleTotalChange = useCallback(
     (newTotal: number | undefined) => {
       if (newTotal === undefined || isNaN(newTotal)) {
@@ -161,10 +183,14 @@ export function SalaryBreakdown({
         return;
       }
 
-      // Calculate breakdown using default percentages
-      const newBasic = Math.round(newTotal * DEFAULT_SALARY_BREAKDOWN.basic * 100) / 100;
-      const newAccommodation = Math.round(newTotal * DEFAULT_SALARY_BREAKDOWN.accommodation * 100) / 100;
-      const newTransport = Math.round(newTotal * DEFAULT_SALARY_BREAKDOWN.transport * 100) / 100;
+      const accomPct = accommodationProvided === 'allowance' ? DEFAULT_SALARY_BREAKDOWN.accommodation : 0;
+      const transportPct = transportProvided === 'allowance' ? DEFAULT_SALARY_BREAKDOWN.transport : 0;
+      // Basic absorbs whatever is not allocated to accommodation/transport.
+      const basicPct = 1 - accomPct - transportPct;
+
+      const newAccommodation = Math.round(newTotal * accomPct * 100) / 100;
+      const newTransport = Math.round(newTotal * transportPct * 100) / 100;
+      const newBasic = Math.round(newTotal * basicPct * 100) / 100;
       const newFood = 0;
       const newOther = 0;
 
@@ -183,7 +209,7 @@ export function SalaryBreakdown({
         salary_prepay_card: 0,
       });
     },
-    [currency, onChange]
+    [currency, onChange, accommodationProvided, transportProvided]
   );
 
   // Set total from sum
@@ -197,6 +223,70 @@ export function SalaryBreakdown({
       salary_food: food,
       salary_other: other,
       salary_prepay_card: prepayCard,
+    });
+  };
+
+  // Centralised handler for any breakdown amount change. After the field is
+  // updated, total is recalculated as the sum of all amounts so the user
+  // doesn't have to manually click "Set Total" — it tracks the breakdown.
+  type BreakdownKey =
+    | 'salary_basic'
+    | 'salary_accommodation'
+    | 'salary_transport'
+    | 'salary_food'
+    | 'salary_other'
+    | 'salary_prepay_card';
+  const handleAmountChange = (field: BreakdownKey, val: number | undefined) => {
+    const nextValues: Record<BreakdownKey, number | undefined> = {
+      salary_basic: basic,
+      salary_accommodation: accommodation,
+      salary_transport: transport,
+      salary_food: food,
+      salary_other: other,
+      salary_prepay_card: prepayCard,
+    };
+    nextValues[field] = val;
+    const newTotal =
+      (nextValues.salary_basic || 0) +
+      (nextValues.salary_accommodation || 0) +
+      (nextValues.salary_transport || 0) +
+      (nextValues.salary_food || 0) +
+      (nextValues.salary_other || 0) +
+      (nextValues.salary_prepay_card || 0);
+    onChange({
+      salary_currency: currency,
+      salary_total: Math.round(newTotal * 100) / 100,
+      ...nextValues,
+    });
+  };
+
+  // When a provided flag flips to 'yes' or 'no', force the corresponding
+  // amount to 0 so the breakdown stays self-consistent.
+  const handleProvidedChange = (
+    field: 'accommodation_provided' | 'transport_provided' | 'food_provided',
+    val: ProvidedFlag,
+  ) => {
+    const zeroPatch: Partial<{
+      salary_accommodation: number;
+      salary_transport: number;
+      salary_food: number;
+    }> = {};
+    if (val !== 'allowance') {
+      if (field === 'accommodation_provided') zeroPatch.salary_accommodation = 0;
+      if (field === 'transport_provided') zeroPatch.salary_transport = 0;
+      if (field === 'food_provided') zeroPatch.salary_food = 0;
+    }
+    onChange({
+      salary_currency: currency,
+      salary_total: total,
+      salary_basic: basic,
+      salary_accommodation: accommodation,
+      salary_transport: transport,
+      salary_food: food,
+      salary_other: other,
+      salary_prepay_card: prepayCard,
+      [field]: val,
+      ...zeroPatch,
     });
   };
 
@@ -276,114 +366,109 @@ export function SalaryBreakdown({
         )}
       </button>
 
-      {/* Breakdown Fields */}
+      {/* Breakdown Fields. 4-column grid throughout: amounts in row 1
+          (Basic/Accommodation/Transport/Food) and row 2 (Other/Prepaid +
+          empty cells), then Provided flags in row 3 (with empty 4th cell)
+          so the layout matches the portal's renewal preview. Amounts whose
+          flag is not 'allowance' are disabled and force-zeroed. */}
       {isExpanded && (
         <div className="space-y-4 pt-2 border-t border-gray-200">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          {/* Row 1: Basic | Accommodation | Transport | Food */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <SalaryInput
               label={`Basic (${getPercentage(basic)})`}
               value={basic}
-              onChange={(val) =>
-                onChange({
-                  salary_currency: currency,
-                  salary_total: total,
-                  salary_basic: val,
-                  salary_accommodation: accommodation,
-                  salary_transport: transport,
-                  salary_food: food,
-                  salary_other: other,
-                  salary_prepay_card: prepayCard,
-                })
-              }
+              onChange={(val) => handleAmountChange('salary_basic', val)}
               error={errors?.basic}
             />
-
             <SalaryInput
               label={`Accommodation (${getPercentage(accommodation)})`}
-              value={accommodation}
-              onChange={(val) =>
-                onChange({
-                  salary_currency: currency,
-                  salary_total: total,
-                  salary_basic: basic,
-                  salary_accommodation: val,
-                  salary_transport: transport,
-                  salary_food: food,
-                  salary_other: other,
-                  salary_prepay_card: prepayCard,
-                })
-              }
+              value={accommodationProvided === 'allowance' ? accommodation : 0}
+              onChange={(val) => handleAmountChange('salary_accommodation', val)}
               error={errors?.accommodation}
+              disabled={accommodationProvided !== 'allowance'}
             />
-
             <SalaryInput
               label={`Transport (${getPercentage(transport)})`}
-              value={transport}
-              onChange={(val) =>
-                onChange({
-                  salary_currency: currency,
-                  salary_total: total,
-                  salary_basic: basic,
-                  salary_accommodation: accommodation,
-                  salary_transport: val,
-                  salary_food: food,
-                  salary_other: other,
-                  salary_prepay_card: prepayCard,
-                })
-              }
+              value={transportProvided === 'allowance' ? transport : 0}
+              onChange={(val) => handleAmountChange('salary_transport', val)}
               error={errors?.transport}
+              disabled={transportProvided !== 'allowance'}
             />
-
             <SalaryInput
               label={`Food (${getPercentage(food)})`}
-              value={food}
-              onChange={(val) =>
-                onChange({
-                  salary_currency: currency,
-                  salary_total: total,
-                  salary_basic: basic,
-                  salary_accommodation: accommodation,
-                  salary_transport: transport,
-                  salary_food: val,
-                  salary_other: other,
-                  salary_prepay_card: prepayCard,
-                })
-              }
+              value={foodProvided === 'allowance' ? food : 0}
+              onChange={(val) => handleAmountChange('salary_food', val)}
+              disabled={foodProvided !== 'allowance'}
             />
+          </div>
 
+          {/* Row 2: Other | Prepaid Card | (empty) | (empty) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <SalaryInput
               label={`Other (${getPercentage(other)})`}
               value={other}
-              onChange={(val) =>
-                onChange({
-                  salary_currency: currency,
-                  salary_total: total,
-                  salary_basic: basic,
-                  salary_accommodation: accommodation,
-                  salary_transport: transport,
-                  salary_food: food,
-                  salary_other: val,
-                  salary_prepay_card: prepayCard,
-                })
-              }
+              onChange={(val) => handleAmountChange('salary_other', val)}
             />
-
             <SalaryInput
               label={`Prepaid Card (${getPercentage(prepayCard)})`}
               value={prepayCard ?? 0}
-              onChange={(val) =>
-                onChange({
-                  salary_currency: currency,
-                  salary_total: total,
-                  salary_basic: basic,
-                  salary_accommodation: accommodation,
-                  salary_transport: transport,
-                  salary_food: food,
-                  salary_other: other,
-                  salary_prepay_card: val,
-                })
-              }
+              onChange={(val) => handleAmountChange('salary_prepay_card', val)}
             />
+            <div aria-hidden="true" />
+            <div aria-hidden="true" />
+          </div>
+
+          {/* Row 3: Provided flags — Accommodation | Transport | Food | (empty).
+              Labels are split into two lines (word / "Provided *") so all
+              three line up consistently with breathing room between
+              columns, instead of either bunching together (whitespace-nowrap)
+              or wrapping unevenly (the longer labels wrap, "Food Provided"
+              stays on one line). */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <label
+                className="block text-sm font-medium mb-1 leading-tight"
+                style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+              >
+                <span className="block">Accommodation</span>
+                <span className="block">Provided<span className="text-red-500 ml-1">*</span></span>
+              </label>
+              <CustomDropdown
+                value={accommodationProvided}
+                onChange={(val) => handleProvidedChange('accommodation_provided', val as ProvidedFlag)}
+                options={PROVIDED_OPTIONS}
+              />
+            </div>
+            <div>
+              <label
+                className="block text-sm font-medium mb-1 leading-tight"
+                style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+              >
+                <span className="block">Transportation</span>
+                <span className="block">Provided<span className="text-red-500 ml-1">*</span></span>
+              </label>
+              <CustomDropdown
+                value={transportProvided}
+                onChange={(val) => handleProvidedChange('transport_provided', val as ProvidedFlag)}
+                options={PROVIDED_OPTIONS}
+              />
+            </div>
+            <div>
+              <label
+                className="block text-sm font-medium mb-1 leading-tight"
+                style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+              >
+                <span className="block">Food</span>
+                <span className="block">Provided<span className="text-red-500 ml-1">*</span></span>
+              </label>
+              <CustomDropdown
+                value={foodProvided}
+                onChange={(val) => handleProvidedChange('food_provided', val as ProvidedFlag)}
+                options={PROVIDED_OPTIONS}
+              />
+            </div>
+            <div aria-hidden="true" />
           </div>
 
           {/* Discrepancy Warning */}

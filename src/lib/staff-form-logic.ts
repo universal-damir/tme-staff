@@ -69,3 +69,39 @@ export function requiresArrivalDate(
 ): boolean {
   return visaCategory === 'visa_on_arrival';
 }
+
+export type TimePeriodUnit = 'days' | 'weeks' | 'months';
+
+/**
+ * Pluralize a numeric period using the stored unit. Renders the unit name in
+ * lowercase singular/plural form so the UI can show "(1 day)", "(30 days)",
+ * "(2 months)", etc. Defaults to "month(s)" when the unit is missing.
+ */
+export function pluralizePeriod(
+  value: number | undefined | null,
+  unit: TimePeriodUnit | string | undefined | null,
+): string {
+  const singular = unit === 'days' ? 'day' : unit === 'weeks' ? 'week' : 'month';
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n === 1) {
+    // singular for "1", plural fallback for missing/invalid values.
+    return n === 1 ? singular : singular + 's';
+  }
+  return singular + 's';
+}
+
+export type ProvidedFlag = 'yes' | 'no' | 'allowance';
+
+/**
+ * Normalize an incoming "provided" flag (from AI extraction, prefill data, or
+ * a saved form) to the strict 'yes' | 'no' | 'allowance' tri-state. Anything
+ * unrecognized — including null, undefined, empty string, or a misspelling —
+ * collapses to 'no', which is the safe default per the product spec ("if the
+ * contract is silent or AI cannot determine, leave it No").
+ */
+export function normalizeProvidedFlag(value: unknown): ProvidedFlag {
+  if (typeof value !== 'string') return 'no';
+  const v = value.trim().toLowerCase();
+  if (v === 'yes' || v === 'allowance') return v;
+  return 'no';
+}
