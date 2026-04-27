@@ -869,23 +869,44 @@ export function EmployeeForm({
 
   // Cover upload handler
   const handleCoverUpload = async (file: File): Promise<boolean> => {
-    const reader = new FileReader();
-    const preview = await new Promise<string>((resolve) => {
-      reader.onload = (e) => resolve(e.target?.result as string);
-      reader.readAsDataURL(file);
-    });
-
-    setCoverUI({ preview, validating: true, error: null, file });
-
-    const validation = await validatePassportPageType(preview, 'COVER');
-    if (!validation.valid) {
-      setCoverUI({ preview, validating: false, error: validation.error || 'Not a valid passport cover', file });
+    const isImage = file.type.startsWith('image/');
+    let preview: string;
+    try {
+      preview = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = () => reject(new Error('read failed'));
+        reader.readAsDataURL(file);
+      });
+    } catch {
+      setCoverUI({ preview: null, validating: false, error: "We couldn't read this file. Please try a different one.", file });
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, 'cover', file);
+    setCoverUI({ preview, validating: true, error: null, file });
+
+    // AI page-type validation only for images — PDFs can't be vision-checked.
+    if (isImage) {
+      try {
+        const validation = await validatePassportPageType(preview, 'COVER');
+        if (!validation.valid) {
+          setCoverUI({ preview, validating: false, error: validation.error || 'This does not look like a passport cover spread. Please upload a clearer photo.', file });
+          return false;
+        }
+      } catch {
+        setCoverUI({ preview, validating: false, error: "We couldn't check this image. Please try again, or upload a PDF instead.", file });
+        return false;
+      }
+    }
+
+    let result: { path: string; filename: string } | null;
+    try {
+      result = await uploadPassportPage(submission.id, 'cover', file);
+    } catch {
+      result = null;
+    }
     if (!result) {
-      setCoverUI({ preview, validating: false, error: 'Failed to upload file', file });
+      setCoverUI({ preview, validating: false, error: 'Upload failed. Please check your connection and try again.', file });
       return false;
     }
 
@@ -901,23 +922,43 @@ export function EmployeeForm({
 
   // Inside pages upload handler
   const handleInsideUpload = async (file: File): Promise<boolean> => {
-    const reader = new FileReader();
-    const preview = await new Promise<string>((resolve) => {
-      reader.onload = (e) => resolve(e.target?.result as string);
-      reader.readAsDataURL(file);
-    });
-
-    setInsideUI({ preview, validating: true, error: null, file });
-
-    const validation = await validatePassportPageType(preview, 'INSIDE_PAGES');
-    if (!validation.valid) {
-      setInsideUI({ preview, validating: false, error: validation.error || 'Not a valid inside page', file });
+    const isImage = file.type.startsWith('image/');
+    let preview: string;
+    try {
+      preview = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = () => reject(new Error('read failed'));
+        reader.readAsDataURL(file);
+      });
+    } catch {
+      setInsideUI({ preview: null, validating: false, error: "We couldn't read this file. Please try a different one.", file });
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, 'insidePages', file);
+    setInsideUI({ preview, validating: true, error: null, file });
+
+    if (isImage) {
+      try {
+        const validation = await validatePassportPageType(preview, 'INSIDE_PAGES');
+        if (!validation.valid) {
+          setInsideUI({ preview, validating: false, error: validation.error || 'This does not look like a passport inside-pages spread. Please upload a clearer photo.', file });
+          return false;
+        }
+      } catch {
+        setInsideUI({ preview, validating: false, error: "We couldn't check this image. Please try again, or upload a PDF instead.", file });
+        return false;
+      }
+    }
+
+    let result: { path: string; filename: string } | null;
+    try {
+      result = await uploadPassportPage(submission.id, 'insidePages', file);
+    } catch {
+      result = null;
+    }
     if (!result) {
-      setInsideUI({ preview, validating: false, error: 'Failed to upload file', file });
+      setInsideUI({ preview, validating: false, error: 'Upload failed. Please check your connection and try again.', file });
       return false;
     }
 
@@ -929,13 +970,22 @@ export function EmployeeForm({
     setPassportError(null);
     await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
 
-    // Extract passport data — show extracting state so user knows it's working
+    // Extraction is image-only — for PDFs the user fills the form manually.
+    if (!isImage) {
+      setPassportDataReady(true);
+      return true;
+    }
+
     setExtractingPassport(true);
-    const extracted = await extractPassportData(preview);
+    let extracted: Record<string, unknown> | null = null;
+    try {
+      extracted = await extractPassportData(preview);
+    } catch {
+      extracted = null;
+    }
     setExtractingPassport(false);
     if (extracted) {
       handlePassportExtracted(extracted);
-      // Store extracted data in passport page reference so tme-portal sync can read passport_issue_date etc.
       const updatedInsidePage: PassportPageReference = {
         ...passportPagesRef.current.insidePages!,
         extracted_data: extracted as Record<string, unknown>,
@@ -945,7 +995,6 @@ export function EmployeeForm({
       passportPagesRef.current = updatedPagesWithData;
       await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPagesWithData }));
     } else {
-      // Extraction failed — let user fill manually
       setPassportDataReady(true);
     }
     return true;
@@ -1493,12 +1542,19 @@ export function EmployeeForm({
                 label="Passport Cover"
                 description="Spread open: front + back cover visible"
                 expectedType="COVER"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
                 file={coverUI.file}
                 preview={coverUI.preview || undefined}
                 validated={!!passportPages.cover?.validated}
                 validating={coverUI.validating}
                 error={coverUI.error || undefined}
                 onUpload={async (file) => {
+                  // PDFs skip the corner-drag scanner — it renders via <img>
+                  // and would hang on a non-image.
+                  if (file.type === 'application/pdf') {
+                    await handleCoverUpload(file);
+                    return true;
+                  }
                   setPendingCoverFile(file);
                   return true;
                 }}
@@ -1556,12 +1612,17 @@ export function EmployeeForm({
                 label=""
                 description="Spread open: data page + opposite page"
                 expectedType="INSIDE_PAGES"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
                 file={insideUI.file}
                 preview={insideUI.preview || undefined}
                 validated={!!passportPages.insidePages?.validated}
                 validating={insideUI.validating}
                 error={insideUI.error || undefined}
                 onUpload={async (file) => {
+                  if (file.type === 'application/pdf') {
+                    await handleInsideUpload(file);
+                    return true;
+                  }
                   setPendingInsideFile(file);
                   return true;
                 }}
