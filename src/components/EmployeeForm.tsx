@@ -1861,6 +1861,7 @@ export function EmployeeForm({
                   label=""
                   description="Last page with parents' names and address"
                   expectedType="INSIDE_PAGES"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
                   file={additionalPageUI.file}
                   preview={additionalPageUI.preview || undefined}
                   validated={!!passportPages.additionalPage?.validated}
