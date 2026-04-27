@@ -130,11 +130,33 @@ export function PassportMultiUpload({
       expectedType: PassportPageType,
       file: File
     ): Promise<boolean> => {
-      const reader = new FileReader();
-      const preview = await new Promise<string>((resolve) => {
-        reader.onload = (e) => resolve(e.target?.result as string);
-        reader.readAsDataURL(file);
-      });
+      const isImage = file.type.startsWith('image/');
+
+      const setError = (msg: string) => {
+        setPages((prev) => ({
+          ...prev,
+          [pageKey]: {
+            ...prev[pageKey],
+            file,
+            validating: false,
+            validated: false,
+            error: msg,
+          },
+        }));
+      };
+
+      let preview: string;
+      try {
+        preview = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = () => reject(new Error('read failed'));
+          reader.readAsDataURL(file);
+        });
+      } catch {
+        setError("We couldn't read this file. Please try a different one.");
+        return false;
+      }
 
       setPages((prev) => ({
         ...prev,
@@ -148,38 +170,40 @@ export function PassportMultiUpload({
         },
       }));
 
-      const validation = await validatePageType(preview, expectedType);
-
-      if (!validation.valid) {
-        setPages((prev) => ({
-          ...prev,
-          [pageKey]: {
-            ...prev[pageKey],
-            validating: false,
-            validated: false,
-            error: validation.error || 'This is not the correct page type',
-          },
-        }));
-        return false;
+      // AI page-type validation only runs for images (the model needs to
+      // see the spread). PDFs go straight through — we trust the user.
+      if (isImage) {
+        try {
+          const validation = await validatePageType(preview, expectedType);
+          if (!validation.valid) {
+            setError(validation.error || 'This does not look like the correct passport page. Please upload a clearer photo of the spread.');
+            return false;
+          }
+        } catch {
+          setError("We couldn't check this image. Please try again, or upload a PDF instead.");
+          return false;
+        }
       }
 
-      const uploadResult = await onUpload(pageKey, file);
+      let uploadResult: { path: string } | null;
+      try {
+        uploadResult = await onUpload(pageKey, file);
+      } catch {
+        uploadResult = null;
+      }
       if (!uploadResult) {
-        setPages((prev) => ({
-          ...prev,
-          [pageKey]: {
-            ...prev[pageKey],
-            validating: false,
-            validated: false,
-            error: 'Failed to upload file',
-          },
-        }));
+        setError("Upload failed. Please check your connection and try again.");
         return false;
       }
 
       let extractedData: Record<string, unknown> | null = null;
-      if (pageKey === 'insidePages') {
-        extractedData = await extractPassportData(preview);
+      if (pageKey === 'insidePages' && isImage) {
+        try {
+          extractedData = await extractPassportData(preview);
+        } catch {
+          // Extraction is best-effort — user can fill the form manually.
+          extractedData = null;
+        }
       }
 
       const newPages = {
@@ -242,12 +266,19 @@ export function PassportMultiUpload({
           label={coverStepNumber ? '' : 'Passport Cover'}
           description="Spread open: front + back cover visible"
           expectedType="COVER"
+          accept="image/jpeg,image/png,image/webp,application/pdf"
           file={pages.cover.file}
           preview={pages.cover.preview || undefined}
           validated={pages.cover.validated}
           validating={pages.cover.validating}
           error={pages.cover.error || undefined}
           onUpload={async (file) => {
+            // PDFs skip the corner-drag scanner — it renders the file via
+            // <img>, which can't decode PDFs and would leave the UI stuck.
+            if (file.type === 'application/pdf') {
+              await handleUpload('cover', 'COVER', file);
+              return true;
+            }
             setPendingCoverFile(file);
             return true;
           }}
@@ -308,6 +339,7 @@ export function PassportMultiUpload({
             label=""
             description="Spread open: data page + opposite page"
             expectedType="INSIDE_PAGES"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
             file={pages.insidePages.file}
             preview={pages.insidePages.preview || undefined}
             validated={pages.insidePages.validated}

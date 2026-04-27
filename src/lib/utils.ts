@@ -165,9 +165,23 @@ export function cn(...classes: (string | boolean | undefined | null)[]): string 
  * Resizes to max 1500px and compresses to JPEG
  */
 export async function compressImageForAI(base64Image: string): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+    // Belt-and-braces: if the browser can't decode the data URL (e.g. a PDF
+    // or HEIC/AVIF that snuck past the file picker), neither onload nor
+    // onerror may fire reliably. Time-bound so the caller can surface an
+    // error instead of leaving the UI stuck on "validating".
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error('Image decode timed out')));
+    }, 15000);
+    img.onload = () => finish(() => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d')!;
 
@@ -192,7 +206,8 @@ export async function compressImageForAI(base64Image: string): Promise<string> {
       // Compress to JPEG at 80% quality
       const compressed = canvas.toDataURL('image/jpeg', 0.8);
       resolve(compressed);
-    };
+    });
+    img.onerror = () => finish(() => reject(new Error('Image could not be decoded')));
     img.src = base64Image;
   });
 }

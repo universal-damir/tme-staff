@@ -50,6 +50,18 @@ export function UploadSlot({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
+      const acceptedTypes = accept.split(',').map(t => t.trim());
+      const typeOk =
+        acceptedTypes.includes(selectedFile.type) ||
+        (acceptedTypes.some(t => t === 'image/*') && selectedFile.type.startsWith('image/'));
+      if (!typeOk) {
+        const friendly = acceptedTypes.includes('application/pdf')
+          ? 'Please upload a JPEG, PNG, WebP image, or a PDF.'
+          : 'Please upload a JPEG, PNG, or WebP image.';
+        alert(friendly);
+        if (inputRef.current) inputRef.current.value = '';
+        return;
+      }
       if (selectedFile.size > MAX_FILE_SIZE) {
         alert(`File too large. Maximum size is ${maxSizeMB}MB.`);
         return;
