@@ -140,13 +140,30 @@ export function UploadSlot({
         {/* Preview or Upload Prompt */}
         {preview ? (
           <div className="relative p-2">
-            {/* Images preview inline. PDFs don't preview — validation runs,
-                and once valid we just show a compact "PDF uploaded" card. */}
+            {/* Images preview inline. PDFs render via <object>, with a
+                generic "PDF uploaded" icon as fallback for browsers that
+                refuse data: URLs (some mobile browsers). */}
             {isPdfPreview ? (
-              <div className="w-full h-64 flex flex-col items-center justify-center rounded-lg bg-white">
-                <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
-                <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
-              </div>
+              <object
+                data={preview}
+                type="application/pdf"
+                className="w-full h-64 rounded-lg bg-white"
+                aria-label={label || 'PDF preview'}
+              >
+                <div className="w-full h-64 flex flex-col items-center justify-center rounded-lg bg-white">
+                  <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
+                  <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
+                  <a
+                    href={preview}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 text-xs underline"
+                    style={{ color: TME_COLORS.primary }}
+                  >
+                    Open PDF
+                  </a>
+                </div>
+              </object>
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img
