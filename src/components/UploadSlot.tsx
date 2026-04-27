@@ -145,12 +145,16 @@ export function UploadSlot({
                 refuse data: URLs (some mobile browsers). */}
             {isPdfPreview ? (
               <object
-                data={preview}
+                // #view=FitH = "Fit horizontal" — tells the browser PDF
+                // viewer to scale the page to the container width so the
+                // user sees the full document instead of a squashed
+                // letterbox with scrollbars.
+                data={`${preview}#view=FitH&toolbar=1`}
                 type="application/pdf"
-                className="w-full h-[80vh] min-h-96 rounded-lg bg-white"
+                className="w-full h-[90vh] min-h-[500px] rounded-lg bg-white"
                 aria-label={label || 'PDF preview'}
               >
-                <div className="w-full h-[80vh] min-h-96 flex flex-col items-center justify-center rounded-lg bg-white">
+                <div className="w-full h-[90vh] min-h-[500px] flex flex-col items-center justify-center rounded-lg bg-white">
                   <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
                   <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
                   <a
