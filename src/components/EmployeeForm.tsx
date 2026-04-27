@@ -1022,6 +1022,7 @@ export function EmployeeForm({
 
   // Indian passport additional page handlers
   const handleAdditionalPageUpload = async (file: File): Promise<boolean> => {
+    const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -1043,7 +1044,9 @@ export function EmployeeForm({
     passportPagesRef.current = updatedPages;
     await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
 
-    // Extract data from additional page
+    // Extraction is image-only — vision API can't read PDFs.
+    if (!isImage) return true;
+
     try {
       const compressedImage = await compressImageForAI(preview);
       const response = await fetch('/api/extract-passport-additional', {
@@ -1133,6 +1136,7 @@ export function EmployeeForm({
   };
 
   const handleEidFrontUpload = async (file: File): Promise<boolean> => {
+    const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -1141,33 +1145,35 @@ export function EmployeeForm({
     setEidFrontUI({ preview, validating: true, error: null, file });
 
     let extractedData: Record<string, unknown> | null = null;
-    try {
-      const compressedImage = await compressImageForAI(preview);
-      const response = await fetch('/api/extract-eid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, side: 'front' }),
-      });
-      if (response.ok) {
-        const extractResult = await response.json();
-        if (extractResult.success && extractResult.data) {
-          if (!extractResult.data.emirates_id_number) {
-            setEidFrontUI({ preview, validating: false, error: 'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID.', file });
+    if (isImage) {
+      try {
+        const compressedImage = await compressImageForAI(preview);
+        const response = await fetch('/api/extract-eid', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: compressedImage, side: 'front' }),
+        });
+        if (response.ok) {
+          const extractResult = await response.json();
+          if (extractResult.success && extractResult.data) {
+            if (!extractResult.data.emirates_id_number) {
+              setEidFrontUI({ preview, validating: false, error: 'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID.', file });
+              return false;
+            }
+            extractedData = extractResult.data;
+          } else {
+            setEidFrontUI({ preview, validating: false, error: 'Could not read this document. Please upload a clear photo of the front of your Emirates ID card.', file });
             return false;
           }
-          extractedData = extractResult.data;
         } else {
-          setEidFrontUI({ preview, validating: false, error: 'Could not read this document. Please upload a clear photo of the front of your Emirates ID card.', file });
+          setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
           return false;
         }
-      } else {
+      } catch (err) {
+        console.error('EID front validation error:', err);
         setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
         return false;
       }
-    } catch (err) {
-      console.error('EID front validation error:', err);
-      setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
-      return false;
     }
 
     const result = await uploadDocument(submission.id, 'eid_front', file);
@@ -1194,6 +1200,7 @@ export function EmployeeForm({
   };
 
   const handleEidBackUpload = async (file: File): Promise<boolean> => {
+    const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -1201,22 +1208,24 @@ export function EmployeeForm({
     });
     setEidBackUI({ preview, validating: true, error: null, file });
 
-    try {
-      const compressedImage = await compressImageForAI(preview);
-      const response = await fetch('/api/extract-eid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, side: 'back' }),
-      });
-      if (response.ok) {
-        const extractResult = await response.json();
-        if (!extractResult.success) {
-          setEidBackUI({ preview, validating: false, error: 'This does not appear to be the back of an Emirates ID card. Please upload a clear photo of the back.', file });
-          return false;
+    if (isImage) {
+      try {
+        const compressedImage = await compressImageForAI(preview);
+        const response = await fetch('/api/extract-eid', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: compressedImage, side: 'back' }),
+        });
+        if (response.ok) {
+          const extractResult = await response.json();
+          if (!extractResult.success) {
+            setEidBackUI({ preview, validating: false, error: 'This does not appear to be the back of an Emirates ID card. Please upload a clear photo of the back.', file });
+            return false;
+          }
         }
+      } catch (err) {
+        console.error('EID back validation error:', err);
       }
-    } catch (err) {
-      console.error('EID back validation error:', err);
     }
 
     const result = await uploadDocument(submission.id, 'eid_back', file);
@@ -1234,6 +1243,7 @@ export function EmployeeForm({
   };
 
   const handlePakistanIdFrontUpload = async (file: File): Promise<boolean> => {
+    const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -1241,28 +1251,30 @@ export function EmployeeForm({
     });
     setPakistanIdFrontUI({ preview, validating: true, error: null, file });
 
-    try {
-      const compressedImage = await compressImageForAI(preview);
-      const response = await fetch('/api/extract-pakistan-id', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, side: 'front' }),
-      });
-      if (response.ok) {
-        const extractResult = await response.json();
-        if (!extractResult.success) {
-          setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
+    if (isImage) {
+      try {
+        const compressedImage = await compressImageForAI(preview);
+        const response = await fetch('/api/extract-pakistan-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: compressedImage, side: 'front' }),
+        });
+        if (response.ok) {
+          const extractResult = await response.json();
+          if (!extractResult.success) {
+            setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
+            return false;
+          }
+          if (extractResult.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
+        } else {
+          setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
           return false;
         }
-        if (extractResult.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
-      } else {
+      } catch (err) {
+        console.error('Pakistan ID front validation error:', err);
         setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
         return false;
       }
-    } catch (err) {
-      console.error('Pakistan ID front validation error:', err);
-      setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
-      return false;
     }
 
     const result = await uploadDocument(submission.id, 'pakistan_id_front', file);
@@ -1280,6 +1292,7 @@ export function EmployeeForm({
   };
 
   const handlePakistanIdBackUpload = async (file: File): Promise<boolean> => {
+    const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -1287,30 +1300,32 @@ export function EmployeeForm({
     });
     setPakistanIdBackUI({ preview, validating: true, error: null, file });
 
-    try {
-      const compressedImage = await compressImageForAI(preview);
-      const response = await fetch('/api/extract-pakistan-id', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, side: 'back' }),
-      });
-      if (response.ok) {
-        const extractResult = await response.json();
-        if (!extractResult.success) {
-          setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
-          return false;
-        }
-        if (extractResult.data?.address) {
-          if (!getValues('home_street_address')) setValue('home_street_address', String(extractResult.data.address));
-          setValue('home_country', 'Pakistan');
-          if (extractResult.data.address_city && !getValues('home_city')) {
-            setValue('home_city', String(extractResult.data.address_city));
+    if (isImage) {
+      try {
+        const compressedImage = await compressImageForAI(preview);
+        const response = await fetch('/api/extract-pakistan-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: compressedImage, side: 'back' }),
+        });
+        if (response.ok) {
+          const extractResult = await response.json();
+          if (!extractResult.success) {
+            setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
+            return false;
           }
-          setTimeout(() => autoSaveEmployeeData(submission.id, getValues()), 100);
+          if (extractResult.data?.address) {
+            if (!getValues('home_street_address')) setValue('home_street_address', String(extractResult.data.address));
+            setValue('home_country', 'Pakistan');
+            if (extractResult.data.address_city && !getValues('home_city')) {
+              setValue('home_city', String(extractResult.data.address_city));
+            }
+            setTimeout(() => autoSaveEmployeeData(submission.id, getValues()), 100);
+          }
         }
+      } catch (err) {
+        console.error('Pakistan ID back validation error:', err);
       }
-    } catch (err) {
-      console.error('Pakistan ID back validation error:', err);
     }
 
     const result = await uploadDocument(submission.id, 'pakistan_id_back', file);
