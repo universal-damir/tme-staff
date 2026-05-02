@@ -8,30 +8,60 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { signWebhookBody } from '@/lib/webhook-signature';
+import {
+  assertSubmittable,
+  getSignerIp,
+  sanitizeFreeText,
+} from '@/lib/submit-validation';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, employerData, signature, ip } = body;
+    const { id, employerData, signature } = body;
 
     if (!id || !employerData || !signature) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    const supabase = getSupabaseAdmin();
+
+    // P2-4: refuse to overwrite a row that's already complete or cancelled.
+    // Look up the current status before issuing the UPDATE.
+    const { data: existing, error: lookupError } = await supabase
+      .from('staff_onboarding_submissions')
+      .select('status')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (lookupError) {
+      console.error('[submit-employer] Status lookup failed:', lookupError);
+      return NextResponse.json({ error: 'Failed to load submission' }, { status: 500 });
+    }
+
+    const guard = assertSubmittable(existing);
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
+    // P2-3: derive signer IP from request headers, never from body.
+    const signerIp = getSignerIp(req);
+
+    // P2-13: strip control chars / angle brackets / cap string lengths.
+    const cleanEmployerData = sanitizeFreeText(employerData) as Record<string, unknown>;
+
     // 1. Save employer data to Supabase via the service-role client. Anon
     // RLS used to permit this update (anon_update policy); after the P0-3
     // hardening we route every write through service-role server endpoints
     // and drop that policy.
-    const supabase = getSupabaseAdmin();
     const { error } = await supabase
       .from('staff_onboarding_submissions')
       .update({
-        employer_data: employerData,
+        employer_data: cleanEmployerData,
         employer_signature_data: signature,
         employer_signed_at: new Date().toISOString(),
-        employer_signer_ip: ip || null,
+        employer_signer_ip: signerIp,
         current_step: 'employee',
         status: 'employer_completed',
         updated_at: new Date().toISOString(),
@@ -44,9 +74,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Notify TME Portal (server-side — guaranteed to complete)
-    const jobTitle = employerData.job_title_visa === 'Other'
-      ? employerData.job_title_visa_custom
-      : employerData.job_title_visa;
+    const jobTitle = cleanEmployerData.job_title_visa === 'Other'
+      ? cleanEmployerData.job_title_visa_custom
+      : cleanEmployerData.job_title_visa;
 
     try {
       const apiSecret = process.env.STAFF_PORTAL_API_SECRET;

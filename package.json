@@ -16,7 +16,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.70.0",
     "@supabase/supabase-js": "^2.89.0",
     "framer-motion": "^12.24.0",
     "lucide-react": "^0.562.0",

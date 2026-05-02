@@ -8,34 +8,67 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { signWebhookBody } from '@/lib/webhook-signature';
+import {
+  assertSubmittable,
+  getSignerIp,
+  sanitizeFreeText,
+} from '@/lib/submit-validation';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, employeeData, signature, ip, isSamePerson, employerData, employerSignature } = body;
+    const { id, employeeData, signature, isSamePerson, employerData, employerSignature } = body;
 
     if (!id || !employeeData || !signature) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
+
+    const supabase = getSupabaseAdmin();
+
+    // P2-4: refuse to overwrite a row that's already complete or cancelled.
+    const { data: existing, error: lookupError } = await supabase
+      .from('staff_onboarding_submissions')
+      .select('status')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (lookupError) {
+      console.error('[submit-employee] Status lookup failed:', lookupError);
+      return NextResponse.json({ error: 'Failed to load submission' }, { status: 500 });
+    }
+
+    const guard = assertSubmittable(existing);
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
+    // P2-3: derive signer IP from request headers, never from body.
+    const signerIp = getSignerIp(req);
+
+    // P2-13: strip control chars / angle brackets / cap string lengths.
+    const cleanEmployeeData = sanitizeFreeText(employeeData) as Record<string, unknown>;
+    const cleanEmployerData = isSamePerson && employerData
+      ? sanitizeFreeText(employerData) as Record<string, unknown>
+      : null;
 
     const now = new Date().toISOString();
 
     // 1. Save to Supabase
     let updateData: Record<string, unknown>;
 
-    if (isSamePerson && employerData) {
+    if (isSamePerson && cleanEmployerData) {
       // Same-person mode — save both sections
       updateData = {
-        employer_data: employerData,
+        employer_data: cleanEmployerData,
         employer_signature_data: employerSignature || signature,
         employer_signed_at: now,
-        employer_signer_ip: ip || null,
-        employee_data: employeeData,
+        employer_signer_ip: signerIp,
+        employee_data: cleanEmployeeData,
         employee_signature_data: signature,
         employee_signed_at: now,
-        employee_signer_ip: ip || null,
+        employee_signer_ip: signerIp,
         current_step: 'complete',
         status: 'complete',
         updated_at: now,
@@ -43,10 +76,10 @@ export async function POST(req: NextRequest) {
     } else {
       // Regular flow — just employee data
       updateData = {
-        employee_data: employeeData,
+        employee_data: cleanEmployeeData,
         employee_signature_data: signature,
         employee_signed_at: now,
-        employee_signer_ip: ip || null,
+        employee_signer_ip: signerIp,
         current_step: 'complete',
         status: 'complete',
         updated_at: now,
@@ -55,7 +88,6 @@ export async function POST(req: NextRequest) {
 
     // Service-role client (P0-3): writes go through the admin client so
     // anon RLS update policies can be dropped.
-    const supabase = getSupabaseAdmin();
     const { error } = await supabase
       .from('staff_onboarding_submissions')
       .update(updateData)
