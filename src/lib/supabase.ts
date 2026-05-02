@@ -156,7 +156,7 @@ export async function updateSamePersonData(
 }
 
 // ===================================================================
-// UPLOAD DOCUMENT
+// UPLOAD DOCUMENT (via server route — service-role + magic-byte validated)
 // ===================================================================
 
 export async function uploadDocument(
@@ -164,27 +164,23 @@ export async function uploadDocument(
   type: 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional' | 'job_offer_letter' | 'visa_document' | 'previous_visa_document' | 'eid_front' | 'eid_back' | 'pakistan_id_front' | 'pakistan_id_back',
   file: File
 ): Promise<{ path: string; filename: string } | null> {
-  const timestamp = Date.now();
-  const sanitizedFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-  const path = `${submissionId}/${type}/${timestamp}-${sanitizedFilename}`;
+  const fd = new FormData();
+  fd.append('submissionId', submissionId);
+  fd.append('type', type);
+  fd.append('file', file);
 
-  const { error } = await supabase.storage
-    .from('staff-documents')
-    .upload(path, file, {
-      cacheControl: '3600',
-      upsert: true,
-    });
-
-  if (error) {
-    console.error('Error uploading document:', error);
+  const res = await fetch('/api/storage/upload', { method: 'POST', body: fd });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    console.error('Error uploading document:', res.status, detail);
     return null;
   }
-
-  return { path, filename: file.name };
+  const json = await res.json();
+  return { path: json.path as string, filename: json.filename as string };
 }
 
 // ===================================================================
-// UPLOAD PASSPORT PAGE (for multi-page passport upload)
+// UPLOAD PASSPORT PAGE (via server route)
 // ===================================================================
 
 export type PassportPageKey = 'cover' | 'insidePages' | 'additionalPage';
@@ -194,23 +190,20 @@ export async function uploadPassportPage(
   pageKey: PassportPageKey,
   file: File
 ): Promise<{ path: string; filename: string } | null> {
-  const timestamp = Date.now();
-  const sanitizedFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-  const path = `${submissionId}/passport/${pageKey}/${timestamp}-${sanitizedFilename}`;
+  const fd = new FormData();
+  fd.append('submissionId', submissionId);
+  fd.append('type', 'passport');
+  fd.append('passportPage', pageKey);
+  fd.append('file', file);
 
-  const { error } = await supabase.storage
-    .from('staff-documents')
-    .upload(path, file, {
-      cacheControl: '3600',
-      upsert: true,
-    });
-
-  if (error) {
-    console.error('Error uploading passport page:', error);
+  const res = await fetch('/api/storage/upload', { method: 'POST', body: fd });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    console.error('Error uploading passport page:', res.status, detail);
     return null;
   }
-
-  return { path, filename: file.name };
+  const json = await res.json();
+  return { path: json.path as string, filename: json.filename as string };
 }
 
 // ===================================================================
@@ -238,12 +231,12 @@ export async function updateDocumentReferences(
 }
 
 // ===================================================================
-// GET DOCUMENT URL
+// GET DOCUMENT URL — returns a stable proxy URL that 302-redirects to a
+// short-lived signed URL. Bucket is private; never call getPublicUrl here.
 // ===================================================================
 
 export function getDocumentUrl(path: string): string {
-  const { data } = supabase.storage.from('staff-documents').getPublicUrl(path);
-  return data.publicUrl;
+  return `/api/storage/file?path=${encodeURIComponent(path)}`;
 }
 
 // ===================================================================
