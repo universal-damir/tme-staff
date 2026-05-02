@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
 import { compressImageForAI } from '@/lib/utils';
 import { getDocumentUrl } from '@/lib/supabase';
@@ -8,6 +9,8 @@ import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
 
 interface PhotoUploadProps {
+  /** Onboarding submission id; passed to the server-side AI guard. */
+  submissionId: string;
   value?: { path: string; filename: string; validated: boolean };
   onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
   onValidated?: (validated: boolean, errors?: string[]) => void;
@@ -15,7 +18,8 @@ interface PhotoUploadProps {
   error?: string;
 }
 
-export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: PhotoUploadProps) {
+export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error }: PhotoUploadProps) {
+  const aiToken = useSearchParams().get('token');
   const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -72,7 +76,7 @@ export function PhotoUpload({ value, onUpload, onValidated, onRemove, error }: P
         const response = await fetch('/api/validate-photo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage }),
+          body: JSON.stringify({ image: compressedImage, submissionId, token: aiToken }),
         });
         return await response.json();
       } catch (err) {

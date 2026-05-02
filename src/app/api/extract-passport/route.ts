@@ -2,19 +2,33 @@
  * Passport Extraction API Route
  *
  * POST /api/extract-passport
- * Body: { image: string } - Base64 encoded image
+ * Body: { image: string, submissionId: string, token: string }
  * Returns: PassportExtractionResult
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { extractPassport, type PassportExtractionResult } from '@/lib/passport-extraction';
+import { guardAiRoute } from '@/lib/ai-route-guard';
 
 export async function POST(request: NextRequest): Promise<NextResponse<PassportExtractionResult>> {
-  try {
-    const body = await request.json();
-    const { image } = body;
+  const guard = await guardAiRoute(request);
+  if (!guard.ok) {
+    return NextResponse.json(
+      {
+        success: false,
+        data: {},
+        confidence: {},
+        mrz_verified: false,
+        error: guard.error,
+      },
+      { status: guard.status }
+    );
+  }
 
-    if (!image) {
+  try {
+    const { image } = guard.body as { image?: unknown };
+
+    if (!image || typeof image !== 'string') {
       return NextResponse.json(
         {
           success: false,
@@ -27,21 +41,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<PassportE
       );
     }
 
-    // Validate image is base64
-    if (typeof image !== 'string') {
-      return NextResponse.json(
-        {
-          success: false,
-          data: {},
-          confidence: {},
-          mrz_verified: false,
-          error: 'Invalid image format',
-        },
-        { status: 400 }
-      );
-    }
-
-    // Check if ANTHROPIC_API_KEY is configured
     if (!process.env.ANTHROPIC_API_KEY) {
       console.error('ANTHROPIC_API_KEY not configured');
       return NextResponse.json(
@@ -56,9 +55,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<PassportE
       );
     }
 
-    // Extract passport data
     const result = await extractPassport(image);
-
     return NextResponse.json(result);
   } catch (error) {
     console.error('Passport extraction API error:', error);

@@ -1,97 +1,21 @@
-import { createClient } from '@supabase/supabase-js';
-import type {
-  StaffOnboardingSubmission,
-  EmployerFormData,
-  EmployeeFormData,
-  StaffDocumentReferences,
-} from '@/types';
+/**
+ * Browser-side helpers for the onboarding flow.
+ *
+ * After the P0-3 hardening, this module no longer talks to Supabase
+ * directly. Every read goes through `/api/onboarding/[id]` (server-side,
+ * service-role + token gate) and every write goes through one of:
+ *   - `/api/storage/upload`              — magic-byte-validated file upload
+ *   - `/api/onboarding/[id]/autosave`    — partial employee_data save
+ *   - `/api/onboarding/[id]/documents`   — patch the documents jsonb
+ *   - `/api/submit-employer`             — final employer-step write
+ *   - `/api/submit-employee`             — final employee-step write
+ *
+ * The bare anon `supabase` client export is gone; nothing in tme-staff
+ * imports an anon Supabase JS instance any more. Anon RLS policies on
+ * `staff_onboarding_submissions` were dropped in migration 0246.
+ */
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-// ===================================================================
-// GET STAFF ONBOARDING
-// ===================================================================
-
-export async function getStaffOnboarding(id: string): Promise<StaffOnboardingSubmission | null> {
-  const { data, error } = await supabase
-    .from('staff_onboarding_submissions')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error) {
-    console.error('Error fetching staff onboarding:', error);
-    return null;
-  }
-
-  return data as StaffOnboardingSubmission;
-}
-
-// ===================================================================
-// UPDATE EMPLOYER DATA
-// ===================================================================
-
-export async function updateEmployerData(
-  id: string,
-  data: EmployerFormData,
-  signature: string,
-  ip?: string
-): Promise<boolean> {
-  const { error } = await supabase
-    .from('staff_onboarding_submissions')
-    .update({
-      employer_data: data,
-      employer_signature_data: signature,
-      employer_signed_at: new Date().toISOString(),
-      employer_signer_ip: ip || null,
-      current_step: 'employee',
-      status: 'employer_completed',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-
-  if (error) {
-    console.error('Error updating employer data:', error);
-    return false;
-  }
-
-  return true;
-}
-
-// ===================================================================
-// UPDATE EMPLOYEE DATA
-// ===================================================================
-
-export async function updateEmployeeData(
-  id: string,
-  data: EmployeeFormData,
-  signature: string,
-  ip?: string
-): Promise<boolean> {
-  const { error } = await supabase
-    .from('staff_onboarding_submissions')
-    .update({
-      employee_data: data,
-      employee_signature_data: signature,
-      employee_signed_at: new Date().toISOString(),
-      employee_signer_ip: ip || null,
-      current_step: 'complete',
-      status: 'complete',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-
-  if (error) {
-    console.error('Error updating employee data:', error);
-    return false;
-  }
-
-  return true;
-}
+import type { StaffDocumentReferences, EmployeeFormData } from '@/types';
 
 // ===================================================================
 // AUTO-SAVE EMPLOYEE DATA (partial save without signature/completion)
@@ -99,60 +23,25 @@ export async function updateEmployeeData(
 
 export async function autoSaveEmployeeData(
   id: string,
-  data: Partial<EmployeeFormData>
+  data: Partial<EmployeeFormData>,
+  token?: string | null,
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from('staff_onboarding_submissions')
-    .update({
-      employee_data: data,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-
-  if (error) {
-    console.error('Error auto-saving employee data:', error);
+  try {
+    const res = await fetch(`/api/onboarding/${encodeURIComponent(id)}/autosave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token ?? null, employeeData: data }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      console.error('[autoSaveEmployeeData] save failed:', res.status, detail);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[autoSaveEmployeeData] network error:', err);
     return false;
   }
-
-  return true;
-}
-
-// ===================================================================
-// UPDATE SAME-PERSON DATA (Both employer and employee in one go)
-// ===================================================================
-
-export async function updateSamePersonData(
-  id: string,
-  employerData: EmployerFormData,
-  employeeData: EmployeeFormData,
-  signature: string,
-  ip?: string
-): Promise<boolean> {
-  const now = new Date().toISOString();
-
-  const { error } = await supabase
-    .from('staff_onboarding_submissions')
-    .update({
-      employer_data: employerData,
-      employer_signature_data: signature,
-      employer_signed_at: now,
-      employer_signer_ip: ip || null,
-      employee_data: employeeData,
-      employee_signature_data: signature, // Same signature for both
-      employee_signed_at: now,
-      employee_signer_ip: ip || null,
-      current_step: 'complete',
-      status: 'complete',
-      updated_at: now,
-    })
-    .eq('id', id);
-
-  if (error) {
-    console.error('Error updating same-person data:', error);
-    return false;
-  }
-
-  return true;
 }
 
 // ===================================================================
@@ -207,27 +96,30 @@ export async function uploadPassportPage(
 }
 
 // ===================================================================
-// UPDATE DOCUMENT REFERENCES
+// UPDATE DOCUMENT REFERENCES (via server route)
 // ===================================================================
 
 export async function updateDocumentReferences(
   id: string,
-  documents: StaffDocumentReferences
+  documents: StaffDocumentReferences,
+  token?: string | null,
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from('staff_onboarding_submissions')
-    .update({
-      documents,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-
-  if (error) {
-    console.error('Error updating document references:', error);
+  try {
+    const res = await fetch(`/api/onboarding/${encodeURIComponent(id)}/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token ?? null, documents }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      console.error('[updateDocumentReferences] save failed:', res.status, detail);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[updateDocumentReferences] network error:', err);
     return false;
   }
-
-  return true;
 }
 
 // ===================================================================

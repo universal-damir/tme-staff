@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { signWebhookBody } from '@/lib/webhook-signature';
 
 // TME Portal API URL - defaults to production if not set
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
@@ -26,6 +27,14 @@ export async function POST(req: NextRequest) {
 
     console.log(`[notify-employee-complete] Notifying TME Portal for supabaseId: ${supabaseId}`);
 
+    const apiSecret = process.env.STAFF_PORTAL_API_SECRET;
+    if (!apiSecret) {
+      console.error('[notify-employee-complete] STAFF_PORTAL_API_SECRET not configured');
+      return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
+    }
+    const notifyBody = JSON.stringify({ supabaseId });
+    const sigHeaders = signWebhookBody(apiSecret, notifyBody);
+
     // Call the TME Portal API to trigger sync
     const response = await fetch(
       `${TME_PORTAL_URL}/api/clients-v2/staff/onboarding/employee-complete`,
@@ -33,9 +42,9 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-secret': process.env.STAFF_PORTAL_API_SECRET || '',
+          ...sigHeaders,
         },
-        body: JSON.stringify({ supabaseId }),
+        body: notifyBody,
       }
     );
 

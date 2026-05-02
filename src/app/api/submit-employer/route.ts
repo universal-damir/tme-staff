@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { signWebhookBody } from '@/lib/webhook-signature';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
 
@@ -19,7 +20,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // 1. Save employer data to Supabase
+    // 1. Save employer data to Supabase via the service-role client. Anon
+    // RLS used to permit this update (anon_update policy); after the P0-3
+    // hardening we route every write through service-role server endpoints
+    // and drop that policy.
+    const supabase = getSupabaseAdmin();
     const { error } = await supabase
       .from('staff_onboarding_submissions')
       .update({
@@ -44,15 +49,24 @@ export async function POST(req: NextRequest) {
       : employerData.job_title_visa;
 
     try {
+      const apiSecret = process.env.STAFF_PORTAL_API_SECRET;
+      if (!apiSecret) {
+        // Fail-closed: refuse to call the portal with an empty secret. The
+        // Supabase row is still saved, so the portal cron-side fallback will
+        // pick this up.
+        throw new Error('STAFF_PORTAL_API_SECRET is not configured');
+      }
+      const notifyBody = JSON.stringify({ supabaseId: id, jobTitle });
+      const sigHeaders = signWebhookBody(apiSecret, notifyBody);
       const notifyResponse = await fetch(
         `${TME_PORTAL_URL}/api/clients-v2/staff/onboarding/employer-complete`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-secret': process.env.STAFF_PORTAL_API_SECRET || '',
+            ...sigHeaders,
           },
-          body: JSON.stringify({ supabaseId: id, jobTitle }),
+          body: notifyBody,
         }
       );
 

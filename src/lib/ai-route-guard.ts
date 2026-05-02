@@ -1,0 +1,131 @@
+/**
+ * Shared guard for the seven AI extraction / validation routes.
+ *
+ * Before this guard, those routes accepted arbitrary base64 from anyone with
+ * the URL — no auth, no submission scoping, no rate limit. That made them a
+ * free Claude vision proxy and a way to drain the Anthropic bill. This
+ * helper enforces:
+ *
+ *   1. Body must include `submissionId` (UUID) and `token` (the candidate's
+ *      employee_access_token from the invitation email).
+ *   2. The submission must exist, not be cancelled / expired / completed,
+ *      and the token must match (constant-time compare via
+ *      verifyOnboardingAccess).
+ *   3. The base64 image payload must be under MAX_AI_IMAGE_BYTES (12 MB
+ *      base64, ≈ 9 MB raw — generous for a phone photo, rejects attempts
+ *      to make us pay for huge images).
+ *   4. Per-IP best-effort rate limit (30 calls / 60s). In-memory only —
+ *      Netlify Lambdas share state within a warm instance but not across
+ *      cold starts. Combined with token gating this is plenty for a low-
+ *      volume internal site.
+ */
+
+import { NextRequest } from 'next/server';
+import { verifyOnboardingAccess } from './onboarding-token';
+
+export const MAX_AI_IMAGE_BYTES = 12 * 1024 * 1024;
+
+const IP_REGEX = /^(\d{1,3}\.){3}\d{1,3}$|^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+
+interface RateBucket {
+  count: number;
+  resetAt: number;
+}
+
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 30;
+const rateState = new Map<string, RateBucket>();
+
+function getClientIp(req: NextRequest): string {
+  const forwarded = req.headers.get('x-forwarded-for');
+  if (forwarded) {
+    const first = forwarded.split(',')[0].trim();
+    if (IP_REGEX.test(first)) return first;
+  }
+  const real = req.headers.get('x-real-ip');
+  if (real && IP_REGEX.test(real)) return real;
+  return 'unknown';
+}
+
+function rateLimitCheck(ip: string): { blocked: boolean } {
+  const now = Date.now();
+  const bucket = rateState.get(ip);
+  if (!bucket || bucket.resetAt <= now) {
+    rateState.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return { blocked: false };
+  }
+  bucket.count++;
+  if (bucket.count > RATE_MAX) {
+    return { blocked: true };
+  }
+  return { blocked: false };
+}
+
+export interface AiGuardSuccess {
+  ok: true;
+  body: Record<string, unknown>;
+  submissionId: string;
+}
+
+export interface AiGuardFailure {
+  ok: false;
+  status: number;
+  error: string;
+}
+
+export type AiGuardResult = AiGuardSuccess | AiGuardFailure;
+
+/**
+ * Parse + authorize the body of an AI extract/validate route. Callers
+ * should `return NextResponse.json({ error }, { status })` on failure.
+ *
+ * The guard always treats the call as belonging to the *employee* step —
+ * candidates uploading documents from the second-stage form. The
+ * onboarding row's actual current_step is not checked beyond not being
+ * `complete` (post-submission) or `cancelled`/`expired` — earlier steps
+ * may legitimately call validate-* routes during autosave.
+ */
+export async function guardAiRoute(req: NextRequest): Promise<AiGuardResult> {
+  const ip = getClientIp(req);
+  if (rateLimitCheck(ip).blocked) {
+    return { ok: false, status: 429, error: 'Rate limit exceeded' };
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return { ok: false, status: 400, error: 'Invalid JSON body' };
+  }
+
+  const submissionId = typeof body.submissionId === 'string' ? body.submissionId : '';
+  const token = typeof body.token === 'string' ? body.token : null;
+
+  if (!submissionId) {
+    return { ok: false, status: 400, error: 'submissionId is required' };
+  }
+
+  // Cap base64 image size before doing any work. The image field is named
+  // `image` in every route we guard.
+  const image = body.image;
+  if (typeof image === 'string' && image.length > MAX_AI_IMAGE_BYTES) {
+    return { ok: false, status: 413, error: 'Image too large' };
+  }
+
+  const access = await verifyOnboardingAccess(submissionId, token, {
+    expectedStep: 'employee',
+    blockIfComplete: true,
+  });
+
+  if (!access.ok) {
+    if (access.reason === 'token_required' || access.reason === 'token_invalid') {
+      return { ok: false, status: 403, error: 'Unauthorized' };
+    }
+    if (access.reason === 'cancelled' || access.reason === 'expired' || access.reason === 'already_complete') {
+      return { ok: false, status: 410, error: `Submission ${access.reason}` };
+    }
+    return { ok: false, status: 404, error: 'Submission not found' };
+  }
+
+  return { ok: true, body, submissionId };
+}

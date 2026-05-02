@@ -2,17 +2,25 @@
  * Indian Passport Additional Page Extraction API Route
  *
  * POST /api/extract-passport-additional
- * Body: { image: string } - Base64 encoded image
+ * Body: { image: string, submissionId: string, token: string }
  * Returns: AdditionalPageExtractionResult
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { extractAdditionalPage, type AdditionalPageExtractionResult } from '@/lib/passport-additional-extraction';
+import { guardAiRoute } from '@/lib/ai-route-guard';
 
 export async function POST(request: NextRequest): Promise<NextResponse<AdditionalPageExtractionResult>> {
+  const guard = await guardAiRoute(request);
+  if (!guard.ok) {
+    return NextResponse.json(
+      { success: false, data: {}, error: guard.error },
+      { status: guard.status }
+    );
+  }
+
   try {
-    const body = await request.json();
-    const { image } = body;
+    const { image } = guard.body as { image?: unknown };
 
     if (!image || typeof image !== 'string') {
       return NextResponse.json(

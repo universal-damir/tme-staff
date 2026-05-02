@@ -3,9 +3,6 @@
 import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
-import {
-  getStaffOnboarding,
-} from '@/lib/supabase';
 import { FormProgress } from '@/components/FormProgress';
 import { EmployerForm } from '@/components/EmployerForm';
 import { EmployeeForm } from '@/components/EmployeeForm';
@@ -21,6 +18,7 @@ type PageState =
   | 'error'
   | 'not_found'
   | 'cancelled'
+  | 'expired'
   | 'already_complete'
   | 'token_required';
 
@@ -79,22 +77,48 @@ function OnboardingPageInner() {
   const [employerData, setEmployerData] = useState<EmployerFormData | null>(null);
   const [showEmployeeSection, setShowEmployeeSection] = useState(false);
 
-  // Fetch submission data
+  // Fetch submission data via the server route. The route uses the service
+  // role client + token gating so the anon-key fetch (which RLS-leaks every
+  // column) is no longer in the page's path.
   useEffect(() => {
     if (!UUID_REGEX.test(id)) return;
 
     async function fetchSubmission() {
       try {
-        const data = await getStaffOnboarding(id);
+        const url = token
+          ? `/api/onboarding/${id}?token=${encodeURIComponent(token)}`
+          : `/api/onboarding/${id}`;
+        const res = await fetch(url, { cache: 'no-store' });
+        const body = await res.json().catch(() => null) as { status?: string } | null;
 
-        if (!data) {
+        if (res.status === 404) {
+          setPageState('not_found');
+          return;
+        }
+        if (res.status === 403) {
+          setPageState('token_required');
+          return;
+        }
+        if (res.status === 410) {
+          if (body?.status === 'cancelled') setPageState('cancelled');
+          else if (body?.status === 'expired') setPageState('expired');
+          else setPageState('cancelled');
+          return;
+        }
+        if (!res.ok) {
+          setError('Failed to load onboarding form');
+          setPageState('error');
+          return;
+        }
+
+        const data = body as unknown as StaffOnboardingSubmission;
+        if (!data || !data.id) {
           setPageState('not_found');
           return;
         }
 
         setSubmission(data);
 
-        // Determine page state based on submission status
         if (data.status === 'cancelled') {
           setPageState('cancelled');
         } else if (data.status === 'complete') {
@@ -106,12 +130,9 @@ function OnboardingPageInner() {
             setPageState('already_complete');
           }
         } else if (data.current_step === 'employee') {
-          // Token-based access: if employee_access_token exists, validate it
-          if (data.employee_access_token && token !== data.employee_access_token) {
-            setPageState('token_required');
-          } else {
-            setPageState('employee');
-          }
+          // Token validation already happened server-side; if we got here
+          // with a 200 the token is good (or none was required for this row).
+          setPageState('employee');
         } else {
           setPageState(data.current_step as 'employer');
         }
@@ -274,6 +295,24 @@ function OnboardingPageInner() {
           <p className="text-gray-600">
             This form has been cancelled. Please contact your HR
             representative for more information.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Expired state — link past 14-day window
+  if (pageState === 'expired') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-yellow-100 mx-auto mb-6 flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8 text-yellow-500" />
+          </div>
+          <h1 className="text-xl font-bold text-gray-900 mb-4">Link Expired</h1>
+          <p className="text-gray-600">
+            This onboarding link has expired. Please ask your HR
+            representative to send you a new one.
           </p>
         </div>
       </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -311,6 +312,25 @@ export function EmployeeForm({
   isSubmitting,
   reuseEmployerSignature = false,
 }: EmployeeFormProps) {
+  // Token from the URL (`/onboard/<id>?token=...`). The seven AI extract /
+  // validate routes require this — we attach it to every fetch body below.
+  // It also gates `/api/onboarding/<id>/autosave` and `/documents` (P0-3),
+  // which now back the autosave + document-refs writes that used to hit
+  // anon Supabase directly.
+  const aiToken = useSearchParams().get('token');
+  // Pre-bound wrappers so the 30+ callsites below stay terse and don't have
+  // to thread submission.id + aiToken through every line.
+  const submissionId = submission.id;
+  const saveDocRefs = useCallback(
+    (docs: import('@/types').StaffDocumentReferences) =>
+      updateDocumentReferences(submissionId, docs, aiToken),
+    [submissionId, aiToken],
+  );
+  const autoSave = useCallback(
+    (data: Partial<EmployeeFormData>) =>
+      autoSaveEmployeeData(submissionId, data, aiToken),
+    [submissionId, aiToken],
+  );
   const [signature, setSignature] = useState<string | null>(
     reuseEmployerSignature ? submission.employer_signature_data : null
   );
@@ -692,7 +712,7 @@ export function EmployeeForm({
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
       if (currentStep > 2) {
-        autoSaveEmployeeData(submission.id, getValues());
+        autoSave(getValues());
       }
     }, 1000);
     return () => {
@@ -783,7 +803,7 @@ export function EmployeeForm({
       setPhotoDoc(newDoc);
       photoDocRef.current = newDoc;
       setPhotoError(null);
-      await updateDocumentReferences(submission.id, buildDocRefs({ photo: newDoc }));
+      await saveDocRefs(buildDocRefs({ photo: newDoc }));
       return result;
     }
     return null;
@@ -796,7 +816,7 @@ export function EmployeeForm({
       const response = await fetch('/api/validate-passport-page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, expectedType }),
+        body: JSON.stringify({ image: compressedImage, expectedType, submissionId: submission.id, token: aiToken }),
       });
       if (!response.ok) throw new Error('Validation failed');
       const result = await response.json();
@@ -813,7 +833,7 @@ export function EmployeeForm({
       const response = await fetch('/api/extract-passport', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage }),
+        body: JSON.stringify({ image: compressedImage, submissionId: submission.id, token: aiToken }),
       });
       if (response.ok) {
         const result = await response.json();
@@ -863,7 +883,7 @@ export function EmployeeForm({
 
     // Auto-save extracted data immediately (use setTimeout to let setValue propagate)
     setTimeout(() => {
-      autoSaveEmployeeData(submission.id, getValues());
+      autoSave(getValues());
     }, 100);
   };
 
@@ -916,7 +936,7 @@ export function EmployeeForm({
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     setPassportError(null);
-    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
     return true;
   };
 
@@ -968,7 +988,7 @@ export function EmployeeForm({
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     setPassportError(null);
-    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
 
     // Extraction is image-only — for PDFs the user fills the form manually.
     if (!isImage) {
@@ -993,7 +1013,7 @@ export function EmployeeForm({
       const updatedPagesWithData = { ...passportPagesRef.current, insidePages: updatedInsidePage };
       setPassportPages(updatedPagesWithData);
       passportPagesRef.current = updatedPagesWithData;
-      await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPagesWithData }));
+      await saveDocRefs(buildDocRefs({ passportPages: updatedPagesWithData }));
     } else {
       setPassportDataReady(true);
     }
@@ -1007,7 +1027,7 @@ export function EmployeeForm({
     delete updatedPages.cover;
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
-    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
   };
 
   const handleInsideRemove = async () => {
@@ -1017,7 +1037,7 @@ export function EmployeeForm({
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     setPassportDataReady(false);
-    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
   };
 
   // Indian passport additional page handlers
@@ -1042,7 +1062,7 @@ export function EmployeeForm({
     const updatedPages = { ...passportPagesRef.current, additionalPage: newPage };
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
-    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
 
     // Extraction is image-only — vision API can't read PDFs.
     if (!isImage) return true;
@@ -1052,7 +1072,7 @@ export function EmployeeForm({
       const response = await fetch('/api/extract-passport-additional', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage }),
+        body: JSON.stringify({ image: compressedImage, submissionId: submission.id, token: aiToken }),
       });
       if (response.ok) {
         const extractResult = await response.json();
@@ -1069,7 +1089,7 @@ export function EmployeeForm({
           if (d.address_pin) setValue('home_postal_code', d.address_pin);
           if (d.address_country) setValue('home_country', d.address_country);
           // Auto-save after extraction
-          setTimeout(() => autoSaveEmployeeData(submission.id, getValues()), 100);
+          setTimeout(() => autoSave(getValues()), 100);
         }
       }
     } catch (err) {
@@ -1085,7 +1105,7 @@ export function EmployeeForm({
     delete updatedPages.additionalPage;
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
-    await updateDocumentReferences(submission.id, buildDocRefs({ passportPages: updatedPages }));
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
   };
 
   // Named upload handlers extracted from inline JSX so they can be wrapped
@@ -1104,7 +1124,7 @@ export function EmployeeForm({
       const response = await fetch('/api/validate-visa-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, expectedCategory: 'previous_visa' }),
+        body: JSON.stringify({ image: imageData, expectedCategory: 'previous_visa', submissionId: submission.id, token: aiToken }),
       });
       if (response.ok) {
         const validationResult = await response.json();
@@ -1131,7 +1151,7 @@ export function EmployeeForm({
     const newDoc = { ...result, validated: true };
     setPreviousVisaDoc(newDoc);
     previousVisaDocRef.current = newDoc;
-    await updateDocumentReferences(submission.id, buildDocRefs());
+    await saveDocRefs(buildDocRefs());
     return true;
   };
 
@@ -1151,7 +1171,7 @@ export function EmployeeForm({
         const response = await fetch('/api/extract-eid', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'front' }),
+          body: JSON.stringify({ image: compressedImage, side: 'front', submissionId: submission.id, token: aiToken }),
         });
         if (response.ok) {
           const extractResult = await response.json();
@@ -1192,10 +1212,10 @@ export function EmployeeForm({
       if (d.emirates_id_number) setValue('eid_number', d.emirates_id_number as string);
       if (d.issue_date) setValue('eid_issue_date', d.issue_date as string);
       if (d.expiry_date) setValue('eid_expiry_date', d.expiry_date as string);
-      setTimeout(() => autoSaveEmployeeData(submission.id, getValues()), 100);
+      setTimeout(() => autoSave(getValues()), 100);
     }
 
-    await updateDocumentReferences(submission.id, buildDocRefs());
+    await saveDocRefs(buildDocRefs());
     return true;
   };
 
@@ -1214,7 +1234,7 @@ export function EmployeeForm({
         const response = await fetch('/api/extract-eid', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'back' }),
+          body: JSON.stringify({ image: compressedImage, side: 'back', submissionId: submission.id, token: aiToken }),
         });
         if (response.ok) {
           const extractResult = await response.json();
@@ -1238,7 +1258,7 @@ export function EmployeeForm({
     const newDoc = { ...result, validated: true };
     setEidBackDoc(newDoc);
     eidBackDocRef.current = newDoc;
-    await updateDocumentReferences(submission.id, buildDocRefs());
+    await saveDocRefs(buildDocRefs());
     return true;
   };
 
@@ -1257,7 +1277,7 @@ export function EmployeeForm({
         const response = await fetch('/api/extract-pakistan-id', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'front' }),
+          body: JSON.stringify({ image: compressedImage, side: 'front', submissionId: submission.id, token: aiToken }),
         });
         if (response.ok) {
           const extractResult = await response.json();
@@ -1287,7 +1307,7 @@ export function EmployeeForm({
     setPakistanIdFrontDoc(newDoc);
     pakistanIdFrontDocRef.current = newDoc;
     setPakistanIdFrontUI({ preview, validating: false, error: null, file });
-    await updateDocumentReferences(submission.id, buildDocRefs());
+    await saveDocRefs(buildDocRefs());
     return true;
   };
 
@@ -1306,7 +1326,7 @@ export function EmployeeForm({
         const response = await fetch('/api/extract-pakistan-id', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'back' }),
+          body: JSON.stringify({ image: compressedImage, side: 'back', submissionId: submission.id, token: aiToken }),
         });
         if (response.ok) {
           const extractResult = await response.json();
@@ -1320,7 +1340,7 @@ export function EmployeeForm({
             if (extractResult.data.address_city && !getValues('home_city')) {
               setValue('home_city', String(extractResult.data.address_city));
             }
-            setTimeout(() => autoSaveEmployeeData(submission.id, getValues()), 100);
+            setTimeout(() => autoSave(getValues()), 100);
           }
         }
       } catch (err) {
@@ -1338,7 +1358,7 @@ export function EmployeeForm({
     setPakistanIdBackDoc(newDoc);
     pakistanIdBackDocRef.current = newDoc;
     setPakistanIdBackUI({ preview, validating: false, error: null, file });
-    await updateDocumentReferences(submission.id, buildDocRefs());
+    await saveDocRefs(buildDocRefs());
     return true;
   };
 
@@ -1397,6 +1417,7 @@ export function EmployeeForm({
           stepNumber={displayedStepNumber(1)}
         >
           <PhotoUpload
+            submissionId={submission.id}
             value={photoDoc}
             onUpload={handlePhotoUpload}
             onValidated={async (validated, validationErrors) => {
@@ -1405,14 +1426,14 @@ export function EmployeeForm({
                 const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
                 setPhotoDoc(updatedDoc);
                 photoDocRef.current = updatedDoc;
-                await updateDocumentReferences(submission.id, buildDocRefs({ photo: updatedDoc }));
+                await saveDocRefs(buildDocRefs({ photo: updatedDoc }));
               }
               if (photoError) setPhotoError(null);
             }}
             onRemove={async () => {
               setPhotoDoc(undefined);
               photoDocRef.current = undefined;
-              await updateDocumentReferences(submission.id, buildDocRefs({ photo: undefined }));
+              await saveDocRefs(buildDocRefs({ photo: undefined }));
             }}
             error={photoError || undefined}
           />
@@ -1939,7 +1960,7 @@ export function EmployeeForm({
                           setPakistanIdFrontUI({ preview: null, validating: false, error: null, file: null });
                           setPakistanIdFrontDoc(undefined);
                           pakistanIdFrontDocRef.current = undefined;
-                          await updateDocumentReferences(submission.id, buildDocRefs());
+                          await saveDocRefs(buildDocRefs());
                         }}
                       />
                     {pakistanIdFrontScan.scannerModal}
@@ -1964,7 +1985,7 @@ export function EmployeeForm({
                           setPakistanIdBackUI({ preview: null, validating: false, error: null, file: null });
                           setPakistanIdBackDoc(undefined);
                           pakistanIdBackDocRef.current = undefined;
-                          await updateDocumentReferences(submission.id, buildDocRefs());
+                          await saveDocRefs(buildDocRefs());
                         }}
                       />
                     {pakistanIdBackScan.scannerModal}
@@ -2021,7 +2042,7 @@ export function EmployeeForm({
                       if (visaDocRef.current) {
                         setVisaDoc(undefined);
                         visaDocRef.current = undefined;
-                        updateDocumentReferences(submission.id, buildDocRefs()).catch(() => {});
+                        saveDocRefs(buildDocRefs()).catch(() => {});
                       }
                     }
                   }}
@@ -2087,7 +2108,7 @@ export function EmployeeForm({
                         visaDocRef.current = docWithMeta;
                         try {
                           const refs = buildDocRefs();
-                          await updateDocumentReferences(submission.id, refs);
+                          await saveDocRefs(refs);
                         } catch (err) {
                           console.error('[VisaUpload] failed to persist doc refs', err);
                         }
@@ -2097,7 +2118,7 @@ export function EmployeeForm({
                         setVisaDoc(undefined);
                         visaDocRef.current = undefined;
                         setVisaDocUI({ preview: null, validating: false, error: null, file: null });
-                        await updateDocumentReferences(submission.id, buildDocRefs());
+                        await saveDocRefs(buildDocRefs());
                       }}
                     />
                   </div>
@@ -2191,7 +2212,7 @@ export function EmployeeForm({
                         setPreviousVisaUI({ preview: null, validating: false, error: null, file: null });
                         setPreviousVisaDoc(undefined);
                         previousVisaDocRef.current = undefined;
-                        await updateDocumentReferences(submission.id, buildDocRefs());
+                        await saveDocRefs(buildDocRefs());
                       }}
                     />
                     {previousVisaScan.scannerModal}
@@ -2239,7 +2260,7 @@ export function EmployeeForm({
                             setValue('eid_number', undefined);
                             setValue('eid_issue_date', undefined);
                             setValue('eid_expiry_date', undefined);
-                            await updateDocumentReferences(submission.id, buildDocRefs());
+                            await saveDocRefs(buildDocRefs());
                           }}
                         />
                       {eidFrontScan.scannerModal}
@@ -2264,7 +2285,7 @@ export function EmployeeForm({
                             setEidBackUI({ preview: null, validating: false, error: null, file: null });
                             setEidBackDoc(undefined);
                             eidBackDocRef.current = undefined;
-                            await updateDocumentReferences(submission.id, buildDocRefs());
+                            await saveDocRefs(buildDocRefs());
                           }}
                         />
                       {eidBackScan.scannerModal}
@@ -2624,14 +2645,14 @@ export function EmployeeForm({
                       if (result) {
                         setDegreeDoc(result);
                         degreeDocRef.current = result;
-                        await updateDocumentReferences(submission.id, buildDocRefs());
+                        await saveDocRefs(buildDocRefs());
                       }
                       return result;
                     }}
                     onRemove={async () => {
                       setDegreeDoc(undefined);
                       degreeDocRef.current = undefined;
-                      await updateDocumentReferences(submission.id, buildDocRefs());
+                      await saveDocRefs(buildDocRefs());
                     }}
                   />
                   <FileUploadSlot
@@ -2644,14 +2665,14 @@ export function EmployeeForm({
                       if (result) {
                         setTranscriptDoc(result);
                         transcriptDocRef.current = result;
-                        await updateDocumentReferences(submission.id, buildDocRefs());
+                        await saveDocRefs(buildDocRefs());
                       }
                       return result;
                     }}
                     onRemove={async () => {
                       setTranscriptDoc(undefined);
                       transcriptDocRef.current = undefined;
-                      await updateDocumentReferences(submission.id, buildDocRefs());
+                      await saveDocRefs(buildDocRefs());
                     }}
                   />
 
@@ -2667,7 +2688,7 @@ export function EmployeeForm({
                         if (result) {
                           setEducationAdditionalDoc(result);
                           educationAdditionalDocRef.current = result;
-                          await updateDocumentReferences(submission.id, buildDocRefs());
+                          await saveDocRefs(buildDocRefs());
                         }
                         return result;
                       }}
@@ -2675,7 +2696,7 @@ export function EmployeeForm({
                         setEducationAdditionalDoc(undefined);
                         educationAdditionalDocRef.current = undefined;
                         setShowAdditionalEducation(false);
-                        await updateDocumentReferences(submission.id, buildDocRefs());
+                        await saveDocRefs(buildDocRefs());
                       }}
                     />
                   ) : (

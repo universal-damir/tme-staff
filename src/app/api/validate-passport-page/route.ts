@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validatePassportPage, PassportPageType } from '@/lib/passport-page-validation';
+import { guardAiRoute } from '@/lib/ai-route-guard';
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { image, expectedType } = body as { image: string; expectedType?: PassportPageType };
+  const guard = await guardAiRoute(req);
+  if (!guard.ok) {
+    return NextResponse.json({ error: guard.error }, { status: guard.status });
+  }
 
-    if (!image) {
-      return NextResponse.json(
-        { error: 'Image is required' },
-        { status: 400 }
-      );
+  try {
+    const { image, expectedType } = guard.body as { image?: unknown; expectedType?: PassportPageType };
+
+    if (!image || typeof image !== 'string') {
+      return NextResponse.json({ error: 'Image is required' }, { status: 400 });
     }
 
     const result = await validatePassportPage(image, expectedType);
 
-    // If expectedType is provided, check if it matches
     let matches = true;
     let errorMessage = '';
 

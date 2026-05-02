@@ -6,7 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { signWebhookBody } from '@/lib/webhook-signature';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
 
@@ -52,6 +53,9 @@ export async function POST(req: NextRequest) {
       };
     }
 
+    // Service-role client (P0-3): writes go through the admin client so
+    // anon RLS update policies can be dropped.
+    const supabase = getSupabaseAdmin();
     const { error } = await supabase
       .from('staff_onboarding_submissions')
       .update(updateData)
@@ -64,15 +68,21 @@ export async function POST(req: NextRequest) {
 
     // 2. Notify TME Portal to trigger sync (server-side — guaranteed to complete)
     try {
+      const apiSecret = process.env.STAFF_PORTAL_API_SECRET;
+      if (!apiSecret) {
+        throw new Error('STAFF_PORTAL_API_SECRET is not configured');
+      }
+      const notifyBody = JSON.stringify({ supabaseId: id });
+      const sigHeaders = signWebhookBody(apiSecret, notifyBody);
       const notifyResponse = await fetch(
         `${TME_PORTAL_URL}/api/clients-v2/staff/onboarding/employee-complete`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-secret': process.env.STAFF_PORTAL_API_SECRET || '',
+            ...sigHeaders,
           },
-          body: JSON.stringify({ supabaseId: id }),
+          body: notifyBody,
         }
       );
 
