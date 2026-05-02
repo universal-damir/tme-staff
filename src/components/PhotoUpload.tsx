@@ -185,7 +185,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
             type="button"
             onClick={() => imageSrc && setLightboxOpen(true)}
             disabled={!imageSrc}
-            className="relative w-48 h-48 rounded-lg overflow-hidden bg-gray-100 mx-auto block cursor-zoom-in disabled:cursor-default"
+            className="relative w-48 h-64 rounded-lg overflow-hidden bg-gray-100 mx-auto block cursor-zoom-in disabled:cursor-default"
             aria-label="View full-size photo"
           >
             {imageSrc ? (
@@ -195,7 +195,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
                 alt="Photo preview"
                 loading="eager"
                 decoding="async"
-                className="absolute inset-0 w-full h-full object-cover"
+                className="absolute inset-0 w-full h-full object-contain"
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
