@@ -157,6 +157,10 @@ export interface PassportPageReference {
   filename: string;
   validated: boolean;
   extracted_data?: Record<string, unknown>;
+  // Set when the user submitted via the manual-review fallback after
+  // 3 consecutive AI-validation rejections. AI gate was bypassed; the
+  // upload still needs human verification before processing.
+  needsReview?: boolean;
 }
 
 export interface StaffDocumentReferences {

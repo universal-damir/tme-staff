@@ -25,10 +25,23 @@ export async function POST(req: NextRequest) {
       const typeLabels: Record<PassportPageType, string> = {
         COVER: 'Passport Cover Spread (open passport showing front + back cover)',
         INSIDE_PAGES: 'Inside Pages Spread (open passport showing data page + opposite page)',
+        ADDITIONAL_PAGE: 'Indian Passport Additional Page (address + family details / file number)',
         INVALID: 'Valid Passport Page',
       };
       if (result.page_type === 'INVALID') {
-        errorMessage = `Please upload the passport spread open showing both pages. Single page photos are not accepted.`;
+        const reason = (result.details || '').trim();
+        if (expectedType === 'ADDITIONAL_PAGE') {
+          // Additional-page rejections aren't about a "spread" — the page
+          // is sometimes a single sheet. Use the model's reason directly
+          // with a softer retry suggestion.
+          errorMessage = reason
+            ? `We couldn't verify this as the additional page: ${reason} Please make sure you're uploading the address / family-details page.`
+            : `Please upload the additional page showing your address and family details (Father / Mother / Spouse names, address, file number).`;
+        } else {
+          errorMessage = reason
+            ? `We couldn't verify this passport spread: ${reason} Please retake with the passport laid fully open and flat, both halves clearly visible.`
+            : `Please upload the passport spread open showing both pages. Single page photos are not accepted.`;
+        }
       } else {
         errorMessage = `This doesn't appear to be a ${typeLabels[expectedType]}. Please upload the correct page spread.`;
       }

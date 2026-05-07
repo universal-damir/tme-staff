@@ -85,10 +85,12 @@ const PASSPORT_ADDITIONAL_TOOL = {
 export async function extractAdditionalPage(imageBase64: string): Promise<AdditionalPageExtractionResult> {
   const client = getAnthropicClient();
 
-  // Remove data URL prefix if present
+  // Remove data URL prefix if present (matches both image/* and application/pdf)
   const base64Data = imageBase64.replace(/^data:[^;]+;base64,/, '');
+  const isPdf =
+    imageBase64.startsWith('data:application/pdf') || imageBase64.includes('application/pdf');
 
-  // Detect media type from magic bytes
+  // Detect media type from magic bytes (images only)
   let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg';
   try {
     const firstBytes = atob(base64Data.substring(0, 16));
@@ -115,6 +117,13 @@ export async function extractAdditionalPage(imageBase64: string): Promise<Additi
     }
   }
 
+  // PDF support via Claude's `document` content block — same pattern as
+  // passport-extraction.ts and visa-document-validation.ts.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fileContent: any = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } };
+
   try {
     const response = await withTimeout(
       client.messages.create({
@@ -126,14 +135,7 @@ export async function extractAdditionalPage(imageBase64: string): Promise<Additi
           {
             role: 'user',
             content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: mediaType,
-                  data: base64Data,
-                },
-              },
+              fileContent,
               { type: 'text', text: ADDITIONAL_PAGE_PROMPT },
             ],
           },

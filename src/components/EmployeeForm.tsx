@@ -27,6 +27,8 @@ import {
   isPakistaniNationality as checkPakistaniNationality,
   visaDocumentRequirement,
   requiresArrivalDate,
+  shouldOfferManualReview,
+  buildManualReviewPageRef,
 } from '@/lib/staff-form-logic';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
 import { calculateFullName, compressImageForAI } from '@/lib/utils';
@@ -463,6 +465,31 @@ export function EmployeeForm({
     file: null as File | null,
   });
 
+  // Manual-review fallback: after MANUAL_REVIEW_THRESHOLD consecutive AI
+  // page-type rejections on a passport step, surface a confirmation-gated
+  // "submit for manual review" affordance. Counters reset on remove or
+  // successful upload. State is intentionally client-side only — a fresh
+  // session starts the user back at zero, which is what we want.
+  // Threshold + helpers live in @/lib/staff-form-logic so they can be
+  // unit-tested without mounting this component.
+  const [coverRejectionCount, setCoverRejectionCount] = useState(0);
+  const [insideRejectionCount, setInsideRejectionCount] = useState(0);
+  const [coverManualReviewConfirmed, setCoverManualReviewConfirmed] = useState(false);
+  const [insideManualReviewConfirmed, setInsideManualReviewConfirmed] = useState(false);
+  // Separate "submitting via manual-review" flags so the slot's
+  // "Validating..." badge stays off during this path. Reusing
+  // coverUI.validating for both AI checks AND manual-review uploads
+  // produced confusing UX where the user saw "Submitting..." on the
+  // button AND "Validating..." in the corner at the same time.
+  const [coverManualReviewSubmitting, setCoverManualReviewSubmitting] = useState(false);
+  const [insideManualReviewSubmitting, setInsideManualReviewSubmitting] = useState(false);
+  // Additional-page (Indian passport) gets the same manual-review escape
+  // hatch as cover/inside: 2 AI rejections → amber affordance → user
+  // confirms + submits → page stamped needsReview, TME verifies later.
+  const [additionalRejectionCount, setAdditionalRejectionCount] = useState(0);
+  const [additionalManualReviewConfirmed, setAdditionalManualReviewConfirmed] = useState(false);
+  const [additionalManualReviewSubmitting, setAdditionalManualReviewSubmitting] = useState(false);
+
   // Refs to track latest values (avoids stale closure issues in callbacks)
   const photoDocRef = React.useRef(photoDoc);
   const passportPagesRef = React.useRef(passportPages);
@@ -703,6 +730,44 @@ export function EmployeeForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStep4Empty]);
 
+  // Scroll to top of page on every step transition (Continue / Back / arrows)
+  // so the user always lands on the "Staff Onboarding" header instead of
+  // somewhere mid-section.
+  //
+  // Why this is more involved than `window.scrollTo`:
+  //   1. The Continue button has focus when clicked. After the step
+  //      transition, the browser tries to keep the focused element in
+  //      view — even after our scrollTo — and the new step's Continue
+  //      button typically lives at the BOTTOM of the new content, so
+  //      the page snaps to the bottom. Blurring the active element
+  //      removes that anchor BEFORE we scroll.
+  //   2. A single synchronous scrollTo gets undone by late layout
+  //      shifts when the next step's heavy sections mount. We re-fire
+  //      in rAF and at +100ms / +300ms so any late shift gets corrected.
+  //   3. Some browsers route window.scrollTo to a different scrolling
+  //      element. We also write to documentElement/body directly.
+  //   4. Instant (no `behavior: 'smooth'`) so the scroll can't be
+  //      interrupted mid-animation.
+  useEffect(() => {
+    if (document.activeElement && 'blur' in document.activeElement) {
+      (document.activeElement as HTMLElement).blur();
+    }
+    const scrollTop = () => {
+      window.scrollTo(0, 0);
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    };
+    scrollTop();
+    const raf = requestAnimationFrame(scrollTop);
+    const t1 = setTimeout(scrollTop, 100);
+    const t2 = setTimeout(scrollTop, 300);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [viewingStep]);
+
   // No auto-advance — user controls navigation via "Continue" button or arrows
 
   // Auto-save form data when step advances (persists across refresh)
@@ -810,7 +875,7 @@ export function EmployeeForm({
   };
 
   // Passport validation helper
-  const validatePassportPageType = async (imageBase64: string, expectedType: 'COVER' | 'INSIDE_PAGES') => {
+  const validatePassportPageType = async (imageBase64: string, expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE') => {
     try {
       const compressedImage = await compressImageForAI(imageBase64);
       const response = await fetch('/api/validate-passport-page', {
@@ -905,18 +970,18 @@ export function EmployeeForm({
 
     setCoverUI({ preview, validating: true, error: null, file });
 
-    // AI page-type validation only for images — PDFs can't be vision-checked.
-    if (isImage) {
-      try {
-        const validation = await validatePassportPageType(preview, 'COVER');
-        if (!validation.valid) {
-          setCoverUI({ preview, validating: false, error: validation.error || 'This does not look like a passport cover spread. Please upload a clearer photo.', file });
-          return false;
-        }
-      } catch {
-        setCoverUI({ preview, validating: false, error: "We couldn't check this image. Please try again, or upload a PDF instead.", file });
+    // Both images and PDFs run through page-type validation — PDFs use
+    // Claude's `document` content block (handled in passport-page-validation.ts).
+    try {
+      const validation = await validatePassportPageType(preview, 'COVER');
+      if (!validation.valid) {
+        setCoverRejectionCount((c) => c + 1);
+        setCoverUI({ preview, validating: false, error: validation.error || 'This does not look like a passport cover spread. Please upload a clearer photo.', file });
         return false;
       }
+    } catch {
+      setCoverUI({ preview, validating: false, error: "We couldn't check this file. Please try again.", file });
+      return false;
     }
 
     let result: { path: string; filename: string } | null;
@@ -936,6 +1001,8 @@ export function EmployeeForm({
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     setPassportError(null);
+    setCoverRejectionCount(0);
+    setCoverManualReviewConfirmed(false);
     await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
     return true;
   };
@@ -958,17 +1025,19 @@ export function EmployeeForm({
 
     setInsideUI({ preview, validating: true, error: null, file });
 
-    if (isImage) {
-      try {
-        const validation = await validatePassportPageType(preview, 'INSIDE_PAGES');
-        if (!validation.valid) {
-          setInsideUI({ preview, validating: false, error: validation.error || 'This does not look like a passport inside-pages spread. Please upload a clearer photo.', file });
-          return false;
-        }
-      } catch {
-        setInsideUI({ preview, validating: false, error: "We couldn't check this image. Please try again, or upload a PDF instead.", file });
+    // Both images and PDFs go through the page-type validator. Anthropic
+    // accepts PDFs natively via the `document` content block (handled in
+    // passport-page-validation.ts), so no client-side rasterization needed.
+    try {
+      const validation = await validatePassportPageType(preview, 'INSIDE_PAGES');
+      if (!validation.valid) {
+        setInsideRejectionCount((c) => c + 1);
+        setInsideUI({ preview, validating: false, error: validation.error || 'This does not look like a passport inside-pages spread. Please upload a clearer photo.', file });
         return false;
       }
+    } catch {
+      setInsideUI({ preview, validating: false, error: "We couldn't check this file. Please try again.", file });
+      return false;
     }
 
     let result: { path: string; filename: string } | null;
@@ -988,14 +1057,14 @@ export function EmployeeForm({
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     setPassportError(null);
+    setInsideRejectionCount(0);
+    setInsideManualReviewConfirmed(false);
     await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
 
-    // Extraction is image-only — for PDFs the user fills the form manually.
-    if (!isImage) {
-      setPassportDataReady(true);
-      return true;
-    }
-
+    // Extraction works on both images and PDFs — Claude's `document` block
+    // handles PDFs internally. (Previously we early-returned for PDFs, which
+    // forced users to type passport details by hand even when the PDF
+    // contained a perfectly readable data page.)
     setExtractingPassport(true);
     let extracted: Record<string, unknown> | null = null;
     try {
@@ -1023,6 +1092,14 @@ export function EmployeeForm({
   // Remove handlers
   const handleCoverRemove = async () => {
     setCoverUI({ preview: null, validating: false, error: null, file: null });
+    // Intentionally do NOT reset coverRejectionCount on remove. The user
+    // can only re-upload by clicking X first (FileUploadSlot.tsx hides
+    // Upload while a file is shown), so resetting here makes the
+    // manual-review threshold unreachable in practice — the counter
+    // would never climb past 1. Counter tracks session-level AI
+    // frustration; only a successful AI validation or a successful
+    // manual-review submit should clear it.
+    setCoverManualReviewConfirmed(false);
     const updatedPages = { ...passportPagesRef.current };
     delete updatedPages.cover;
     setPassportPages(updatedPages);
@@ -1032,6 +1109,8 @@ export function EmployeeForm({
 
   const handleInsideRemove = async () => {
     setInsideUI({ preview: null, validating: false, error: null, file: null });
+    // Same rationale as handleCoverRemove — see comment there.
+    setInsideManualReviewConfirmed(false);
     const updatedPages = { ...passportPagesRef.current };
     delete updatedPages.insidePages;
     setPassportPages(updatedPages);
@@ -1040,9 +1119,135 @@ export function EmployeeForm({
     await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
   };
 
+  // Manual-review fallback handlers — invoked only after the user has hit
+  // MANUAL_REVIEW_THRESHOLD AI rejections AND ticked the confirmation
+  // checkbox. Skips the AI page-type gate, uploads as-is, marks the page
+  // as needing human review.
+  const handleCoverManualReview = async () => {
+    if (!coverUI.file || !coverUI.preview) return;
+    // Clear the previous AI-rejection error and DO NOT set validating:true
+    // — the manual-review path bypasses AI, so showing "Validating..."
+    // while the user has clicked "Submit for manual review" is misleading.
+    // The submit button gets its own dedicated submitting flag below.
+    setCoverUI({ preview: coverUI.preview, file: coverUI.file, validating: false, error: null });
+    setCoverManualReviewSubmitting(true);
+    let result: { path: string; filename: string } | null;
+    try {
+      result = await uploadPassportPage(submission.id, 'cover', coverUI.file);
+    } catch {
+      result = null;
+    }
+    if (!result) {
+      setCoverUI({ preview: coverUI.preview, file: coverUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setCoverManualReviewSubmitting(false);
+      return;
+    }
+    setCoverManualReviewSubmitting(false);
+    const newPage: PassportPageReference = buildManualReviewPageRef(result);
+    const updatedPages = { ...passportPagesRef.current, cover: newPage };
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    setPassportError(null);
+    setCoverRejectionCount(0);
+    setCoverManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+  };
+
+  const handleInsideManualReview = async () => {
+    if (!insideUI.file || !insideUI.preview) return;
+    // Same rationale as handleCoverManualReview — keep validating:false so
+    // the slot's "Validating..." badge stays off while the dedicated
+    // submitting flag drives the manual-review button.
+    setInsideUI({ preview: insideUI.preview, file: insideUI.file, validating: false, error: null });
+    setInsideManualReviewSubmitting(true);
+    let result: { path: string; filename: string } | null;
+    try {
+      result = await uploadPassportPage(submission.id, 'insidePages', insideUI.file);
+    } catch {
+      result = null;
+    }
+    if (!result) {
+      setInsideUI({ preview: insideUI.preview, file: insideUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setInsideManualReviewSubmitting(false);
+      return;
+    }
+
+    // Best-effort extraction even though the AI rejected this as a proper
+    // spread. Reasoning: a single passport data page (the most common
+    // rejection cause) still has fully readable MRZ + name + dates. If
+    // we can pre-fill the form from it, the user verifies/corrects fields
+    // instead of typing everything from scratch — and the portal sync
+    // also benefits because extracted_data lands on the page reference.
+    // The needsReview flag still goes through, so TME re-checks the photo.
+    // Works on both images and PDFs — extraction uses Claude's `document`
+    // content block for PDFs.
+    setExtractingPassport(true);
+    let extracted: Record<string, unknown> | null = null;
+    try {
+      extracted = await extractPassportData(insideUI.preview);
+    } catch {
+      extracted = null;
+    }
+    setExtractingPassport(false);
+    if (extracted) handlePassportExtracted(extracted);
+
+    setInsideManualReviewSubmitting(false);
+    const newPage: PassportPageReference = {
+      ...buildManualReviewPageRef(result),
+      // Persist the extraction onto the page ref so the portal-side
+      // sync picks it up alongside the needsReview flag.
+      ...(extracted ? { extracted_data: extracted } : {}),
+    };
+    const updatedPages = { ...passportPagesRef.current, insidePages: newPage };
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    setPassportError(null);
+    setInsideRejectionCount(0);
+    setInsideManualReviewConfirmed(false);
+    setPassportDataReady(true);
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+  };
+
+  // Helper: best-effort extraction of the additional-page fields from a
+  // base64 image/PDF preview. Returns the raw extracted dict so the
+  // caller can also persist it onto the page reference. Image AND PDF —
+  // Claude's `document` content block handles PDFs in extractAdditionalPage.
+  const extractAdditionalPageData = async (preview: string): Promise<Record<string, unknown> | null> => {
+    try {
+      const isImg = preview.startsWith('data:image/');
+      const payload = isImg ? await compressImageForAI(preview) : preview;
+      const response = await fetch('/api/extract-passport-additional', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: payload, submissionId: submission.id, token: aiToken }),
+      });
+      if (!response.ok) return null;
+      const result = await response.json();
+      if (result.success && result.data) return result.data as Record<string, unknown>;
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Apply extracted additional-page fields to the form. Used by both the
+  // regular upload path and the manual-review path so behaviour is identical.
+  const applyAdditionalPageData = (d: Record<string, unknown>) => {
+    if (d.father_name) setValue('father_full_name', d.father_name as string);
+    if (d.mother_name) setValue('mother_full_name', d.mother_name as string);
+    if (d.spouse_name) {
+      setValue('marital_status', 'Married');
+      setValue('spouse_name', d.spouse_name as string);
+    }
+    if (d.address_street) setValue('home_street_address', d.address_street as string);
+    if (d.address_city) setValue('home_city', d.address_city as string);
+    if (d.address_pin) setValue('home_postal_code', d.address_pin as string);
+    if (d.address_country) setValue('home_country', d.address_country as string);
+    setTimeout(() => autoSave(getValues()), 100);
+  };
+
   // Indian passport additional page handlers
   const handleAdditionalPageUpload = async (file: File): Promise<boolean> => {
-    const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -1051,6 +1256,22 @@ export function EmployeeForm({
 
     setAdditionalPageUI({ preview, validating: true, error: null, file });
 
+    // AI page-type validation — same pattern as cover/inside. Permissive
+    // (the prompt favours valid=true) because additional-page layouts vary,
+    // but it still catches the common mistake of uploading the cover or
+    // the data page here. Counter feeds the manual-review affordance.
+    try {
+      const validation = await validatePassportPageType(preview, 'ADDITIONAL_PAGE');
+      if (!validation.valid) {
+        setAdditionalRejectionCount((c) => c + 1);
+        setAdditionalPageUI({ preview, validating: false, error: validation.error || 'This does not look like an Indian passport additional page.', file });
+        return false;
+      }
+    } catch {
+      setAdditionalPageUI({ preview, validating: false, error: "We couldn't check this file. Please try again.", file });
+      return false;
+    }
+
     const result = await uploadPassportPage(submission.id, 'additionalPage', file);
     if (!result) {
       setAdditionalPageUI({ preview, validating: false, error: 'Failed to upload file', file });
@@ -1058,49 +1279,65 @@ export function EmployeeForm({
     }
 
     setAdditionalPageUI({ preview, validating: false, error: null, file });
-    const newPage: PassportPageReference = { path: result.path, filename: result.filename, validated: true };
+    const extracted = await extractAdditionalPageData(preview);
+    if (extracted) applyAdditionalPageData(extracted);
+
+    const newPage: PassportPageReference = {
+      path: result.path,
+      filename: result.filename,
+      validated: true,
+      ...(extracted ? { extracted_data: extracted } : {}),
+    };
     const updatedPages = { ...passportPagesRef.current, additionalPage: newPage };
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
+    setAdditionalRejectionCount(0);
+    setAdditionalManualReviewConfirmed(false);
     await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+    return true;
+  };
 
-    // Extraction is image-only — vision API can't read PDFs.
-    if (!isImage) return true;
-
+  // Manual-review fallback for the additional page — same shape as cover/
+  // inside: bypass AI validation, upload as-is, stamp needsReview=true,
+  // best-effort extract so the form is still pre-filled where possible.
+  const handleAdditionalManualReview = async () => {
+    if (!additionalPageUI.file || !additionalPageUI.preview) return;
+    setAdditionalPageUI({ preview: additionalPageUI.preview, file: additionalPageUI.file, validating: false, error: null });
+    setAdditionalManualReviewSubmitting(true);
+    let result: { path: string; filename: string } | null;
     try {
-      const compressedImage = await compressImageForAI(preview);
-      const response = await fetch('/api/extract-passport-additional', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, submissionId: submission.id, token: aiToken }),
-      });
-      if (response.ok) {
-        const extractResult = await response.json();
-        if (extractResult.success && extractResult.data) {
-          const d = extractResult.data;
-          if (d.father_name) setValue('father_full_name', d.father_name);
-          if (d.mother_name) setValue('mother_full_name', d.mother_name);
-          if (d.spouse_name) {
-            setValue('marital_status', 'Married');
-            setValue('spouse_name', d.spouse_name);
-          }
-          if (d.address_street) setValue('home_street_address', d.address_street);
-          if (d.address_city) setValue('home_city', d.address_city);
-          if (d.address_pin) setValue('home_postal_code', d.address_pin);
-          if (d.address_country) setValue('home_country', d.address_country);
-          // Auto-save after extraction
-          setTimeout(() => autoSave(getValues()), 100);
-        }
-      }
-    } catch (err) {
-      console.error('Additional page extraction error:', err);
+      result = await uploadPassportPage(submission.id, 'additionalPage', additionalPageUI.file);
+    } catch {
+      result = null;
+    }
+    if (!result) {
+      setAdditionalPageUI({ preview: additionalPageUI.preview, file: additionalPageUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setAdditionalManualReviewSubmitting(false);
+      return;
     }
 
-    return true;
+    const extracted = await extractAdditionalPageData(additionalPageUI.preview);
+    if (extracted) applyAdditionalPageData(extracted);
+
+    setAdditionalManualReviewSubmitting(false);
+    const newPage: PassportPageReference = {
+      ...buildManualReviewPageRef(result),
+      ...(extracted ? { extracted_data: extracted } : {}),
+    };
+    const updatedPages = { ...passportPagesRef.current, additionalPage: newPage };
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    setAdditionalRejectionCount(0);
+    setAdditionalManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
   };
 
   const handleAdditionalPageRemove = async () => {
     setAdditionalPageUI({ preview: null, validating: false, error: null, file: null });
+    // Same rationale as handleCoverRemove — keep the rejection counter
+    // so the manual-review threshold is reachable through the Replace
+    // path (X+upload would otherwise reset every iteration).
+    setAdditionalManualReviewConfirmed(false);
     const updatedPages = { ...passportPagesRef.current };
     delete updatedPages.additionalPage;
     setPassportPages(updatedPages);
@@ -1583,6 +1820,7 @@ export function EmployeeForm({
                 preview={coverUI.preview || undefined}
                 validated={!!passportPages.cover?.validated}
                 validating={coverUI.validating}
+                needsReview={!!passportPages.cover?.needsReview}
                 error={coverUI.error || undefined}
                 onUpload={async (file) => {
                   // PDFs skip the corner-drag scanner — it renders via <img>
@@ -1606,6 +1844,32 @@ export function EmployeeForm({
                   }}
                   onCancel={() => setPendingCoverFile(null)}
                 />
+              )}
+
+              {shouldOfferManualReview(coverRejectionCount) && coverUI.file && !passportPages.cover?.validated && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+                  <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this photo is your passport cover spread, you can submit it for manual review.
+                  </p>
+                  <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 flex-shrink-0"
+                      checked={coverManualReviewConfirmed}
+                      onChange={(e) => setCoverManualReviewConfirmed(e.target.checked)}
+                    />
+                    <span>I confirm this is my passport cover (front + back) photographed spread open. I understand a TME team member will verify it manually.</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleCoverManualReview}
+                    disabled={!coverManualReviewConfirmed || coverManualReviewSubmitting}
+                    className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ backgroundColor: TME_COLORS.primary }}
+                  >
+                    {coverManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                  </button>
+                </div>
               )}
             </div>
             {passportError && (
@@ -1653,6 +1917,7 @@ export function EmployeeForm({
                 preview={insideUI.preview || undefined}
                 validated={!!passportPages.insidePages?.validated}
                 validating={insideUI.validating}
+                needsReview={!!passportPages.insidePages?.needsReview}
                 error={insideUI.error || undefined}
                 onUpload={async (file) => {
                   if (file.type === 'application/pdf') {
@@ -1674,6 +1939,32 @@ export function EmployeeForm({
                   }}
                   onCancel={() => setPendingInsideFile(null)}
                 />
+              )}
+
+              {shouldOfferManualReview(insideRejectionCount) && insideUI.file && !passportPages.insidePages?.validated && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+                  <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this photo is your passport inside-pages spread, you can submit it for manual review.
+                  </p>
+                  <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 flex-shrink-0"
+                      checked={insideManualReviewConfirmed}
+                      onChange={(e) => setInsideManualReviewConfirmed(e.target.checked)}
+                    />
+                    <span>I confirm this is my passport inside pages (data page + opposite page) photographed spread open. I understand a TME team member will verify it manually, and I&apos;ll need to fill in my passport details by hand.</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleInsideManualReview}
+                    disabled={!insideManualReviewConfirmed || insideManualReviewSubmitting}
+                    className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ backgroundColor: TME_COLORS.primary }}
+                  >
+                    {insideManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                  </button>
+                </div>
               )}
             </div>
           </FormSection>
@@ -1887,16 +2178,47 @@ export function EmployeeForm({
                   preview={additionalPageUI.preview || undefined}
                   validated={!!passportPages.additionalPage?.validated}
                   validating={additionalPageUI.validating}
+                  needsReview={!!passportPages.additionalPage?.needsReview}
                   error={additionalPageUI.error || undefined}
                   onUpload={additionalPageScan.intercepted}
                   onRemove={handleAdditionalPageRemove}
                 />
                 {additionalPageScan.scannerModal}
 
-                {isAdditionalPageUploaded && (
+                {isAdditionalPageUploaded && !passportPages.additionalPage?.needsReview && (
                   <div className="flex items-center gap-2 text-green-600 text-sm">
                     <CheckCircle className="w-4 h-4" />
                     Additional page uploaded. Family details and address will be pre-filled.
+                  </div>
+                )}
+
+                {/* Manual-review affordance — same pattern as cover/inside.
+                    Appears after MANUAL_REVIEW_THRESHOLD AI rejections so a
+                    user with an unusual layout (handwritten, photocopy,
+                    addendum sheet) isn't permanently blocked. */}
+                {shouldOfferManualReview(additionalRejectionCount) && additionalPageUI.file && !passportPages.additionalPage?.validated && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+                    <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your Indian passport additional page, you can submit it for manual review.
+                    </p>
+                    <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 flex-shrink-0"
+                        checked={additionalManualReviewConfirmed}
+                        onChange={(e) => setAdditionalManualReviewConfirmed(e.target.checked)}
+                      />
+                      <span>I confirm this is my Indian passport additional page (address / family details). I understand a TME team member will verify it manually.</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleAdditionalManualReview}
+                      disabled={!additionalManualReviewConfirmed || additionalManualReviewSubmitting}
+                      className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ backgroundColor: TME_COLORS.primary }}
+                    >
+                      {additionalManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -2877,7 +3199,7 @@ export function EmployeeForm({
             />
           </FormSection>
           {viewingStep === 7 && (
-            <StepNavButtons enabled={isEducationComplete} onContinue={() => { setViewingStep(8); window.scrollTo({ top: 0 }); setTimeout(() => window.scrollTo({ top: 0 }), 300); }} onBack={() => setViewingStep(6)} label="Review & Sign" />
+            <StepNavButtons enabled={isEducationComplete} onContinue={() => setViewingStep(8)} onBack={() => setViewingStep(6)} label="Review & Sign" />
           )}
         </div>
       </RevealSection>

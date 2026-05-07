@@ -7,6 +7,9 @@ import {
   requiresArrivalDate,
   pluralizePeriod,
   normalizeProvidedFlag,
+  MANUAL_REVIEW_THRESHOLD,
+  shouldOfferManualReview,
+  buildManualReviewPageRef,
 } from './staff-form-logic';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -59,6 +62,75 @@ describe('mergeStaffDocRefs', () => {
     expect(Object.keys(merged).sort()).toEqual(
       ['eid_front', 'existing_doc_a', 'existing_doc_b', 'job_offer_letter'].sort()
     );
+  });
+
+  it('preserves a needsReview flag on passportPages when employee saves unrelated keys', () => {
+    // Regression for the manual-review fallback: when the employee submits a
+    // cover via the manual-review path (needsReview=true) and then later saves
+    // other fields without re-passing passportPages, the flag must survive
+    // through merge so the portal sync still sees it.
+    const existing: StaffDocumentReferences = {
+      passportPages: {
+        cover: { path: 'cover.jpg', filename: 'cover.jpg', validated: true, needsReview: true },
+      },
+    };
+    const merged = mergeStaffDocRefs(existing, {
+      eid_front: { path: 'eid.jpg', filename: 'eid.jpg' },
+    });
+    expect(merged.passportPages?.cover?.needsReview).toBe(true);
+  });
+
+  it('preserves a needsReview flag on the side not being overwritten', () => {
+    // Employee submits cover via manual-review (needsReview=true), then later
+    // saves only insidePages — passportPages gets shallow-replaced, so this
+    // documents the boundary: callers that touch passportPages must spread
+    // the existing dict if they want the cover flag to survive.
+    const existing: StaffDocumentReferences = {
+      passportPages: {
+        cover: { path: 'cover.jpg', filename: 'cover.jpg', validated: true, needsReview: true },
+      },
+    };
+    const merged = mergeStaffDocRefs(existing, {
+      passportPages: {
+        ...existing.passportPages,
+        insidePages: { path: 'inside.jpg', filename: 'inside.jpg', validated: true },
+      },
+    });
+    expect(merged.passportPages?.cover?.needsReview).toBe(true);
+    expect(merged.passportPages?.insidePages?.validated).toBe(true);
+  });
+});
+
+describe('shouldOfferManualReview', () => {
+  it('threshold is 2 — fewer rejections must hide the affordance', () => {
+    expect(MANUAL_REVIEW_THRESHOLD).toBe(2);
+    expect(shouldOfferManualReview(0)).toBe(false);
+    expect(shouldOfferManualReview(1)).toBe(false);
+  });
+
+  it('shows the affordance once the rejection count hits the threshold', () => {
+    expect(shouldOfferManualReview(2)).toBe(true);
+    expect(shouldOfferManualReview(3)).toBe(true);
+    expect(shouldOfferManualReview(99)).toBe(true);
+  });
+});
+
+describe('buildManualReviewPageRef', () => {
+  it('always stamps validated=true and needsReview=true', () => {
+    const ref = buildManualReviewPageRef({ path: 'p/x.jpg', filename: 'x.jpg' });
+    expect(ref.validated).toBe(true);
+    expect(ref.needsReview).toBe(true);
+  });
+
+  it('passes path and filename through unchanged', () => {
+    const ref = buildManualReviewPageRef({ path: 'staff/123/cover.jpg', filename: 'cover.jpg' });
+    expect(ref.path).toBe('staff/123/cover.jpg');
+    expect(ref.filename).toBe('cover.jpg');
+  });
+
+  it('does not include extracted_data — manual-review path means user types passport details by hand', () => {
+    const ref = buildManualReviewPageRef({ path: 'p', filename: 'f' });
+    expect(ref.extracted_data).toBeUndefined();
   });
 });
 

@@ -131,18 +131,17 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
     }
   }
 
-  console.log('[Passport Extraction] Detected media type:', mediaType);
+  console.log('[Passport Extraction] Detected media type:', isPdf ? 'application/pdf' : mediaType);
 
-  // For PDFs, we need to handle differently
-  if (isPdf) {
-    return {
-      success: false,
-      data: {},
-      confidence: {},
-      mrz_verified: false,
-      error: 'Please upload an image file (JPG or PNG) of your passport, not a PDF.',
-    };
-  }
+  // PDFs go through Claude's `document` content block — Anthropic rasterizes
+  // pages server-side and runs the same vision pipeline as for images, so
+  // the extraction quality is comparable. Matches the pattern in
+  // visa-document-validation.ts. Required because plenty of staff scan
+  // their passport once as a PDF and re-use that file across employers.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fileContent: any = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } };
 
   try {
     const response = await withTimeout(
@@ -180,14 +179,7 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
           {
             role: 'user',
             content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: mediaType,
-                  data: base64Data,
-                },
-              },
+              fileContent,
               {
                 type: 'text',
                 text: PASSPORT_EXTRACTION_PROMPT,

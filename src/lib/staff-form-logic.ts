@@ -3,7 +3,7 @@
  * Factored out so they can be unit-tested without mounting the components.
  */
 
-import type { StaffDocumentReferences, VisaCategory } from '@/types';
+import type { PassportPageReference, StaffDocumentReferences, VisaCategory } from '@/types';
 
 /**
  * Merge existing submission documents with employee-side uploaded docs.
@@ -88,6 +88,43 @@ export function pluralizePeriod(
     return n === 1 ? singular : singular + 's';
   }
   return singular + 's';
+}
+
+/**
+ * Number of consecutive AI-validation rejections after which the employee
+ * is offered the manual-review fallback for passport cover / inside-pages.
+ * Two rejections is enough to suggest the photo is fine and the AI is
+ * the problem; the user then confirms + submits, an HR reviewer verifies
+ * later on the portal side. (Was 3; reduced to 2 because three rounds of
+ * "click X, re-upload, get rejected again" is too much friction.)
+ */
+export const MANUAL_REVIEW_THRESHOLD = 2;
+
+/**
+ * Whether the manual-review affordance should be shown for the current
+ * passport-page step. Counter is per-step (cover / inside) and resets on
+ * successful upload, on remove, or after the manual-review submit.
+ */
+export function shouldOfferManualReview(rejectionCount: number): boolean {
+  return rejectionCount >= MANUAL_REVIEW_THRESHOLD;
+}
+
+/**
+ * Build the passport page reference saved when the user submits via the
+ * manual-review fallback. AI gate was bypassed, so `validated: true`
+ * unblocks the form, and `needsReview: true` flags the upload for human
+ * verification on the portal side. No extracted_data — the user fills
+ * passport details manually for the inside-pages step.
+ */
+export function buildManualReviewPageRef(
+  result: { path: string; filename: string },
+): PassportPageReference {
+  return {
+    path: result.path,
+    filename: result.filename,
+    validated: true,
+    needsReview: true,
+  };
 }
 
 export type ProvidedFlag = 'yes' | 'no' | 'allowance';

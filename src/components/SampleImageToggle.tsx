@@ -26,8 +26,10 @@ export function SampleImageToggle({ imageSrc, altText, label = 'See example', im
         {show ? 'Hide example' : label}
       </button>
       {show && (
-        <div className="mt-2 rounded-lg overflow-hidden border border-gray-200 inline-block">
-          <img src={imageSrc} alt={altText} className={imageClassName || 'max-w-xs'} />
+        <div className="mt-2 flex justify-center">
+          <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+            <img src={imageSrc} alt={altText} className={imageClassName || 'max-w-xs'} />
+          </div>
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@
 
 import React, { useState, useRef } from 'react';
 import { TME_COLORS } from '@/lib/constants';
-import { Upload, CheckCircle, AlertCircle, X, Loader2, FileText } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, FileText, RefreshCw } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
 
 interface UploadSlotProps {
@@ -18,6 +18,15 @@ interface UploadSlotProps {
   preview?: string;
   accept?: string;
   maxSizeMB?: number;
+  /**
+   * True when the file was uploaded via the manual-review fallback
+   * (3-rejection bypass). The page is not actually AI-verified — TME
+   * will check it on the portal side. The slot uses this to swap the
+   * green "Valid" / "Page verified" treatment for an amber "Pending
+   * review — TME will verify this manually" treatment so the user
+   * isn't told their photo is verified when it's just been queued.
+   */
+  needsReview?: boolean;
 }
 
 export function UploadSlot({
@@ -26,16 +35,18 @@ export function UploadSlot({
   expectedType: _expectedType, // Reserved for future use
   file: _file, // File ref tracked by parent
   onUpload,
-  onRemove,
+  onRemove: _onRemove, // No longer wired — Replace covers swap, no X button anymore
   validated,
   validating,
   error,
   preview,
   accept = 'image/jpeg,image/png,image/webp',
   maxSizeMB = 5,
+  needsReview = false,
 }: UploadSlotProps) {
   void _expectedType;
   void _file;
+  void _onRemove;
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -99,6 +110,7 @@ export function UploadSlot({
 
   const getBorderColor = () => {
     if (error) return 'border-red-300';
+    if (needsReview) return 'border-amber-300';
     if (validated) return 'border-green-300';
     if (isDragging) return 'border-[#243F7B]';
     return 'border-gray-200';
@@ -106,6 +118,7 @@ export function UploadSlot({
 
   const getBgColor = () => {
     if (error) return 'bg-red-50';
+    if (needsReview) return 'bg-amber-50';
     if (validated) return 'bg-green-50';
     if (isDragging) return 'bg-blue-50';
     return 'bg-gray-50';
@@ -185,6 +198,11 @@ export function UploadSlot({
                   <Loader2 className="w-3 h-3 animate-spin" />
                   Validating...
                 </div>
+              ) : needsReview ? (
+                <div className="bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-xs flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  Pending review
+                </div>
               ) : validated ? (
                 <div className="bg-green-100 text-green-600 px-2 py-1 rounded-full text-xs flex items-center gap-1">
                   <CheckCircle className="w-3 h-3" />
@@ -198,14 +216,24 @@ export function UploadSlot({
               ) : null}
             </div>
 
-            {/* Remove Button */}
-            <button
-              type="button"
-              onClick={onRemove}
-              className="absolute top-4 left-4 bg-white rounded-full p-1 shadow-md hover:bg-gray-100 transition-colors"
-            >
-              <X className="w-4 h-4 text-gray-600" />
-            </button>
+            {/* Replace Button — single way to swap the photo. Opens the
+                file picker directly; the new file's onUpload result
+                overwrites the previous preview/file/error state in the
+                parent. Hidden during validation/submission so the user
+                isn't tempted to fire a second upload while the first is
+                still in flight (and so the "Validating..." badge isn't
+                competing with an actionable button). */}
+            {!validating && (
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                className="absolute top-4 left-4 bg-white rounded-full p-1.5 shadow-md hover:bg-gray-100 transition-colors flex items-center gap-1 px-2"
+                title="Replace with another photo"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-gray-600" />
+                <span className="text-xs font-medium text-gray-700">Replace</span>
+              </button>
+            )}
           </div>
         ) : (
           <button
@@ -227,8 +255,17 @@ export function UploadSlot({
         </p>
       )}
 
-      {/* Validated Message - only show when not currently validating */}
-      {validated && !error && !validating && (
+      {/* Validated Message — green "Page verified" only when AI actually
+          accepted the page. Manual-review submissions get an amber line
+          instead so the user understands the page hasn't been verified
+          yet — TME will check it on the portal side. */}
+      {needsReview && !error && !validating && (
+        <p className="mt-2 text-xs text-amber-700 flex items-center gap-1">
+          <AlertCircle className="w-3 h-3" />
+          TME will verify this manually
+        </p>
+      )}
+      {validated && !needsReview && !error && !validating && (
         <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
           <CheckCircle className="w-3 h-3" />
           Page verified
