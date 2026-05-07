@@ -9,3 +9,28 @@
 # Use Netlify's Next.js runtime for SSR
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+# Cache strategy: never cache HTML, but cache hashed bundles forever.
+#
+# Why: a browser tab loaded before a deploy keeps running the old JS,
+# but as long as fresh navigations always pull fresh HTML, the new
+# bundle URLs (Next.js content-hashes them) load instantly with no
+# user action. Without this, Netlify Durable Cache would serve stale
+# HTML for up to its TTL — meaning even a fresh tab visit could land
+# on yesterday's UI.
+#
+# /_next/static/* gets immutable + 1-year max-age because every file
+# under that path has a content hash baked into the URL by Next.js
+# (e.g. main-app-682b115844d0a6a0.js). New deploys produce different
+# hashes, so the cached old URLs are simply unreferenced — they never
+# collide with new content.
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-store, must-revalidate"
+
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
