@@ -3,6 +3,7 @@ import {
   mergeStaffDocRefs,
   isPakistaniNationality,
   isDmccAuthority,
+  isDetAuthority,
   visaDocumentRequirement,
   requiresArrivalDate,
   pluralizePeriod,
@@ -190,6 +191,45 @@ describe('isDmccAuthority', () => {
     expect(isDmccAuthority(null)).toBe(false);
     expect(isDmccAuthority(undefined)).toBe(false);
     expect(isDmccAuthority('')).toBe(false);
+  });
+});
+
+describe('isDetAuthority', () => {
+  it('matches plain "DET"', () => {
+    expect(isDetAuthority('DET')).toBe(true);
+  });
+
+  it('matches the short form passed by the portal (getShortAuthorityName)', () => {
+    // Portal sends e.g. "DET" from "DXB DET (Dubai Economy & Tourism)".
+    expect(isDetAuthority('DET')).toBe(true);
+  });
+
+  it('matches full authority name with parens', () => {
+    expect(isDetAuthority('DET (Dubai Economy & Tourism)')).toBe(true);
+    expect(isDetAuthority('Department of Economy and Tourism (DET)')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isDetAuthority('det')).toBe(true);
+    expect(isDetAuthority('Det')).toBe(true);
+  });
+
+  it('does not match substrings inside unrelated words', () => {
+    // Regression: substring match would falsely flag "DETAILED" / "Cadet" / "DETROIT".
+    expect(isDetAuthority('DETAILED AUTHORITY')).toBe(false);
+    expect(isDetAuthority('Cadet Free Zone')).toBe(false);
+  });
+
+  it('returns false for other authorities', () => {
+    expect(isDetAuthority('DMCC')).toBe(false);
+    expect(isDetAuthority('IFZA')).toBe(false);
+    expect(isDetAuthority('DIFC')).toBe(false);
+  });
+
+  it('returns false for null / undefined / empty', () => {
+    expect(isDetAuthority(null)).toBe(false);
+    expect(isDetAuthority(undefined)).toBe(false);
+    expect(isDetAuthority('')).toBe(false);
   });
 });
 

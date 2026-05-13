@@ -124,6 +124,17 @@ export interface EmployeeFormData {
   educational_qualification_custom?: string;
   languages_spoken: string[];
 
+  // DET-only extended education details (collected when registered_authority
+  // is DET and the qualification is degree-level). Degree type is captured
+  // via the unified Educational Qualification dropdown, not a separate field.
+  det_university_name?: string;
+  det_faculty?: string;
+  det_study_majors?: string;
+  det_degree_start_date?: string; // ISO YYYY-MM-DD
+  det_degree_end_date?: string;   // ISO YYYY-MM-DD
+  det_graduation_year?: number;
+  det_actual_years_of_degree?: number;
+
   // Bank
   has_uae_bank: boolean;
   bank_name?: string;

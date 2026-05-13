@@ -5,16 +5,17 @@
  * the headers to attach to a fetch() call to a tme-portal webhook endpoint.
  *
  * Wire format (see verifier doc-comment for full details):
- *   x-timestamp   seconds-since-epoch
- *   x-nonce       random UUID
- *   x-signature   "sha256=<hex>" of HMAC-SHA256(secret, `${ts}.${nonce}.${rawBody}`)
+ *   x-timestamp        seconds-since-epoch
+ *   x-webhook-nonce    random UUID (name avoids collision with the portal's
+ *                      CSP `x-nonce` header that gets injected by middleware)
+ *   x-signature        "sha256=<hex>" of HMAC-SHA256(secret, `${ts}.${nonce}.${rawBody}`)
  */
 
 import crypto from 'crypto';
 
 export function signWebhookBody(secret: string, rawBody: string): {
   'x-timestamp': string;
-  'x-nonce': string;
+  'x-webhook-nonce': string;
   'x-signature': string;
 } {
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -25,7 +26,7 @@ export function signWebhookBody(secret: string, rawBody: string): {
     .digest('hex');
   return {
     'x-timestamp': timestamp,
-    'x-nonce': nonce,
+    'x-webhook-nonce': nonce,
     'x-signature': `sha256=${sig}`,
   };
 }

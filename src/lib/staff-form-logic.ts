@@ -38,6 +38,20 @@ export function isDmccAuthority(registeredAuthority: string | null | undefined):
 }
 
 /**
+ * Detect whether the registered authority is DET (Department of Economy &
+ * Tourism, Dubai mainland). Used to gate the extended education-details
+ * block on the employee form (university name, faculty, study majors,
+ * degree type/dates/years) required for DET work-permit applications.
+ */
+export function isDetAuthority(registeredAuthority: string | null | undefined): boolean {
+  if (!registeredAuthority) return false;
+  const upper = registeredAuthority.toUpperCase();
+  // Word-boundary-ish match: standalone "DET" or "DET " or "(DET)" etc.
+  // Avoid matching substrings inside unrelated words.
+  return /\bDET\b/.test(upper);
+}
+
+/**
  * Upload rules for each visa category. `visa_on_arrival` asks for an arrival
  * date instead of a document, `other` makes the upload optional, and the rest
  * require a supporting document.

@@ -11,6 +11,8 @@ import {
   RELIGIONS,
   MARITAL_STATUS_OPTIONS,
   EDUCATIONAL_QUALIFICATIONS,
+  DET_DEGREE_YEAR_MIN,
+  DET_DEGREE_ACTUAL_YEARS_MAX,
   LANGUAGES,
   UAE_EMIRATES,
 } from '@/lib/constants';
@@ -25,6 +27,7 @@ import type { EmployeeFormData, EmployeeFormProps, PassportPageReference, VisaCa
 import {
   mergeStaffDocRefs,
   isPakistaniNationality as checkPakistaniNationality,
+  isDetAuthority,
   visaDocumentRequirement,
   requiresArrivalDate,
   shouldOfferManualReview,
@@ -380,9 +383,18 @@ export function EmployeeForm({
   // previous-visa slot and the EID front/back slots. Stored back into
   // `has_previous_eid` in the form for backwards-compat with existing
   // downstream consumers.
+  //
+  // Default priority (first hit wins):
+  //   1. Previously-saved employee answer
+  //   2. Any existing EID/previous-visa upload on the submission → Yes
+  //   3. Employer answered "applicant currently in UAE" → Yes (auto-default;
+  //      the employee can still flip to No, in which case we surface a warning)
+  //   4. Otherwise null (must answer)
+  const employerSaysInUae = submission.employer_data?.applicant_in_uae === true;
   const savedHasPreviousUaeDocs =
     submission.employee_data?.has_previous_eid ??
-    (!!submission.documents?.eid_front || !!submission.documents?.previous_visa_document ? true : undefined);
+    (!!submission.documents?.eid_front || !!submission.documents?.previous_visa_document ? true : undefined) ??
+    (employerSaysInUae ? true : undefined);
   const [hasPreviousUaeDocs, setHasPreviousUaeDocs] = useState<boolean | null>(
     typeof savedHasPreviousUaeDocs === 'boolean' ? savedHasPreviousUaeDocs : null
   );
@@ -400,6 +412,22 @@ export function EmployeeForm({
   const eidBackDocRef = React.useRef(eidBackDoc);
   React.useEffect(() => { eidFrontDocRef.current = eidFrontDoc; }, [eidFrontDoc]);
   React.useEffect(() => { eidBackDocRef.current = eidBackDoc; }, [eidBackDoc]);
+
+  // If we defaulted hasPreviousUaeDocs above (e.g. from the employer's
+  // in-UAE flag) and the user hasn't explicitly answered yet, push that
+  // initial value into the form state so the submitted answer matches
+  // the displayed radio. Subsequent clicks call setValue directly.
+  // Also: on renewal force uae_presence to 'inside' (employee MUST be in
+  // UAE for a renewal — the toggle is hidden in the JSX below).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => {
+    if (hasPreviousUaeDocs !== null && submission.employee_data?.has_previous_eid === undefined) {
+      setValue('has_previous_eid', hasPreviousUaeDocs);
+    }
+    if (submission.onboarding_type === 'renewal') {
+      setValue('uae_presence', 'inside');
+    }
+  }, []);
 
   // Previous UAE visa / residence permit state (optional, sits alongside EID
   // inside the same Yes/No section).
@@ -551,6 +579,13 @@ export function EmployeeForm({
     register('eid_expiry_date');
     register('visa_category');
     register('visa_arrival_date');
+    register('det_university_name');
+    register('det_faculty');
+    register('det_study_majors');
+    register('det_degree_start_date');
+    register('det_degree_end_date');
+    register('det_graduation_year');
+    register('det_actual_years_of_degree');
   }, [register]);
 
   const title = watch('title');
@@ -588,6 +623,34 @@ export function EmployeeForm({
   const passportExpiry = watch('passport_expiry');
   const placeOfIssue = watch('place_of_issue');
   const gender = watch('gender');
+
+  // DET (Department of Economy & Tourism, Dubai mainland) requires extra
+  // education fields. Authority comes from the portal via prefill_employer_data
+  // (already set by /api/clients-v2/staff/onboarding). Mirrors the DMCC pattern
+  // used in EmployerForm.tsx for the Job Offer Letter slot.
+  const registeredAuthority = (submission.prefill_employer_data as Record<string, unknown> | null)?.registered_authority as string | undefined;
+  const isDET = isDetAuthority(registeredAuthority);
+
+  // DET extended education fields (only relevant when isDET is true).
+  // Degree type is captured via the unified Educational Qualification
+  // dropdown — no separate field here.
+  const detUniversityName = watch('det_university_name');
+  const detFaculty = watch('det_faculty');
+  const detStudyMajors = watch('det_study_majors');
+  const detDegreeStartDate = watch('det_degree_start_date');
+  const detDegreeEndDate = watch('det_degree_end_date');
+  const detGraduationYear = watch('det_graduation_year');
+  const detActualYearsOfDegree = watch('det_actual_years_of_degree');
+
+  // DET extended fields are only collected when the user has a degree-level
+  // qualification (anything past high-school/vocational). Primary, Secondary,
+  // and Vocational don't have university/faculty/etc. — the DET form skips
+  // them too. Keep this list aligned with EDUCATIONAL_QUALIFICATIONS.
+  const isDegreeLevelQualification = !!(
+    educationalQualification &&
+    !['Primary School', 'Secondary School / High School', 'Vocational Certificate'].includes(educationalQualification)
+  );
+  const showDetExtendedBlock = isDET && isDegreeLevelQualification;
 
   // Derive country code from nationality for phone inputs
   const nationalityCountryCode = nationality ? nationalityToCountryCode(nationality) : undefined;
@@ -641,9 +704,14 @@ export function EmployeeForm({
   const [hasPreviousNationality, setHasPreviousNationality] = useState(
     !!submission.employee_data?.previous_nationality
   );
+  // On renewal, the employee MUST be inside the UAE — the toggle is hidden
+  // below and UAE address fields are always shown. Init to true regardless
+  // of any prior saved value so the form state matches the locked UI.
   const [isInUAE, setIsInUAE] = useState(
-    submission.employee_data?.uae_presence === 'inside' ||
-    !!(submission.employee_data?.uae_street_address || submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
+    isRenewal ? true : (
+      submission.employee_data?.uae_presence === 'inside' ||
+      !!(submission.employee_data?.uae_street_address || submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
+    )
   );
 
   // Track whether passport data has been extracted/pre-filled
@@ -663,12 +731,31 @@ export function EmployeeForm({
   const requiresAdditionalPage = isIndianNationality && isInsidePagesUploaded && passportDataReady;
   const isPersonalComplete = !!(firstName && lastName && nationality);
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
-  const isContactComplete = !!(homeStreetAddress && homeCity && homeCountry && personalEmail);
+  // UAE mobile is mandatory when the applicant is in the UAE (always true for
+  // renewals; user-toggled for new-hires). When outside the UAE we don't ask
+  // for it, since they may not yet have a UAE number.
+  const isContactComplete = !!(
+    homeStreetAddress && homeCity && homeCountry && personalEmail &&
+    (!isInUAE || mobileUae)
+  );
   const educationalQualificationCustom = watch('educational_qualification_custom');
+  // DET extended fields are only required when the DET block is actually
+  // shown (DET client + degree-level qualification). For non-degree levels
+  // the block is hidden, so those fields stay optional.
+  const isDetEducationComplete = !showDetExtendedBlock || !!(
+    detUniversityName &&
+    detFaculty &&
+    detStudyMajors &&
+    detDegreeStartDate &&
+    detDegreeEndDate &&
+    detGraduationYear &&
+    detActualYearsOfDegree
+  );
   const isEducationComplete = !!(
     educationalQualification &&
     (educationalQualification !== 'Other' || educationalQualificationCustom) &&
-    languagesSpoken.length > 0
+    languagesSpoken.length > 0 &&
+    isDetEducationComplete
   );
 
   // Step 4 (Identity & Visa Documents) completion check
@@ -2490,6 +2577,15 @@ export function EmployeeForm({
                 ))}
               </div>
 
+              {employerSaysInUae && hasPreviousUaeDocs === false && (
+                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ backgroundColor: '#FEF3C7', border: '1px solid #F59E0B' }}>
+                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#92400E' }} />
+                  <p className="text-xs" style={{ color: '#92400E' }}>
+                    Your employer indicated that you are currently in the UAE.
+                  </p>
+                </div>
+              )}
+
               {hasPreviousUaeDocs === true && (
                 <div className="space-y-5 pl-6 border-l-2 border-gray-200">
                   {/* Combined guidance — applies to both the visa and the EID uploads below */}
@@ -2787,26 +2883,38 @@ export function EmployeeForm({
             icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
           >
             <div className="space-y-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isInUAE}
-                  onChange={(e) => {
-                    setIsInUAE(e.target.checked);
-                    setValue('uae_presence', e.target.checked ? 'inside' : 'outside');
-                    if (!e.target.checked) {
-                      setValue('uae_street_address', '');
-                      setValue('uae_city', '');
-                      setValue('uae_postal_code', '');
-                      setValue('uae_emirate', '');
-                    }
-                  }}
-                  className="w-4 h-4 rounded border-gray-300"
-                />
-                <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-                  Applicant is currently in the UAE
-                </span>
-              </label>
+              {/* On renewal the employee MUST be in the UAE — no toggle.
+                  On new-hire onboarding the checkbox stays so applicants
+                  abroad can skip the UAE address fields. */}
+              {!isRenewal ? (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isInUAE}
+                    onChange={(e) => {
+                      setIsInUAE(e.target.checked);
+                      setValue('uae_presence', e.target.checked ? 'inside' : 'outside');
+                      if (!e.target.checked) {
+                        setValue('uae_street_address', '');
+                        setValue('uae_city', '');
+                        setValue('uae_postal_code', '');
+                        setValue('uae_emirate', '');
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                    Applicant is currently in the UAE
+                  </span>
+                </label>
+              ) : (
+                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
+                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <p className="text-xs" style={{ color: TME_COLORS.primary }}>
+                    Visa renewal requires you to be currently inside the UAE. Please provide your UAE address below.
+                  </p>
+                </div>
+              )}
 
               {isInUAE && (
                 <div className="space-y-4 pl-6 border-l-2 border-gray-200">
@@ -2842,10 +2950,11 @@ export function EmployeeForm({
                     />
                   </div>
                   <PhoneInput
-                    label="Telephone"
+                    label="UAE Mobile"
                     value={mobileUae}
                     onChange={(value) => setValue('mobile_uae', value || '')}
                     country="AE"
+                    required
                   />
                 </div>
               )}
@@ -2931,6 +3040,81 @@ export function EmployeeForm({
                     required: educationalQualification === 'Other' ? 'Please specify your qualification' : false,
                   })}
                 />
+              )}
+
+              {showDetExtendedBlock && (
+                <>
+                  <p className="text-xs -mt-2" style={{ color: TME_COLORS.primary }}>
+                    Additional details required for DET work permits.
+                  </p>
+
+                  <Input
+                    label="University Name"
+                    required
+                    error={errors.det_university_name?.message}
+                    {...register('det_university_name', { required: isDET ? 'University name is required' : false })}
+                  />
+
+                  <Input
+                    label="Faculty"
+                    required
+                    error={errors.det_faculty?.message}
+                    {...register('det_faculty', { required: isDET ? 'Faculty is required' : false })}
+                  />
+
+                  <Input
+                    label="Study Majors"
+                    required
+                    error={errors.det_study_majors?.message}
+                    {...register('det_study_majors', { required: isDET ? 'Study majors are required' : false })}
+                  />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CustomDatePicker
+                      label="Degree Start Date"
+                      value={detDegreeStartDate || ''}
+                      onChange={(val) => setValue('det_degree_start_date', val)}
+                      error={errors.det_degree_start_date?.message}
+                      required
+                    />
+                    <CustomDatePicker
+                      label="Degree End Date"
+                      value={detDegreeEndDate || ''}
+                      onChange={(val) => setValue('det_degree_end_date', val)}
+                      error={errors.det_degree_end_date?.message}
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <CustomDropdown
+                      label="Graduation Year"
+                      options={(() => {
+                        const max = new Date().getFullYear() + 1;
+                        const years: { value: string; label: string }[] = [];
+                        for (let y = max; y >= DET_DEGREE_YEAR_MIN; y--) {
+                          years.push({ value: String(y), label: String(y) });
+                        }
+                        return years;
+                      })()}
+                      value={detGraduationYear ? String(detGraduationYear) : ''}
+                      onChange={(val) => setValue('det_graduation_year', val ? Number(val) : undefined)}
+                      error={errors.det_graduation_year?.message}
+                      required
+                    />
+                    <CustomDropdown
+                      label="Actual Years of Degree"
+                      options={Array.from({ length: DET_DEGREE_ACTUAL_YEARS_MAX }, (_, i) => {
+                        const n = i + 1;
+                        return { value: String(n), label: `${n} ${n === 1 ? 'year' : 'years'}` };
+                      })}
+                      value={detActualYearsOfDegree ? String(detActualYearsOfDegree) : ''}
+                      onChange={(val) => setValue('det_actual_years_of_degree', val ? Number(val) : undefined)}
+                      error={errors.det_actual_years_of_degree?.message}
+                      required
+                    />
+                  </div>
+                </>
               )}
 
               <MultiSelectDropdown

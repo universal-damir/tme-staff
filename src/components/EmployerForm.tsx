@@ -185,7 +185,11 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       return;
     }
     setSignatureError(null);
-    await onSubmit({ ...data, applicant_in_uae: applicantInUAE ?? undefined }, signature);
+    // On renewal the checkbox is hidden entirely — the employee MUST be inside
+    // the UAE for a visa renewal, so we force the flag to true regardless of
+    // any previously-saved value from a prior new-hire onboarding.
+    const applicantInUaeForSubmit = isRenewal ? true : (applicantInUAE ?? undefined);
+    await onSubmit({ ...data, applicant_in_uae: applicantInUaeForSubmit }, signature);
   };
 
   const handleSalaryChange = (values: {

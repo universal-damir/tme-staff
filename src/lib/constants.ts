@@ -135,11 +135,17 @@ export type Religion = (typeof RELIGIONS)[number];
 // EDUCATIONAL QUALIFICATIONS
 // ===================================================================
 
+// Includes the formal-degree levels required by the DET work-permit form
+// ("Associate Diploma" and "Post Graduate Diploma") so that this single
+// dropdown also covers DET's "Degree Type" field — no duplicate dropdown
+// needed on the employee form.
 export const EDUCATIONAL_QUALIFICATIONS = [
   'Primary School',
   'Secondary School / High School',
   'Vocational Certificate',
+  'Associate Diploma',
   'Diploma',
+  'Post Graduate Diploma',
   "Bachelor's Degree",
   "Master's Degree",
   'Doctorate (PhD)',
@@ -148,6 +154,16 @@ export const EDUCATIONAL_QUALIFICATIONS = [
 ] as const;
 
 export type EducationalQualification = (typeof EDUCATIONAL_QUALIFICATIONS)[number];
+
+// ===================================================================
+// DET — EXTENDED DEGREE DETAILS
+// ===================================================================
+// Year ranges for the DET-specific extra fields shown alongside
+// Educational Qualification when the registered authority is DET and
+// the qualification is degree-level.
+
+export const DET_DEGREE_YEAR_MIN = 1960;
+export const DET_DEGREE_ACTUAL_YEARS_MAX = 25;
 
 // ===================================================================
 // LANGUAGES
