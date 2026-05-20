@@ -40,6 +40,12 @@ export interface EmployerFormData {
   payroll_salary_food?: number;
   payroll_salary_other?: number;
   payroll_salary_prepay_card?: number;
+  payroll_salary_other_breakdown?: Array<{
+    type: 'education' | 'phone' | 'commute' | 'bonus' | 'salik'
+        | 'petrol' | 'pension' | 'health_insurance' | 'car' | 'flight' | 'other';
+    amount: number;
+  }>;
+  payroll_salary_variable_advance?: number;
   annual_leave_days: number;
   annual_leave_type: 'calendar' | 'working';
   notice_period_value: number;

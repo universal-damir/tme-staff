@@ -47,6 +47,20 @@ function FormSection({ title, icon, children }: FormSectionProps) {
  * Read-only view of a salary breakdown — used on renewal to show the current
  * payroll as reference data next to the editable contract salary.
  */
+const PAYROLL_OTHER_TYPE_LABELS: Record<NonNullable<EmployerFormData['payroll_salary_other_breakdown']>[number]['type'], string> = {
+  education: 'Education / Schooling',
+  phone: 'Phone / Telephone',
+  commute: 'Commute',
+  bonus: 'Bonus',
+  salik: 'Salik',
+  petrol: 'Petrol / Fuel',
+  pension: 'Pension',
+  health_insurance: 'Health Insurance',
+  car: 'Car',
+  flight: 'Flight / Air Ticket',
+  other: 'Other',
+};
+
 interface ReadOnlySalarySummaryProps {
   currency: string;
   total: number | undefined;
@@ -56,6 +70,8 @@ interface ReadOnlySalarySummaryProps {
   food?: number | undefined;
   other?: number | undefined;
   prepayCard?: number | undefined;
+  otherBreakdown?: EmployerFormData['payroll_salary_other_breakdown'];
+  variableAdvance?: number;
 }
 
 function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
@@ -70,6 +86,8 @@ function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
     { label: 'Other', value: props.other },
     { label: 'Prepaid Card', value: props.prepayCard },
   ];
+  const hasBreakdown = !!props.otherBreakdown && props.otherBreakdown.length > 0;
+  const hasVariableAdvance = props.variableAdvance !== undefined && props.variableAdvance !== 0;
   return (
     <div className="border-2 border-gray-200 rounded-lg overflow-hidden">
       <div className="px-3 py-2 bg-gray-50 border-b-2 border-gray-200 text-xs font-medium text-gray-600">
@@ -82,6 +100,30 @@ function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
             <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(r.value)}</span>
           </div>
         ))}
+        {hasBreakdown && (
+          <div className="bg-gray-50 px-3 py-2">
+            <div className="text-xs font-medium text-gray-600 mb-1">Other breakdown</div>
+            <div className="divide-y divide-gray-100">
+              {props.otherBreakdown!.map((entry, idx) => (
+                <div key={`${entry.type}-${idx}`} className="flex items-center justify-between pl-3 py-1.5 text-sm">
+                  <span className="text-gray-500">{PAYROLL_OTHER_TYPE_LABELS[entry.type]}</span>
+                  <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(entry.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {hasVariableAdvance && (
+          <div className="px-3 py-2 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-600">Variable salary advance</span>
+              <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(props.variableAdvance)}</span>
+            </div>
+            <div className="text-xs italic text-gray-500 mt-0.5">
+              Recoverable advance, not part of monthly allowances.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -163,6 +205,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const payrollFood = watch('payroll_salary_food');
   const payrollOther = watch('payroll_salary_other');
   const payrollPrepayCard = watch('payroll_salary_prepay_card');
+  const payrollOtherBreakdown = watch('payroll_salary_other_breakdown');
+  const payrollVariableAdvance = watch('payroll_salary_variable_advance');
   const startingDate = watch('starting_date');
   const annualLeaveType = watch('annual_leave_type');
   const weeklyOff = watch('weekly_off');
@@ -478,6 +522,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               food={payrollFood}
               other={payrollOther}
               prepayCard={payrollPrepayCard}
+              otherBreakdown={payrollOtherBreakdown}
+              variableAdvance={payrollVariableAdvance}
             />
           </div>
         </FormSection>
