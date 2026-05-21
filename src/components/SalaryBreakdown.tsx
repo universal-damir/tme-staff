@@ -172,9 +172,14 @@ export function SalaryBreakdown({
   // single source of truth — matches tme-portal payroll behaviour.
   const otherIsLocked = hasBreakdownRows;
 
-  // Calculate sum and discrepancy
+  // Calculate sum and discrepancy. Variable advance is normally separate from
+  // monthly allowances, but some HRW workbooks roll it into the "Gross" column
+  // that becomes `total`. So accept both interpretations: sum, or sum + advance.
   const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0);
-  const hasDiscrepancy = total !== undefined && total > 0 && Math.abs(sum - total) > 0.01;
+  const sumWithAdvance = sum + (variableAdvance || 0);
+  const hasDiscrepancy = total !== undefined && total > 0
+    && Math.abs(sum - total) > 0.01
+    && Math.abs(sumWithAdvance - total) > 0.01;
 
   // Auto-expand if there's a discrepancy
   useEffect(() => {
