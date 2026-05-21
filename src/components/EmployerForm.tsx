@@ -58,6 +58,7 @@ const PAYROLL_OTHER_TYPE_LABELS: Record<NonNullable<EmployerFormData['payroll_sa
   health_insurance: 'Health Insurance',
   car: 'Car',
   flight: 'Flight / Air Ticket',
+  prepay_card: 'Prepaid Card',
   other: 'Other',
 };
 
@@ -69,8 +70,9 @@ interface ReadOnlySalarySummaryProps {
   transport: number | undefined;
   food?: number | undefined;
   other?: number | undefined;
-  prepayCard?: number | undefined;
-  otherBreakdown?: EmployerFormData['payroll_salary_other_breakdown'];
+  // Shape-agnostic so the same read-only summary can render either the contract
+  // or payroll breakdown (both share the same { type, amount } row shape).
+  otherBreakdown?: ReadonlyArray<{ type: string; amount: number }>;
   variableAdvance?: number;
 }
 
@@ -84,7 +86,6 @@ function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
     { label: 'Transport', value: props.transport },
     { label: 'Food', value: props.food },
     { label: 'Other', value: props.other },
-    { label: 'Prepaid Card', value: props.prepayCard },
   ];
   const hasBreakdown = !!props.otherBreakdown && props.otherBreakdown.length > 0;
   const hasVariableAdvance = props.variableAdvance !== undefined && props.variableAdvance !== 0;
@@ -106,7 +107,9 @@ function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
             <div className="divide-y divide-gray-100">
               {props.otherBreakdown!.map((entry, idx) => (
                 <div key={`${entry.type}-${idx}`} className="flex items-center justify-between pl-3 py-1.5 text-sm">
-                  <span className="text-gray-500">{PAYROLL_OTHER_TYPE_LABELS[entry.type]}</span>
+                  <span className="text-gray-500">
+                    {PAYROLL_OTHER_TYPE_LABELS[entry.type as keyof typeof PAYROLL_OTHER_TYPE_LABELS] ?? entry.type}
+                  </span>
                   <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(entry.amount)}</span>
                 </div>
               ))}
@@ -196,7 +199,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const salaryTransport = watch('salary_transport');
   const salaryFood = watch('salary_food');
   const salaryOther = watch('salary_other');
-  const salaryPrepayCard = watch('salary_prepay_card');
+  const salaryOtherBreakdown = watch('salary_other_breakdown');
+  const salaryVariableAdvance = watch('salary_variable_advance');
   const payrollCurrency = watch('payroll_salary_currency');
   const payrollTotal = watch('payroll_salary_total');
   const payrollBasic = watch('payroll_salary_basic');
@@ -204,7 +208,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const payrollTransport = watch('payroll_salary_transport');
   const payrollFood = watch('payroll_salary_food');
   const payrollOther = watch('payroll_salary_other');
-  const payrollPrepayCard = watch('payroll_salary_prepay_card');
   const payrollOtherBreakdown = watch('payroll_salary_other_breakdown');
   const payrollVariableAdvance = watch('payroll_salary_variable_advance');
   const startingDate = watch('starting_date');
@@ -244,7 +247,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     salary_transport: number | undefined;
     salary_food?: number | undefined;
     salary_other?: number | undefined;
-    salary_prepay_card?: number | undefined;
+    salary_other_breakdown?: EmployerFormData['salary_other_breakdown'];
+    salary_variable_advance?: number | undefined;
     accommodation_provided?: 'yes' | 'no' | 'allowance';
     transport_provided?: 'yes' | 'no' | 'allowance';
     food_provided?: 'yes' | 'no' | 'allowance';
@@ -256,7 +260,12 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('salary_transport', values.salary_transport as number);
     setValue('salary_food', values.salary_food);
     setValue('salary_other', values.salary_other);
-    setValue('salary_prepay_card', values.salary_prepay_card);
+    if (values.salary_other_breakdown !== undefined) {
+      setValue('salary_other_breakdown', values.salary_other_breakdown);
+    }
+    if (values.salary_variable_advance !== undefined) {
+      setValue('salary_variable_advance', values.salary_variable_advance);
+    }
     if (values.accommodation_provided !== undefined) setValue('accommodation_provided', values.accommodation_provided);
     if (values.transport_provided !== undefined) setValue('transport_provided', values.transport_provided);
     if (values.food_provided !== undefined) setValue('food_provided', values.food_provided);
@@ -275,7 +284,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('salary_transport', payrollTransport as number);
     setValue('salary_food', payrollFood);
     setValue('salary_other', payrollOther);
-    setValue('salary_prepay_card', payrollPrepayCard);
     showMatchFeedback('contract');
   };
 
@@ -452,6 +460,10 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         </div>
       </FormSection>
 
+      {/* Salary Contract + Payroll — on renewal, render side-by-side on lg+ so the
+          employer can compare contract vs current payroll without scrolling.
+          On new-hire (no payroll yet) the contract section stays full-width. */}
+      <div className={isRenewal && payrollTotal !== undefined ? "grid grid-cols-1 lg:grid-cols-2 gap-4 items-start" : ""}>
       {/* Salary Contract — editable */}
       <FormSection
         title="Salary Contract"
@@ -483,7 +495,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
           transport={salaryTransport}
           food={salaryFood}
           other={salaryOther}
-          prepayCard={salaryPrepayCard}
+          otherBreakdown={salaryOtherBreakdown}
+          variableAdvance={salaryVariableAdvance}
           accommodationProvided={accommodationProvided || 'no'}
           transportProvided={transportProvided || 'no'}
           foodProvided={foodProvided || 'no'}
@@ -521,13 +534,13 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               transport={payrollTransport}
               food={payrollFood}
               other={payrollOther}
-              prepayCard={payrollPrepayCard}
               otherBreakdown={payrollOtherBreakdown}
               variableAdvance={payrollVariableAdvance}
             />
           </div>
         </FormSection>
       )}
+      </div>
 
       {/* Leave & Terms */}
       <FormSection

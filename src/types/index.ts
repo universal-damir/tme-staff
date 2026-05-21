@@ -24,7 +24,17 @@ export interface EmployerFormData {
   salary_transport: number;
   salary_food?: number;
   salary_other?: number;
-  salary_prepay_card?: number;
+  // Typed allowance breakdown for the contract salary's "Other" bucket. When
+  // entries exist, salary_other is locked to the sum of these amounts —
+  // mirrors the payroll-side payroll_salary_other_breakdown.
+  salary_other_breakdown?: Array<{
+    type: 'education' | 'phone' | 'commute' | 'bonus' | 'salik'
+        | 'petrol' | 'pension' | 'health_insurance' | 'car' | 'flight' | 'prepay_card' | 'other';
+    amount: number;
+  }>;
+  // Recoverable advance separate from monthly allowances — does NOT contribute
+  // to salary_total.
+  salary_variable_advance?: number;
 
   // Provided-benefit flags — 'yes' = company provides directly (FIRST PARTY),
   // 'allowance' = paid as cash (amount lives in the matching salary_* field),
@@ -39,10 +49,9 @@ export interface EmployerFormData {
   payroll_salary_transport?: number;
   payroll_salary_food?: number;
   payroll_salary_other?: number;
-  payroll_salary_prepay_card?: number;
   payroll_salary_other_breakdown?: Array<{
     type: 'education' | 'phone' | 'commute' | 'bonus' | 'salik'
-        | 'petrol' | 'pension' | 'health_insurance' | 'car' | 'flight' | 'other';
+        | 'petrol' | 'pension' | 'health_insurance' | 'car' | 'flight' | 'prepay_card' | 'other';
     amount: number;
   }>;
   payroll_salary_variable_advance?: number;

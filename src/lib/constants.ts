@@ -490,6 +490,35 @@ export const SALARY_BREAKDOWN_EXPLANATION =
   'You can adjust these values, but the total must equal the monthly salary.';
 
 // ===================================================================
+// "OTHER" ALLOWANCE BREAKDOWN TYPES
+// Mirrors tme-portal PAYROLL_OTHER_TYPE_OPTIONS — same 11 categories so
+// contract and payroll breakdowns are interchangeable. The 'other' fallback
+// covers anything that doesn't fit a named category.
+// ===================================================================
+
+export const PAYROLL_OTHER_TYPE_OPTIONS = [
+  { value: 'education', label: 'Education / Schooling' },
+  { value: 'phone', label: 'Phone / Telephone' },
+  { value: 'commute', label: 'Commute' },
+  { value: 'bonus', label: 'Bonus' },
+  { value: 'salik', label: 'Salik' },
+  { value: 'petrol', label: 'Petrol / Fuel' },
+  { value: 'pension', label: 'Pension' },
+  { value: 'health_insurance', label: 'Health Insurance' },
+  { value: 'car', label: 'Car' },
+  { value: 'flight', label: 'Flight / Air Ticket' },
+  { value: 'prepay_card', label: 'Prepaid Card' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export type PayrollOtherType = (typeof PAYROLL_OTHER_TYPE_OPTIONS)[number]['value'];
+
+export interface PayrollOtherBreakdownEntry {
+  type: PayrollOtherType;
+  amount: number;
+}
+
+// ===================================================================
 // BANK OPTIONS (Common banks in UAE)
 // @deprecated — Use uae-bank-directory.ts for IBAN-based auto-derivation.
 // Kept for backwards compat with any code that still references it.

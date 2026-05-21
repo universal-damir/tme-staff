@@ -1,9 +1,16 @@
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { TME_COLORS, SALARY_BREAKDOWN_EXPLANATION, DEFAULT_SALARY_BREAKDOWN } from '@/lib/constants';
+import {
+  TME_COLORS,
+  SALARY_BREAKDOWN_EXPLANATION,
+  DEFAULT_SALARY_BREAKDOWN,
+  PAYROLL_OTHER_TYPE_OPTIONS,
+  type PayrollOtherType,
+  type PayrollOtherBreakdownEntry,
+} from '@/lib/constants';
 import { CustomDropdown } from '@/components/ui';
-import { ChevronDown, ChevronUp, Info, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronUp, Info, AlertTriangle, Plus, X } from 'lucide-react';
 
 type ProvidedFlag = 'yes' | 'no' | 'allowance';
 
@@ -44,7 +51,11 @@ interface SalaryBreakdownProps {
   transport: number | undefined;
   food?: number | undefined;
   other?: number | undefined;
-  prepayCard?: number | undefined;
+  /** Typed allowance breakdown — when at least one entry exists, the plain
+   *  "Other" input becomes read-only and reflects the sum. */
+  otherBreakdown?: PayrollOtherBreakdownEntry[];
+  /** Recoverable advance shown below the breakdown. NOT part of salary_total. */
+  variableAdvance?: number;
   accommodationProvided: ProvidedFlag;
   transportProvided: ProvidedFlag;
   foodProvided: ProvidedFlag;
@@ -56,7 +67,8 @@ interface SalaryBreakdownProps {
     salary_transport: number | undefined;
     salary_food?: number | undefined;
     salary_other?: number | undefined;
-    salary_prepay_card?: number | undefined;
+    salary_other_breakdown?: PayrollOtherBreakdownEntry[];
+    salary_variable_advance?: number | undefined;
     accommodation_provided?: ProvidedFlag;
     transport_provided?: ProvidedFlag;
     food_provided?: ProvidedFlag;
@@ -143,7 +155,8 @@ export function SalaryBreakdown({
   transport,
   food,
   other,
-  prepayCard,
+  otherBreakdown,
+  variableAdvance,
   accommodationProvided,
   transportProvided,
   foodProvided,
@@ -153,8 +166,14 @@ export function SalaryBreakdown({
   const [isExpanded, setIsExpanded] = useState(true);
   const [showInfo, setShowInfo] = useState(true);
 
+  const breakdownRows: PayrollOtherBreakdownEntry[] = otherBreakdown ?? [];
+  const hasBreakdownRows = breakdownRows.length > 0;
+  // When entries exist, "Other" is locked to the sum so the editor is the
+  // single source of truth — matches tme-portal payroll behaviour.
+  const otherIsLocked = hasBreakdownRows;
+
   // Calculate sum and discrepancy
-  const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0) + (prepayCard || 0);
+  const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0);
   const hasDiscrepancy = total !== undefined && total > 0 && Math.abs(sum - total) > 0.01;
 
   // Auto-expand if there's a discrepancy
@@ -178,7 +197,6 @@ export function SalaryBreakdown({
           salary_transport: undefined,
           salary_food: undefined,
           salary_other: undefined,
-          salary_prepay_card: undefined,
         });
         return;
       }
@@ -206,7 +224,6 @@ export function SalaryBreakdown({
         salary_transport: newTransport,
         salary_food: newFood,
         salary_other: newOther,
-        salary_prepay_card: 0,
       });
     },
     [currency, onChange, accommodationProvided, transportProvided]
@@ -222,7 +239,6 @@ export function SalaryBreakdown({
       salary_transport: transport,
       salary_food: food,
       salary_other: other,
-      salary_prepay_card: prepayCard,
     });
   };
 
@@ -234,8 +250,7 @@ export function SalaryBreakdown({
     | 'salary_accommodation'
     | 'salary_transport'
     | 'salary_food'
-    | 'salary_other'
-    | 'salary_prepay_card';
+    | 'salary_other';
   const handleAmountChange = (field: BreakdownKey, val: number | undefined) => {
     const nextValues: Record<BreakdownKey, number | undefined> = {
       salary_basic: basic,
@@ -243,7 +258,6 @@ export function SalaryBreakdown({
       salary_transport: transport,
       salary_food: food,
       salary_other: other,
-      salary_prepay_card: prepayCard,
     };
     nextValues[field] = val;
     const newTotal =
@@ -251,8 +265,7 @@ export function SalaryBreakdown({
       (nextValues.salary_accommodation || 0) +
       (nextValues.salary_transport || 0) +
       (nextValues.salary_food || 0) +
-      (nextValues.salary_other || 0) +
-      (nextValues.salary_prepay_card || 0);
+      (nextValues.salary_other || 0);
     onChange({
       salary_currency: currency,
       salary_total: Math.round(newTotal * 100) / 100,
@@ -284,9 +297,65 @@ export function SalaryBreakdown({
       salary_transport: transport,
       salary_food: food,
       salary_other: other,
-      salary_prepay_card: prepayCard,
       [field]: val,
       ...zeroPatch,
+    });
+  };
+
+  // Typed "Other" breakdown helpers. After every edit we recompute
+  // salary_other (= sum of entries) and salary_total so the parent never has
+  // to reconcile them. Variable advance is separate and never feeds total.
+  const emitBreakdownUpdate = (nextBreakdown: PayrollOtherBreakdownEntry[]) => {
+    const sumOther = nextBreakdown.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+    const newTotal =
+      (basic || 0) +
+      (accommodation || 0) +
+      (transport || 0) +
+      (food || 0) +
+      sumOther;
+    onChange({
+      salary_currency: currency,
+      salary_total: Math.round(newTotal * 100) / 100,
+      salary_basic: basic,
+      salary_accommodation: accommodation,
+      salary_transport: transport,
+      salary_food: food,
+      salary_other: sumOther,
+      salary_other_breakdown: nextBreakdown,
+    });
+  };
+
+  const handleAddBreakdownRow = () => {
+    emitBreakdownUpdate([...breakdownRows, { type: 'other', amount: 0 }]);
+  };
+
+  const handleRemoveBreakdownRow = (index: number) => {
+    emitBreakdownUpdate(breakdownRows.filter((_, i) => i !== index));
+  };
+
+  const handleBreakdownRowTypeChange = (index: number, value: PayrollOtherType) => {
+    emitBreakdownUpdate(
+      breakdownRows.map((e, i) => (i === index ? { ...e, type: value } : e)),
+    );
+  };
+
+  const handleBreakdownRowAmountChange = (index: number, value: number | undefined) => {
+    emitBreakdownUpdate(
+      breakdownRows.map((e, i) => (i === index ? { ...e, amount: value ?? 0 } : e)),
+    );
+  };
+
+  const handleVariableAdvanceChange = (value: number | undefined) => {
+    onChange({
+      salary_currency: currency,
+      salary_total: total,
+      salary_basic: basic,
+      salary_accommodation: accommodation,
+      salary_transport: transport,
+      salary_food: food,
+      salary_other: other,
+      salary_other_breakdown: otherBreakdown,
+      salary_variable_advance: value,
     });
   };
 
@@ -311,7 +380,6 @@ export function SalaryBreakdown({
               salary_transport: transport,
               salary_food: food,
               salary_other: other,
-              salary_prepay_card: prepayCard,
             })
           }
           options={CURRENCY_OPTIONS}
@@ -367,14 +435,14 @@ export function SalaryBreakdown({
       </button>
 
       {/* Breakdown Fields. 4-column grid throughout: amounts in row 1
-          (Basic/Accommodation/Transport/Food) and row 2 (Other/Prepaid +
-          empty cells), then Provided flags in row 3 (with empty 4th cell)
-          so the layout matches the portal's renewal preview. Amounts whose
+          (Basic/Accommodation/Transport/Food) and row 2 (Other + empty
+          cells), then Provided flags in row 3 (with empty 4th cell) so
+          the layout matches the portal's renewal preview. Amounts whose
           flag is not 'allowance' are disabled and force-zeroed. */}
       {isExpanded && (
         <div className="space-y-4 pt-2 border-t border-gray-200">
           {/* Row 1: Basic | Accommodation | Transport | Food */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
             <SalaryInput
               label={`Basic (${getPercentage(basic)})`}
               value={basic}
@@ -403,20 +471,84 @@ export function SalaryBreakdown({
             />
           </div>
 
-          {/* Row 2: Other | Prepaid Card | (empty) | (empty) */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {/* Row 2: Other | (empty) | (empty) | (empty) */}
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
             <SalaryInput
               label={`Other (${getPercentage(other)})`}
               value={other}
               onChange={(val) => handleAmountChange('salary_other', val)}
-            />
-            <SalaryInput
-              label={`Prepaid Card (${getPercentage(prepayCard)})`}
-              value={prepayCard ?? 0}
-              onChange={(val) => handleAmountChange('salary_prepay_card', val)}
+              disabled={otherIsLocked}
             />
             <div aria-hidden="true" />
             <div aria-hidden="true" />
+            <div aria-hidden="true" />
+          </div>
+
+          {/* Typed "Other" allowance breakdown editor. Whenever the user adds
+              entries, the plain "Other" field above is locked and reflects the
+              sum so the editor remains the single source of truth. */}
+          <div className="pt-3 border-t border-gray-100 space-y-3">
+            <div className="flex items-center justify-between">
+              <span
+                className="text-sm font-medium"
+                style={{ color: TME_COLORS.primary }}
+              >
+                Other Breakdown
+              </span>
+              {otherIsLocked && (
+                <span className="text-xs text-gray-500 italic">
+                  Other field locked — sum of entries below
+                </span>
+              )}
+            </div>
+
+            {breakdownRows.map((entry, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <div className="flex-1">
+                  <CustomDropdown
+                    value={entry.type}
+                    onChange={(v) => handleBreakdownRowTypeChange(index, v as PayrollOtherType)}
+                    options={PAYROLL_OTHER_TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                  />
+                </div>
+                <div className="w-40">
+                  <SalaryInput
+                    value={entry.amount}
+                    onChange={(val) => handleBreakdownRowAmountChange(index, val)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveBreakdownRow(index)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  title="Remove allowance"
+                  aria-label="Remove allowance"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={handleAddBreakdownRow}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              style={{ backgroundColor: `${TME_COLORS.primary}10`, color: TME_COLORS.primary }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add allowance
+            </button>
+
+            <div className="pt-3 border-t border-gray-100">
+              <SalaryInput
+                label="Variable salary advance"
+                value={variableAdvance}
+                onChange={handleVariableAdvanceChange}
+              />
+              <p className="mt-1 text-xs italic text-gray-500">
+                Recoverable advance, not part of monthly allowances.
+              </p>
+            </div>
           </div>
 
           {/* Row 3: Provided flags — Accommodation | Transport | Food | (empty).
@@ -425,7 +557,7 @@ export function SalaryBreakdown({
               columns, instead of either bunching together (whitespace-nowrap)
               or wrapping unevenly (the longer labels wrap, "Food Provided"
               stays on one line). */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
             <div>
               <label
                 className="block text-sm font-medium mb-1 leading-tight"
