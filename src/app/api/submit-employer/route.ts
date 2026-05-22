@@ -13,16 +13,25 @@ import {
   getSignerIp,
   sanitizeFreeText,
 } from '@/lib/submit-validation';
+import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, employerData, signature } = body;
+    const { id: linkToken, employerData, signature } = body;
 
-    if (!id || !employerData || !signature) {
+    if (!linkToken || !employerData || !signature) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // The body's "id" is the URL link_token (rotatable). Resolve it to the
+    // Supabase row's actual id so downstream `.eq('id', ...)` lookups and the
+    // portal webhook payload both use the stable supabase row id.
+    const id = await resolveSubmissionIdByLinkToken(linkToken);
+    if (!id) {
+      return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
     }
 
     const supabase = getSupabaseAdmin();

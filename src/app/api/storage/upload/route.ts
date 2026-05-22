@@ -9,6 +9,7 @@ import {
   isAllowedType,
   isAllowedPassportPage,
 } from '@/lib/file-validation';
+import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
 
 export const runtime = 'nodejs';
 
@@ -38,11 +39,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const supabase = getSupabaseAdmin();
 
-    // Verify the submission exists and is not finalised/cancelled.
+    // The form's submissionId is the URL link_token (rotatable). Resolve to
+    // the Supabase row id so storage paths stay stable across reissues —
+    // otherwise rotated rows would orphan their earlier uploads under the
+    // old folder.
+    const rowId = await resolveSubmissionIdByLinkToken(submissionId);
+    if (!rowId) {
+      return NextResponse.json({ error: 'submission_not_found' }, { status: 404 });
+    }
+
+    // Verify status (use resolved id from here on).
     const { data: row, error: rowErr } = await supabase
       .from('staff_onboarding_submissions')
       .select('id,status')
-      .eq('id', submissionId)
+      .eq('id', rowId)
       .maybeSingle();
 
     if (rowErr) {
@@ -63,10 +73,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const opaqueName = `${randomUUID()}${detected}`;
+    // Use the resolved row id as the folder, not the URL token. Stable
+    // across reissues.
     const path =
       passportPage !== null
-        ? `${submissionId}/${type}/${passportPage}/${opaqueName}`
-        : `${submissionId}/${type}/${opaqueName}`;
+        ? `${rowId}/${type}/${passportPage}/${opaqueName}`
+        : `${rowId}/${type}/${opaqueName}`;
 
     const { error: upErr } = await supabase.storage
       .from(STORAGE_BUCKET)

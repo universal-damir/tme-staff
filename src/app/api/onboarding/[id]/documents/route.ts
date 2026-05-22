@@ -66,13 +66,18 @@ export async function POST(
   }
 
   const supabase = getSupabaseAdmin();
+  // URL `id` is the link_token; use the verifier's resolved row id.
+  const rowId = access.row?.id;
+  if (!rowId) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
   const { error } = await supabase
     .from('staff_onboarding_submissions')
     .update({
       documents: body.documents,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', rowId);
 
   if (error) {
     console.error('[onboarding/documents] update error:', error);

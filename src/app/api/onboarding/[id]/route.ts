@@ -43,15 +43,19 @@ export async function GET(
     return NextResponse.json(body, { status: result.status ?? 404 });
   }
 
-  // Already-complete reads return a minimal payload — the page will render
-  // the "Already Completed" view without form data.
+  // The page + forms use `submission.id` to address subsequent API calls.
+  // After link-rotation hardening, the URL identifier is `link_token` (not
+  // the Supabase row id), so we surface the URL token in the response's
+  // `id` field. The server keeps the actual `row.id` internal — it's only
+  // used for storage paths and the portal webhook payload.
   if (result.row?.status === 'complete') {
     return NextResponse.json({
-      id: result.row.id,
+      id,
       status: 'complete',
       current_step: result.row.current_step,
     });
   }
 
-  return NextResponse.json(scrubOnboardingForBrowser(result.row!));
+  const scrubbed = scrubOnboardingForBrowser(result.row!);
+  return NextResponse.json({ ...scrubbed, id });
 }

@@ -20,8 +20,12 @@ import { getSupabaseAdmin } from './supabase-server';
 export const ONBOARDING_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ONBOARDING_TOKEN_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Onboarding requests expire 14 days after creation in tme-portal. We mirror
-// that here against `created_at` since the Supabase row has no expiry column.
+// The portal is now authoritative on expiry — it rotates link_token + extends
+// the 14-day window via the reissue endpoint, and flips status to 'expired' or
+// 'cancelled' as needed. tme-staff trusts those flags, which lets a reissued
+// link work without us having to mirror the portal's timer here.
+//
+// (Kept exported for any caller still importing the old constant.)
 export const ONBOARDING_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 export type OnboardingAccessFailure =
@@ -89,6 +93,31 @@ interface VerifyOptions {
 }
 
 /**
+ * Resolve a link_token (from the URL) to the underlying Supabase row id.
+ *
+ * Used by write endpoints that bypass verifyOnboardingAccess (submit-employer,
+ * submit-employee, storage routes). They get the URL token as input but need
+ * the row's primary key for downstream `.eq('id', ...)` operations and for
+ * webhook payloads to the portal — the portal addresses the row by its
+ * Supabase id, never by link_token.
+ *
+ * Returns null when the token is malformed or no row matches.
+ */
+export async function resolveSubmissionIdByLinkToken(
+  linkToken: string,
+): Promise<string | null> {
+  if (!ONBOARDING_UUID_REGEX.test(linkToken)) return null;
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('staff_onboarding_submissions')
+    .select('id')
+    .eq('link_token', linkToken)
+    .maybeSingle();
+  if (error || !data) return null;
+  return (data as { id: string }).id;
+}
+
+/**
  * Look up a submission and decide whether the caller may access it.
  *
  * Returns `{ ok: true, row }` when access is granted. Otherwise returns a
@@ -106,10 +135,13 @@ export async function verifyOnboardingAccess(
   }
 
   const supabase = getSupabaseAdmin();
+  // The URL parameter is the rotatable link_token (not the Supabase row's id).
+  // Backfilled rows have link_token = id, so legacy live links keep working;
+  // new and reissued links resolve through here too.
   const { data, error } = await supabase
     .from('staff_onboarding_submissions')
     .select(SAFE_COLUMNS)
-    .eq('id', id)
+    .eq('link_token', id)
     .single();
 
   if (error || !data) {
@@ -121,14 +153,8 @@ export async function verifyOnboardingAccess(
   if (row.status === 'cancelled') {
     return { ok: false, reason: 'cancelled', status: 410, row };
   }
-
-  // 14-day expiry from created_at (tme-portal mirrors this in its
-  // staff_onboarding_requests.token_expires_at column).
-  if (row.created_at) {
-    const ageMs = Date.now() - new Date(row.created_at).getTime();
-    if (Number.isFinite(ageMs) && ageMs > ONBOARDING_TTL_MS) {
-      return { ok: false, reason: 'expired', status: 410, row };
-    }
+  if (row.status === 'expired') {
+    return { ok: false, reason: 'expired', status: 410, row };
   }
 
   if (row.status === 'complete') {

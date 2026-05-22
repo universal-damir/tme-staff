@@ -59,13 +59,19 @@ export async function POST(
   }
 
   const supabase = getSupabaseAdmin();
+  // Use the row's actual Supabase id from the verifier, not the URL token —
+  // the URL is now the link_token and rotates on reissue.
+  const rowId = access.row?.id;
+  if (!rowId) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
   const { error } = await supabase
     .from('staff_onboarding_submissions')
     .update({
       employee_data: body.employeeData,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', rowId);
 
   if (error) {
     console.error('[onboarding/autosave] update error:', error);
