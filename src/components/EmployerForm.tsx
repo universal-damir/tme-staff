@@ -388,7 +388,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
                     }}
                     customEntryHint="You can use any title for your internal company designation."
                   />
-                  <p className="text-xs text-gray-500 mt-1">Employee&apos;s actual position within the company</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {submission.is_same_person ? 'Your' : 'Employee’s'} actual position within the company
+                  </p>
                 </>
               )}
               {!jobTitleSameAsVisa && jobTitleCompany === 'Other' && (
@@ -705,7 +707,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       >
         <div className="space-y-3">
           <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-            Is the applicant currently in the UAE? <span className="text-red-500">*</span>
+            {submission.is_same_person ? 'Are you currently in the UAE?' : 'Is the applicant currently in the UAE?'} <span className="text-red-500">*</span>
           </p>
           <div className="flex items-center gap-6">
             {([
@@ -733,7 +735,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
             <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50">
               <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-600" />
               <p className="text-xs text-blue-800">
-                The employee will confirm their current visa category (and upload any required supporting documents) during their part of the onboarding form.
+                {submission.is_same_person
+                  ? 'You’ll confirm your current visa category (and upload any required supporting documents) later.'
+                  : 'The employee will confirm their current visa category (and upload any required supporting documents) during their part of the onboarding form.'}
               </p>
             </div>
           )}

@@ -2435,7 +2435,9 @@ export function EmployeeForm({
             >
               <div className="space-y-4">
                 <p className="text-sm text-gray-600">
-                  Your employer has indicated that you are currently in the UAE. Please confirm your current visa status.
+                  {submission.is_same_person
+                    ? 'Please confirm your current visa status.'
+                    : 'Your employer has indicated that you are currently in the UAE. Please confirm your current visa status.'}
                 </p>
 
                 <CustomDropdown
@@ -2577,7 +2579,7 @@ export function EmployeeForm({
                 ))}
               </div>
 
-              {employerSaysInUae && hasPreviousUaeDocs === false && (
+              {employerSaysInUae && hasPreviousUaeDocs === false && !submission.is_same_person && (
                 <div className="flex items-start gap-2 p-3 rounded-lg" style={{ backgroundColor: '#FEF3C7', border: '1px solid #F59E0B' }}>
                   <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#92400E' }} />
                   <p className="text-xs" style={{ color: '#92400E' }}>
