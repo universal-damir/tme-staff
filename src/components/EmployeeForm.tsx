@@ -53,6 +53,7 @@ import {
   Info,
   CreditCard,
   FileText,
+  Phone,
 } from 'lucide-react';
 
 // Sort lists alphabetically (with "Other" at the end)
@@ -707,12 +708,24 @@ export function EmployeeForm({
   // On renewal, the employee MUST be inside the UAE — the toggle is hidden
   // below and UAE address fields are always shown. Init to true regardless
   // of any prior saved value so the form state matches the locked UI.
-  const [isInUAE, setIsInUAE] = useState(
-    isRenewal ? true : (
-      submission.employee_data?.uae_presence === 'inside' ||
-      !!(submission.employee_data?.uae_street_address || submission.employee_data?.uae_flat_villa || submission.employee_data?.uae_building_name || submission.employee_data?.uae_street_name)
-    )
-  );
+  // For new-hires: prefer the employee's saved answer; fall back to the
+  // employer's "applicant in the UAE" answer so the box arrives pre-checked
+  // (the employee can still uncheck it).
+  const [isInUAE, setIsInUAE] = useState(() => {
+    if (isRenewal) return true;
+    const saved = submission.employee_data?.uae_presence;
+    if (saved === 'inside') return true;
+    if (saved === 'outside') return false;
+    if (
+      submission.employee_data?.uae_street_address ||
+      submission.employee_data?.uae_flat_villa ||
+      submission.employee_data?.uae_building_name ||
+      submission.employee_data?.uae_street_name
+    ) {
+      return true;
+    }
+    return submission.employer_data?.applicant_in_uae === true;
+  });
 
   // Track whether passport data has been extracted/pre-filled
   const [passportDataReady, setPassportDataReady] = useState(
@@ -2951,16 +2964,25 @@ export function EmployeeForm({
                       required
                     />
                   </div>
-                  <PhoneInput
-                    label="UAE Mobile"
-                    value={mobileUae}
-                    onChange={(value) => setValue('mobile_uae', value || '')}
-                    country="AE"
-                    required
-                  />
                 </div>
               )}
             </div>
+          </FormSection>
+
+          {/* UAE Mobile — placed below the UAE Address section so it stays
+              prominently visible while sitting next to the related address
+              fields. Still only required when the applicant is in the UAE. */}
+          <FormSection
+            title="UAE Mobile"
+            icon={<Phone className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
+            <PhoneInput
+              label="UAE Mobile"
+              value={mobileUae}
+              onChange={(value) => setValue('mobile_uae', value || '')}
+              country="AE"
+              required={isInUAE}
+            />
           </FormSection>
 
           {/* Email */}

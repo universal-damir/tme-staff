@@ -71,7 +71,6 @@ function OnboardingPageInner() {
   );
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [clientIP, setClientIP] = useState<string | null>(null);
 
   // For same-person combined form
   const [employerData, setEmployerData] = useState<EmployerFormData | null>(null);
@@ -126,6 +125,13 @@ function OnboardingPageInner() {
         } else if (data.is_same_person) {
           if (data.current_step === 'employer') {
             setPageState('combined');
+          } else if (data.current_step === 'employee') {
+            // Refresh mid-flow after the employer step was saved server-side.
+            // Drop the user straight into the employee section so they don't
+            // have to re-fill the employer details + signature they already
+            // submitted.
+            setPageState('combined');
+            setShowEmployeeSection(true);
           } else {
             setPageState('already_complete');
           }
@@ -146,20 +152,10 @@ function OnboardingPageInner() {
     fetchSubmission();
   }, [id, token]);
 
-  // Get client IP for audit
-  useEffect(() => {
-    async function fetchIP() {
-      try {
-        // Use a public IP service or get from headers
-        const res = await fetch('https://api.ipify.org?format=json');
-        const data = await res.json();
-        setClientIP(data.ip);
-      } catch {
-        // IP fetch failed, will be captured server-side
-      }
-    }
-    fetchIP();
-  }, []);
+  // Client IP is derived server-side from request headers (see
+  // submit-validation.ts `getSignerIp` — P2-3 hardening). The previous
+  // browser-side ipify.org fetch is no longer used and was being blocked by
+  // the CSP `connect-src` allowlist.
 
   // Handle employer form submission
   const handleEmployerSubmit = useCallback(
@@ -171,16 +167,37 @@ function OnboardingPageInner() {
 
       try {
         if (submission.is_same_person) {
+          // Persist employer data + signature server-side so a refresh
+          // doesn't lose them. The portal-side employer-complete webhook
+          // recognises is_same_person and skips the employee invite email,
+          // it just flips current_step to 'employee' and logs the status.
+          const response = await fetch('/api/submit-employer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id,
+              employerData: data,
+              signature,
+            }),
+          });
+
+          if (!response.ok) {
+            setError('Failed to save form. Please try again.');
+            return;
+          }
+
           // Store employer data and show employee section
           setEmployerData(data);
           setShowEmployeeSection(true);
           // Scroll to top when transitioning to employee section
           window.scrollTo({ top: 0, behavior: 'smooth' });
-          // Update local submission state
+          // Update local submission state so refresh-detection lands in the
+          // right place and EmployeeForm has the employer data it needs.
           setSubmission({
             ...submission,
             employer_data: data,
             employer_signature_data: signature,
+            current_step: 'employee',
           });
         } else {
           // Regular flow - save AND notify via server-side API (guaranteed delivery)
@@ -191,7 +208,6 @@ function OnboardingPageInner() {
               id,
               employerData: data,
               signature,
-              ip: clientIP || undefined,
             }),
           });
 
@@ -208,7 +224,7 @@ function OnboardingPageInner() {
         setIsSubmitting(false);
       }
     },
-    [submission, id, clientIP]
+    [submission, id]
   );
 
   // Handle employee form submission
@@ -228,9 +244,13 @@ function OnboardingPageInner() {
             id,
             employeeData: data,
             signature,
-            ip: clientIP || undefined,
             isSamePerson: submission.is_same_person,
-            employerData: submission.is_same_person ? employerData : undefined,
+            // Refresh after the employer step wipes local `employerData`; in
+            // that case the server already has the authoritative copy in
+            // submission.employer_data, so fall back to it.
+            employerData: submission.is_same_person
+              ? (employerData || submission.employer_data)
+              : undefined,
             employerSignature: submission.is_same_person ? submission.employer_signature_data : undefined,
           }),
         });
@@ -247,7 +267,7 @@ function OnboardingPageInner() {
         setIsSubmitting(false);
       }
     },
-    [submission, id, clientIP, employerData]
+    [submission, id, employerData]
   );
 
   // Loading state
@@ -427,14 +447,6 @@ function OnboardingPageInner() {
           isSamePerson={submission.is_same_person}
         />
 
-        {/* Error Banner */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-
         {/* Forms */}
         <div className="space-y-8">
           {/* Employer Form - Show in employer state or combined mode before employee */}
@@ -455,6 +467,17 @@ function OnboardingPageInner() {
               isSubmitting={isSubmitting}
               reuseEmployerSignature={submission.is_same_person}
             />
+          )}
+
+          {/* Error banner — rendered at the bottom of the form area so it
+              sits just under the Submit button. A top-of-page banner would
+              be off-screen after the user scrolled through the form, leaving
+              failed submits looking like "nothing happened". */}
+          {error && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
           )}
         </div>
 

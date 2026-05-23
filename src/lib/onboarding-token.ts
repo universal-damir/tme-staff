@@ -44,6 +44,7 @@ export interface OnboardingRow {
   is_same_person: boolean;
   employer_data: Record<string, unknown> | null;
   employee_data: Record<string, unknown> | null;
+  employer_signature_data: string | null;
   prefill_employer_data: Record<string, unknown> | null;
   prefill_employee_data: Record<string, unknown> | null;
   documents: Record<string, unknown> | null;
@@ -69,6 +70,7 @@ const SAFE_COLUMNS = [
   'is_same_person',
   'employer_data',
   'employee_data',
+  'employer_signature_data',
   'prefill_employer_data',
   'prefill_employee_data',
   'documents',
@@ -193,6 +195,12 @@ export async function verifyOnboardingAccess(
  * Strip fields the browser must never see (signer IPs, signature blobs of
  * the *other* party, and the access token itself). Used by the read route
  * before serializing to the page.
+ *
+ * Same-person carve-out: when the employer and employee are the same human,
+ * there is no "other party" to leak to. The employee step needs the employer
+ * signature back so it can re-use it on final submit after a mid-flow refresh
+ * — otherwise submit-employee rejects with 400 because the signature it
+ * receives is null.
  */
 export function scrubOnboardingForBrowser(row: OnboardingRow) {
   return {
@@ -202,6 +210,7 @@ export function scrubOnboardingForBrowser(row: OnboardingRow) {
     is_same_person: row.is_same_person,
     employer_data: row.employer_data,
     employee_data: row.employee_data,
+    employer_signature_data: row.is_same_person ? row.employer_signature_data : undefined,
     prefill_employer_data: row.prefill_employer_data,
     prefill_employee_data: row.prefill_employee_data,
     documents: row.documents,

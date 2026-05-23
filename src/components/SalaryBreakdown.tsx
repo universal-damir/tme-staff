@@ -164,9 +164,13 @@ export function SalaryBreakdown({
 
   const breakdownRows: PayrollOtherBreakdownEntry[] = otherBreakdown ?? [];
   const hasBreakdownRows = breakdownRows.length > 0;
-  // When entries exist, "Other" is locked to the sum so the editor is the
-  // single source of truth — matches tme-portal payroll behaviour.
-  const otherIsLocked = hasBreakdownRows;
+  // Always render at least one row in the editor so the user can immediately
+  // see and use the "Other" structure without first having to discover an
+  // "Add allowance" button. The phantom row carries any legacy `other` value
+  // so historical data is still visible until the user changes it.
+  const visibleBreakdownRows: PayrollOtherBreakdownEntry[] = hasBreakdownRows
+    ? breakdownRows
+    : [{ type: 'other', amount: other ?? 0 }];
 
   const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0);
   const hasDiscrepancy = total !== undefined && total > 0
@@ -333,22 +337,22 @@ export function SalaryBreakdown({
   };
 
   const handleAddBreakdownRow = () => {
-    emitBreakdownUpdate([...breakdownRows, { type: 'other', amount: 0 }]);
+    emitBreakdownUpdate([...visibleBreakdownRows, { type: 'other', amount: 0 }]);
   };
 
   const handleRemoveBreakdownRow = (index: number) => {
-    emitBreakdownUpdate(breakdownRows.filter((_, i) => i !== index));
+    emitBreakdownUpdate(visibleBreakdownRows.filter((_, i) => i !== index));
   };
 
   const handleBreakdownRowTypeChange = (index: number, value: PayrollOtherType) => {
     emitBreakdownUpdate(
-      breakdownRows.map((e, i) => (i === index ? { ...e, type: value } : e)),
+      visibleBreakdownRows.map((e, i) => (i === index ? { ...e, type: value } : e)),
     );
   };
 
   const handleBreakdownRowAmountChange = (index: number, value: number | undefined) => {
     emitBreakdownUpdate(
-      breakdownRows.map((e, i) => (i === index ? { ...e, amount: value ?? 0 } : e)),
+      visibleBreakdownRows.map((e, i) => (i === index ? { ...e, amount: value ?? 0 } : e)),
     );
   };
 
@@ -461,38 +465,27 @@ export function SalaryBreakdown({
             />
           </div>
 
-          {/* Row 2: Other | (empty) | (empty) | (empty) */}
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
-            <SalaryInput
-              label={`Other (${getPercentage(other)})`}
-              value={other}
-              onChange={(val) => handleAmountChange('salary_other', val)}
-              disabled={otherIsLocked}
-            />
-            <div aria-hidden="true" />
-            <div aria-hidden="true" />
-            <div aria-hidden="true" />
-          </div>
-
-          {/* Typed "Other" allowance breakdown editor. Whenever the user adds
-              entries, the plain "Other" field above is locked and reflects the
-              sum so the editor remains the single source of truth. */}
+          {/* "Other" allowances — itemized editor only. The old standalone
+              "Other" number field was removed: it duplicated the section
+              below, and once the user added a row it locked silently. Now
+              there's a single, always-visible editor; the (X%) label tracks
+              the sum so it still slots into the breakdown grid above. */}
           <div className="pt-3 border-t border-gray-100 space-y-3">
             <div className="flex items-center justify-between">
               <span
                 className="text-sm font-medium"
                 style={{ color: TME_COLORS.primary }}
               >
-                Other Breakdown
+                Other ({getPercentage(other)})
               </span>
-              {otherIsLocked && (
-                <span className="text-xs text-gray-500 italic">
-                  Other field locked — sum of entries below
+              {(other ?? 0) > 0 && (
+                <span className="text-xs text-gray-500">
+                  {currency} {formatNumber(other)}
                 </span>
               )}
             </div>
 
-            {breakdownRows.map((entry, index) => (
+            {visibleBreakdownRows.map((entry, index) => (
               <div key={index} className="flex items-center gap-2">
                 <div className="flex-1">
                   <CustomDropdown
@@ -507,15 +500,19 @@ export function SalaryBreakdown({
                     onChange={(val) => handleBreakdownRowAmountChange(index, val)}
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveBreakdownRow(index)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                  title="Remove allowance"
-                  aria-label="Remove allowance"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                {visibleBreakdownRows.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveBreakdownRow(index)}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                    title="Remove allowance"
+                    aria-label="Remove allowance"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <span aria-hidden="true" className="w-7" />
+                )}
               </div>
             ))}
 
