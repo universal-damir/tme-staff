@@ -32,10 +32,6 @@ export interface EmployerFormData {
         | 'petrol' | 'pension' | 'health_insurance' | 'car' | 'flight' | 'prepay_card' | 'other';
     amount: number;
   }>;
-  // Recoverable advance separate from monthly allowances — does NOT contribute
-  // to salary_total.
-  salary_variable_advance?: number;
-
   // Provided-benefit flags — 'yes' = company provides directly (FIRST PARTY),
   // 'allowance' = paid as cash (amount lives in the matching salary_* field),
   // 'no' = not provided. Default 'no' when AI extraction can't determine.
@@ -54,7 +50,6 @@ export interface EmployerFormData {
         | 'petrol' | 'pension' | 'health_insurance' | 'car' | 'flight' | 'prepay_card' | 'other';
     amount: number;
   }>;
-  payroll_salary_variable_advance?: number;
   annual_leave_days: number;
   annual_leave_type: 'calendar' | 'working';
   notice_period_value: number;

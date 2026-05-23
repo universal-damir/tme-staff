@@ -54,8 +54,6 @@ interface SalaryBreakdownProps {
   /** Typed allowance breakdown — when at least one entry exists, the plain
    *  "Other" input becomes read-only and reflects the sum. */
   otherBreakdown?: PayrollOtherBreakdownEntry[];
-  /** Recoverable advance shown below the breakdown. NOT part of salary_total. */
-  variableAdvance?: number;
   accommodationProvided: ProvidedFlag;
   transportProvided: ProvidedFlag;
   foodProvided: ProvidedFlag;
@@ -68,7 +66,6 @@ interface SalaryBreakdownProps {
     salary_food?: number | undefined;
     salary_other?: number | undefined;
     salary_other_breakdown?: PayrollOtherBreakdownEntry[];
-    salary_variable_advance?: number | undefined;
     accommodation_provided?: ProvidedFlag;
     transport_provided?: ProvidedFlag;
     food_provided?: ProvidedFlag;
@@ -156,7 +153,6 @@ export function SalaryBreakdown({
   food,
   other,
   otherBreakdown,
-  variableAdvance,
   accommodationProvided,
   transportProvided,
   foodProvided,
@@ -172,14 +168,9 @@ export function SalaryBreakdown({
   // single source of truth — matches tme-portal payroll behaviour.
   const otherIsLocked = hasBreakdownRows;
 
-  // Calculate sum and discrepancy. Variable advance is normally separate from
-  // monthly allowances, but some HRW workbooks roll it into the "Gross" column
-  // that becomes `total`. So accept both interpretations: sum, or sum + advance.
   const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0);
-  const sumWithAdvance = sum + (variableAdvance || 0);
   const hasDiscrepancy = total !== undefined && total > 0
-    && Math.abs(sum - total) > 0.01
-    && Math.abs(sumWithAdvance - total) > 0.01;
+    && Math.abs(sum - total) > 0.01;
 
   // Auto-expand if there's a discrepancy
   useEffect(() => {
@@ -256,6 +247,9 @@ export function SalaryBreakdown({
     | 'salary_transport'
     | 'salary_food'
     | 'salary_other';
+  // When a value > 0 is typed into accommodation/transport/food while the
+  // corresponding flag is 'no', flip the flag to 'allowance' — "no" + money
+  // is nonsensical (company doesn't provide it but pays for it = allowance).
   const handleAmountChange = (field: BreakdownKey, val: number | undefined) => {
     const nextValues: Record<BreakdownKey, number | undefined> = {
       salary_basic: basic,
@@ -271,29 +265,38 @@ export function SalaryBreakdown({
       (nextValues.salary_transport || 0) +
       (nextValues.salary_food || 0) +
       (nextValues.salary_other || 0);
+
+    const flagPatch: {
+      accommodation_provided?: ProvidedFlag;
+      transport_provided?: ProvidedFlag;
+      food_provided?: ProvidedFlag;
+    } = {};
+    const hasAmount = val !== undefined && val > 0;
+    if (hasAmount) {
+      if (field === 'salary_accommodation' && accommodationProvided === 'no') {
+        flagPatch.accommodation_provided = 'allowance';
+      } else if (field === 'salary_transport' && transportProvided === 'no') {
+        flagPatch.transport_provided = 'allowance';
+      } else if (field === 'salary_food' && foodProvided === 'no') {
+        flagPatch.food_provided = 'allowance';
+      }
+    }
+
     onChange({
       salary_currency: currency,
       salary_total: Math.round(newTotal * 100) / 100,
       ...nextValues,
+      ...flagPatch,
     });
   };
 
-  // When a provided flag flips to 'yes' or 'no', force the corresponding
-  // amount to 0 so the breakdown stays self-consistent.
+  // Flip a provided flag. Amount is left alone — user may want to keep an
+  // allowance value on record even when flipping to 'yes' (in-kind plus cash)
+  // or clear it manually after flipping to 'no'.
   const handleProvidedChange = (
     field: 'accommodation_provided' | 'transport_provided' | 'food_provided',
     val: ProvidedFlag,
   ) => {
-    const zeroPatch: Partial<{
-      salary_accommodation: number;
-      salary_transport: number;
-      salary_food: number;
-    }> = {};
-    if (val !== 'allowance') {
-      if (field === 'accommodation_provided') zeroPatch.salary_accommodation = 0;
-      if (field === 'transport_provided') zeroPatch.salary_transport = 0;
-      if (field === 'food_provided') zeroPatch.salary_food = 0;
-    }
     onChange({
       salary_currency: currency,
       salary_total: total,
@@ -303,7 +306,6 @@ export function SalaryBreakdown({
       salary_food: food,
       salary_other: other,
       [field]: val,
-      ...zeroPatch,
     });
   };
 
@@ -348,20 +350,6 @@ export function SalaryBreakdown({
     emitBreakdownUpdate(
       breakdownRows.map((e, i) => (i === index ? { ...e, amount: value ?? 0 } : e)),
     );
-  };
-
-  const handleVariableAdvanceChange = (value: number | undefined) => {
-    onChange({
-      salary_currency: currency,
-      salary_total: total,
-      salary_basic: basic,
-      salary_accommodation: accommodation,
-      salary_transport: transport,
-      salary_food: food,
-      salary_other: other,
-      salary_other_breakdown: otherBreakdown,
-      salary_variable_advance: value,
-    });
   };
 
   const getPercentage = (value: number | undefined) => {
@@ -456,23 +444,20 @@ export function SalaryBreakdown({
             />
             <SalaryInput
               label={`Accommodation (${getPercentage(accommodation)})`}
-              value={accommodationProvided === 'allowance' ? accommodation : 0}
+              value={accommodation}
               onChange={(val) => handleAmountChange('salary_accommodation', val)}
               error={errors?.accommodation}
-              disabled={accommodationProvided !== 'allowance'}
             />
             <SalaryInput
               label={`Transport (${getPercentage(transport)})`}
-              value={transportProvided === 'allowance' ? transport : 0}
+              value={transport}
               onChange={(val) => handleAmountChange('salary_transport', val)}
               error={errors?.transport}
-              disabled={transportProvided !== 'allowance'}
             />
             <SalaryInput
               label={`Food (${getPercentage(food)})`}
-              value={foodProvided === 'allowance' ? food : 0}
+              value={food}
               onChange={(val) => handleAmountChange('salary_food', val)}
-              disabled={foodProvided !== 'allowance'}
             />
           </div>
 
@@ -543,17 +528,6 @@ export function SalaryBreakdown({
               <Plus className="w-3.5 h-3.5" />
               Add allowance
             </button>
-
-            <div className="pt-3 border-t border-gray-100">
-              <SalaryInput
-                label="Variable salary advance"
-                value={variableAdvance}
-                onChange={handleVariableAdvanceChange}
-              />
-              <p className="mt-1 text-xs italic text-gray-500">
-                Recoverable advance, not part of monthly allowances.
-              </p>
-            </div>
           </div>
 
           {/* Row 3: Provided flags — Accommodation | Transport | Food | (empty).

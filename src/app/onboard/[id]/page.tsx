@@ -397,10 +397,15 @@ function OnboardingPageInner() {
   if (!submission) return null;
 
   const isRenewal = submission.onboarding_type === 'renewal';
+  const isShowingEmployer = pageState === 'employer' || (pageState === 'combined' && !showEmployeeSection);
+  // Widen the page only for the renewal employer step, where Salary Contract +
+  // Payroll render side-by-side. Other steps (employee form, success states)
+  // stay at the narrower default width.
+  const containerWidthClass = isRenewal && isShowingEmployer ? 'max-w-6xl' : 'max-w-3xl';
 
   return (
     <main className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-3xl mx-auto">
+      <div className={`${containerWidthClass} mx-auto`}>
         {/* Header */}
         <div className="text-center mb-8">
           <h1

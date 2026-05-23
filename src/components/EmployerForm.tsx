@@ -73,7 +73,6 @@ interface ReadOnlySalarySummaryProps {
   // Shape-agnostic so the same read-only summary can render either the contract
   // or payroll breakdown (both share the same { type, amount } row shape).
   otherBreakdown?: ReadonlyArray<{ type: string; amount: number }>;
-  variableAdvance?: number;
 }
 
 function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
@@ -88,7 +87,6 @@ function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
     { label: 'Other', value: props.other },
   ];
   const hasBreakdown = !!props.otherBreakdown && props.otherBreakdown.length > 0;
-  const hasVariableAdvance = props.variableAdvance !== undefined && props.variableAdvance !== 0;
   return (
     <div className="border-2 border-gray-200 rounded-lg overflow-hidden">
       <div className="px-3 py-2 bg-gray-50 border-b-2 border-gray-200 text-xs font-medium text-gray-600">
@@ -113,17 +111,6 @@ function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
                   <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(entry.amount)}</span>
                 </div>
               ))}
-            </div>
-          </div>
-        )}
-        {hasVariableAdvance && (
-          <div className="px-3 py-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-600">Variable salary advance</span>
-              <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(props.variableAdvance)}</span>
-            </div>
-            <div className="text-xs italic text-gray-500 mt-0.5">
-              Recoverable advance, not part of monthly allowances.
             </div>
           </div>
         )}
@@ -200,7 +187,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const salaryFood = watch('salary_food');
   const salaryOther = watch('salary_other');
   const salaryOtherBreakdown = watch('salary_other_breakdown');
-  const salaryVariableAdvance = watch('salary_variable_advance');
   const payrollCurrency = watch('payroll_salary_currency');
   const payrollTotal = watch('payroll_salary_total');
   const payrollBasic = watch('payroll_salary_basic');
@@ -209,7 +195,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const payrollFood = watch('payroll_salary_food');
   const payrollOther = watch('payroll_salary_other');
   const payrollOtherBreakdown = watch('payroll_salary_other_breakdown');
-  const payrollVariableAdvance = watch('payroll_salary_variable_advance');
   const startingDate = watch('starting_date');
   const annualLeaveType = watch('annual_leave_type');
   const weeklyOff = watch('weekly_off');
@@ -248,7 +233,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     salary_food?: number | undefined;
     salary_other?: number | undefined;
     salary_other_breakdown?: EmployerFormData['salary_other_breakdown'];
-    salary_variable_advance?: number | undefined;
     accommodation_provided?: 'yes' | 'no' | 'allowance';
     transport_provided?: 'yes' | 'no' | 'allowance';
     food_provided?: 'yes' | 'no' | 'allowance';
@@ -262,9 +246,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('salary_other', values.salary_other);
     if (values.salary_other_breakdown !== undefined) {
       setValue('salary_other_breakdown', values.salary_other_breakdown);
-    }
-    if (values.salary_variable_advance !== undefined) {
-      setValue('salary_variable_advance', values.salary_variable_advance);
     }
     if (values.accommodation_provided !== undefined) setValue('accommodation_provided', values.accommodation_provided);
     if (values.transport_provided !== undefined) setValue('transport_provided', values.transport_provided);
@@ -284,6 +265,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue('salary_transport', payrollTransport as number);
     setValue('salary_food', payrollFood);
     setValue('salary_other', payrollOther);
+    setValue('salary_other_breakdown', payrollOtherBreakdown ?? []);
     showMatchFeedback('contract');
   };
 
@@ -496,7 +478,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
           food={salaryFood}
           other={salaryOther}
           otherBreakdown={salaryOtherBreakdown}
-          variableAdvance={salaryVariableAdvance}
           accommodationProvided={accommodationProvided || 'no'}
           transportProvided={transportProvided || 'no'}
           foodProvided={foodProvided || 'no'}
@@ -535,7 +516,6 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               food={payrollFood}
               other={payrollOther}
               otherBreakdown={payrollOtherBreakdown}
-              variableAdvance={payrollVariableAdvance}
             />
           </div>
         </FormSection>
