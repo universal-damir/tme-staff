@@ -128,6 +128,10 @@ export interface EmployeeFormData {
   same_emails: boolean;
   mobile_uae: string;
   mobile_international?: string;
+  // True when the employee confirms they don't have an active UAE mobile yet.
+  // Lets isContactComplete pass without a UAE number and flags the staff
+  // record on the portal side until HR fills one in.
+  mobile_uae_unavailable?: boolean;
 
   // Education
   educational_qualification: string;

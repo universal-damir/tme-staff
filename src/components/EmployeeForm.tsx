@@ -604,6 +604,7 @@ export function EmployeeForm({
   const otherNationality = watch('other_nationality');
   const previousNationality = watch('previous_nationality');
   const mobileUae = watch('mobile_uae');
+  const mobileUaeUnavailable = watch('mobile_uae_unavailable') === true;
   const homeTelephone = watch('home_telephone');
   const personalEmail = watch('personal_email');
   const homeStreetAddress = watch('home_street_address');
@@ -746,10 +747,11 @@ export function EmployeeForm({
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
   // UAE mobile is mandatory when the applicant is in the UAE (always true for
   // renewals; user-toggled for new-hires). When outside the UAE we don't ask
-  // for it, since they may not yet have a UAE number.
+  // for it, since they may not yet have a UAE number. Inside the UAE but
+  // without a number yet, the employee can tick `mobile_uae_unavailable`.
   const isContactComplete = !!(
     homeStreetAddress && homeCity && homeCountry && personalEmail &&
-    (!isInUAE || mobileUae)
+    (!isInUAE || mobileUae || mobileUaeUnavailable)
   );
   const educationalQualificationCustom = watch('educational_qualification_custom');
   // DET extended fields are only required when the DET block is actually
@@ -2884,7 +2886,7 @@ export function EmployeeForm({
               </div>
 
               <PhoneInput
-                label="Home Telephone"
+                label="International Mobile"
                 value={homeTelephone}
                 onChange={(value) => setValue('home_telephone', value || '')}
                 defaultCountry={nationalityCountryCode || 'AE'}
@@ -2981,8 +2983,24 @@ export function EmployeeForm({
               value={mobileUae}
               onChange={(value) => setValue('mobile_uae', value || '')}
               country="AE"
-              required={isInUAE}
+              required={isInUAE && !mobileUaeUnavailable}
+              disabled={mobileUaeUnavailable}
             />
+            {isInUAE && (
+              <label className="flex items-center gap-2 mt-3 text-sm text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={mobileUaeUnavailable}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setValue('mobile_uae_unavailable', checked, { shouldDirty: true });
+                    if (checked) setValue('mobile_uae', '', { shouldDirty: true });
+                  }}
+                  className="rounded"
+                />
+                I don&apos;t have an active UAE mobile number yet
+              </label>
+            )}
           </FormSection>
 
           {/* Email */}
