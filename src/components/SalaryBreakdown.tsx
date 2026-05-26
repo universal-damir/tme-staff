@@ -1,16 +1,15 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   TME_COLORS,
   SALARY_BREAKDOWN_EXPLANATION,
-  DEFAULT_SALARY_BREAKDOWN,
   PAYROLL_OTHER_TYPE_OPTIONS,
   type PayrollOtherType,
   type PayrollOtherBreakdownEntry,
 } from '@/lib/constants';
 import { CustomDropdown } from '@/components/ui';
-import { ChevronDown, ChevronUp, Info, AlertTriangle, Plus, X } from 'lucide-react';
+import { Info, Plus, X, AlertTriangle } from 'lucide-react';
 
 type ProvidedFlag = 'yes' | 'no' | 'allowance';
 
@@ -159,7 +158,6 @@ export function SalaryBreakdown({
   onChange,
   errors,
 }: SalaryBreakdownProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
   const [showInfo, setShowInfo] = useState(true);
 
   const breakdownRows: PayrollOtherBreakdownEntry[] = otherBreakdown ?? [];
@@ -172,68 +170,40 @@ export function SalaryBreakdown({
     ? breakdownRows
     : [{ type: 'other', amount: other ?? 0 }];
 
+  // The monthly total is normally the sum of every component the employer
+  // enters (bottom-up). It is shown editable at the bottom: by default it
+  // tracks this sum, but the employer may type a different total for
+  // flexibility. Once they do, the total is "pinned" — editing components no
+  // longer moves it (only editing the total field does), and a warning flags
+  // the mismatch. The breakdown itself is never auto-adjusted.
   const sum = (basic || 0) + (accommodation || 0) + (transport || 0) + (food || 0) + (other || 0);
-  const hasDiscrepancy = total !== undefined && total > 0
-    && Math.abs(sum - total) > 0.01;
 
-  // Auto-expand if there's a discrepancy
-  useEffect(() => {
-    if (hasDiscrepancy) {
-      setIsExpanded(true);
-    }
-  }, [hasDiscrepancy]);
-
-  // Auto-calculate breakdown when total changes. Only allocate to fields whose
-  // provided flag is 'allowance'; the rest are forced to 0 (their flag means
-  // either company-provided in-kind, or not provided at all).
-  const handleTotalChange = useCallback(
-    (newTotal: number | undefined) => {
-      if (newTotal === undefined || isNaN(newTotal)) {
-        onChange({
-          salary_currency: currency,
-          salary_total: undefined,
-          salary_basic: undefined,
-          salary_accommodation: undefined,
-          salary_transport: undefined,
-          salary_food: undefined,
-          salary_other: undefined,
-        });
-        return;
-      }
-
-      const accomPct = accommodationProvided === 'allowance' ? DEFAULT_SALARY_BREAKDOWN.accommodation : 0;
-      const transportPct = transportProvided === 'allowance' ? DEFAULT_SALARY_BREAKDOWN.transport : 0;
-      // Basic absorbs whatever is not allocated to accommodation/transport.
-      const basicPct = 1 - accomPct - transportPct;
-
-      const newAccommodation = Math.round(newTotal * accomPct * 100) / 100;
-      const newTransport = Math.round(newTotal * transportPct * 100) / 100;
-      const newBasic = Math.round(newTotal * basicPct * 100) / 100;
-      const newFood = 0;
-      const newOther = 0;
-
-      // Adjust for rounding
-      const calculatedSum = newBasic + newAccommodation + newTransport + newFood + newOther;
-      const adjustedBasic = Math.round((newBasic + (newTotal - calculatedSum)) * 100) / 100;
-
-      onChange({
-        salary_currency: currency,
-        salary_total: newTotal,
-        salary_basic: adjustedBasic,
-        salary_accommodation: newAccommodation,
-        salary_transport: newTransport,
-        salary_food: newFood,
-        salary_other: newOther,
-      });
-    },
-    [currency, onChange, accommodationProvided, transportProvided]
+  // Latch: has the employer manually overridden the total? Derived on mount so
+  // a loaded record whose stored total already differs from its components is
+  // treated as overridden (we won't silently snap it back to the sum).
+  const [totalOverridden, setTotalOverridden] = useState<boolean>(
+    () => total !== undefined && total !== null && Math.abs(total - sum) > 0.01,
   );
 
-  // Set total from sum
-  const handleSetTotalFromSum = () => {
+  // While tracking, total follows the component sum. While overridden, the
+  // employer's typed total is preserved.
+  const resolvedTotal = (newSum: number): number => (totalOverridden ? (total ?? newSum) : newSum);
+
+  const [totalDisplay, setTotalDisplay] = useState(formatNumber(total));
+  useEffect(() => {
+    setTotalDisplay(formatNumber(total));
+  }, [total]);
+
+  const hasDiscrepancy =
+    total !== undefined && total !== null && Math.abs(sum - total) > 0.01;
+
+  // Editing the total pins it — only the total moves, the breakdown is left
+  // exactly as entered.
+  const handleTotalChange = (newTotal: number | undefined) => {
+    setTotalOverridden(true);
     onChange({
       salary_currency: currency,
-      salary_total: Math.round(sum * 100) / 100,
+      salary_total: newTotal,
       salary_basic: basic,
       salary_accommodation: accommodation,
       salary_transport: transport,
@@ -242,9 +212,8 @@ export function SalaryBreakdown({
     });
   };
 
-  // Centralised handler for any breakdown amount change. After the field is
-  // updated, total is recalculated as the sum of all amounts so the user
-  // doesn't have to manually click "Set Total" — it tracks the breakdown.
+  // Centralised handler for any breakdown amount change. While tracking, total
+  // follows the new sum; once the employer has pinned a total, it is preserved.
   type BreakdownKey =
     | 'salary_basic'
     | 'salary_accommodation'
@@ -288,7 +257,7 @@ export function SalaryBreakdown({
 
     onChange({
       salary_currency: currency,
-      salary_total: Math.round(newTotal * 100) / 100,
+      salary_total: Math.round(resolvedTotal(newTotal) * 100) / 100,
       ...nextValues,
       ...flagPatch,
     });
@@ -326,7 +295,7 @@ export function SalaryBreakdown({
       sumOther;
     onChange({
       salary_currency: currency,
-      salary_total: Math.round(newTotal * 100) / 100,
+      salary_total: Math.round(resolvedTotal(newTotal) * 100) / 100,
       salary_basic: basic,
       salary_accommodation: accommodation,
       salary_transport: transport,
@@ -357,13 +326,15 @@ export function SalaryBreakdown({
   };
 
   const getPercentage = (value: number | undefined) => {
-    if (!total || !value) return '0%';
-    return `${Math.round((value / total) * 100)}%`;
+    if (!sum || !value) return '0%';
+    return `${Math.round((value / sum) * 100)}%`;
   };
 
   return (
     <div className="space-y-4">
-      {/* Currency and Total */}
+      {/* Currency selector. The monthly total is no longer typed here — the
+          employer enters each component below and the total is summed for them
+          at the bottom of the section. */}
       <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4">
         <CustomDropdown
           label="Currency"
@@ -383,15 +354,7 @@ export function SalaryBreakdown({
           error={errors?.currency}
           required
         />
-
-        <SalaryInput
-          label="Monthly Salary (Total)"
-          value={total}
-          onChange={handleTotalChange}
-          placeholder="Enter total monthly salary"
-          error={errors?.total}
-          required
-        />
+        <div />
       </div>
 
       {/* Info Toggle */}
@@ -414,29 +377,12 @@ export function SalaryBreakdown({
         </div>
       )}
 
-      {/* Breakdown Toggle */}
-      <button
-        type="button"
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 text-sm font-medium"
-        style={{ color: TME_COLORS.primary }}
-      >
-        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        {isExpanded ? 'Hide breakdown' : 'Show breakdown'}
-        {hasDiscrepancy && (
-          <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-600 text-xs rounded-full flex items-center gap-1">
-            <AlertTriangle className="w-3 h-3" />
-            Mismatch
-          </span>
-        )}
-      </button>
-
-      {/* Breakdown Fields. 4-column grid throughout: amounts in row 1
-          (Basic/Accommodation/Transport/Food) and row 2 (Other + empty
-          cells), then Provided flags in row 3 (with empty 4th cell) so
-          the layout matches the portal's renewal preview. Amounts whose
-          flag is not 'allowance' are disabled and force-zeroed. */}
-      {isExpanded && (
+      {/* Breakdown Fields — always visible since they are the primary inputs.
+          4-column grid throughout: amounts in row 1
+          (Basic/Accommodation/Transport/Food), then the Other editor, then
+          Provided flags. Amounts whose flag is not 'allowance' are disabled
+          and force-zeroed. */}
+      {(
         <div className="space-y-4 pt-2 border-t border-gray-200">
           {/* Row 1: Basic | Accommodation | Transport | Food */}
           <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
@@ -485,34 +431,39 @@ export function SalaryBreakdown({
               )}
             </div>
 
+            {/* 4-column grid mirroring the Basic/Accommodation/Transport/Food
+                row above: the allowance type spans the first 3 columns and the
+                amount occupies the 4th, so it lines up exactly under Food. */}
             {visibleBreakdownRows.map((entry, index) => (
-              <div key={index} className="flex items-center gap-2">
-                <div className="flex-1">
+              <div key={index} className="grid grid-cols-4 gap-4 items-center">
+                <div className="col-span-3">
                   <CustomDropdown
                     value={entry.type}
                     onChange={(v) => handleBreakdownRowTypeChange(index, v as PayrollOtherType)}
                     options={PAYROLL_OTHER_TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
                   />
                 </div>
-                <div className="w-40">
-                  <SalaryInput
-                    value={entry.amount}
-                    onChange={(val) => handleBreakdownRowAmountChange(index, val)}
-                  />
+                <div className="flex items-center gap-1">
+                  <div className="flex-1">
+                    <SalaryInput
+                      // Show empty (not "0") for an unfilled row, matching the
+                      // other breakdown inputs whose value is undefined.
+                      value={entry.amount || undefined}
+                      onChange={(val) => handleBreakdownRowAmountChange(index, val)}
+                    />
+                  </div>
+                  {visibleBreakdownRows.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveBreakdownRow(index)}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0"
+                      title="Remove allowance"
+                      aria-label="Remove allowance"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
-                {visibleBreakdownRows.length > 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveBreakdownRow(index)}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                    title="Remove allowance"
-                    aria-label="Remove allowance"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                ) : (
-                  <span aria-hidden="true" className="w-7" />
-                )}
               </div>
             ))}
 
@@ -579,33 +530,59 @@ export function SalaryBreakdown({
             <div aria-hidden="true" />
           </div>
 
-          {/* Discrepancy Warning */}
-          {hasDiscrepancy && (() => {
-            const difference = sum - (total || 0);
-            return (
-              <div className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
-                <div className="flex items-center gap-2 text-red-600">
-                  <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                  <div>
-                    <span className="text-sm">
-                      Sum ({currency} {formatNumber(sum)}) does not match total ({currency} {formatNumber(total)})
-                    </span>
-                    <span className="block text-xs mt-0.5 font-medium">
-                      Difference: {currency} {difference > 0 ? '+' : ''}{formatNumber(difference)}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSetTotalFromSum}
-                  className="px-3 py-1 text-sm font-medium text-white rounded flex-shrink-0"
-                  style={{ backgroundColor: TME_COLORS.primary }}
+          {/* Monthly Total — normally the sum of every component above. Styled
+              as a total, but editable: the employer can type a different figure
+              for flexibility. Doing so leaves the breakdown untouched and shows
+              the mismatch warning below. */}
+          <div>
+            <div
+              className="flex items-center justify-between px-4 py-2.5 rounded-lg border-2"
+              style={{
+                borderColor: TME_COLORS.primary,
+                backgroundColor: `${TME_COLORS.primary}0D`,
+              }}
+            >
+              <span
+                className="text-sm font-medium"
+                style={{ color: TME_COLORS.primary }}
+              >
+                Monthly Salary (Total)
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span
+                  className="text-lg font-semibold"
+                  style={{ color: TME_COLORS.primary }}
                 >
-                  Set Total to {currency} {formatNumber(sum)}
-                </button>
+                  {currency}
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={totalDisplay}
+                  onChange={(e) => {
+                    const cleaned = e.target.value.replace(/[^0-9.]/g, '');
+                    const parsed = parseFormattedNumber(cleaned);
+                    handleTotalChange(parsed);
+                    setTotalDisplay(parsed !== undefined ? formatNumber(parsed) : '');
+                  }}
+                  placeholder="0"
+                  aria-label="Monthly salary total"
+                  className="w-32 bg-transparent text-right text-lg font-semibold focus:outline-none"
+                  style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+                />
               </div>
-            );
-          })()}
+            </div>
+
+            {hasDiscrepancy && (
+              <div className="mt-2 flex items-start gap-2 px-1 text-sm text-amber-700">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>
+                  This total differs from the sum of the components ({currency}{' '}
+                  {formatNumber(sum)}).
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

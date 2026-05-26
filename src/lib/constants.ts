@@ -487,7 +487,7 @@ export const DEFAULT_SALARY_BREAKDOWN = {
 export const SALARY_BREAKDOWN_EXPLANATION =
   'Sample common split in the UAE is: Basic 60%, Accommodation 30%, Transport 10%. ' +
   "The percentage is NOT defined in the UAE Labour Law. It is the employer's decision. " +
-  'You can adjust these values, but the total must equal the monthly salary.';
+  'Enter each component below and the monthly total is calculated for you automatically.';
 
 // ===================================================================
 // "OTHER" ALLOWANCE BREAKDOWN TYPES
