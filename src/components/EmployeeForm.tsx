@@ -1962,15 +1962,17 @@ export function EmployeeForm({
                     />
                     <span>I confirm this is my passport cover (front + back) photographed spread open. I understand a TME team member will verify it manually.</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleCoverManualReview}
-                    disabled={!coverManualReviewConfirmed || coverManualReviewSubmitting}
-                    className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: TME_COLORS.primary }}
-                  >
-                    {coverManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                  </button>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleCoverManualReview}
+                      disabled={!coverManualReviewConfirmed || coverManualReviewSubmitting}
+                      className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ backgroundColor: TME_COLORS.primary }}
+                    >
+                      {coverManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -2055,17 +2057,19 @@ export function EmployeeForm({
                       checked={insideManualReviewConfirmed}
                       onChange={(e) => setInsideManualReviewConfirmed(e.target.checked)}
                     />
-                    <span>I confirm this is my passport inside pages (data page + opposite page) photographed spread open. I understand a TME team member will verify it manually, and I&apos;ll need to fill in my passport details by hand.</span>
+                    <span>I confirm this is my passport inside pages (data page + opposite page) photographed spread open.</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleInsideManualReview}
-                    disabled={!insideManualReviewConfirmed || insideManualReviewSubmitting}
-                    className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: TME_COLORS.primary }}
-                  >
-                    {insideManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                  </button>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleInsideManualReview}
+                      disabled={!insideManualReviewConfirmed || insideManualReviewSubmitting}
+                      className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ backgroundColor: TME_COLORS.primary }}
+                    >
+                      {insideManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -2312,15 +2316,17 @@ export function EmployeeForm({
                       />
                       <span>I confirm this is my Indian passport additional page (address / family details). I understand a TME team member will verify it manually.</span>
                     </label>
-                    <button
-                      type="button"
-                      onClick={handleAdditionalManualReview}
-                      disabled={!additionalManualReviewConfirmed || additionalManualReviewSubmitting}
-                      className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{ backgroundColor: TME_COLORS.primary }}
-                    >
-                      {additionalManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                    </button>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleAdditionalManualReview}
+                        disabled={!additionalManualReviewConfirmed || additionalManualReviewSubmitting}
+                        className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ backgroundColor: TME_COLORS.primary }}
+                      >
+                        {additionalManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
