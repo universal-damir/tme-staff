@@ -169,6 +169,21 @@ export interface EmployeeFormData {
   visa_category?: VisaCategory;
   visa_arrival_date?: string; // ISO format YYYY-MM-DD, only when visa_category = 'visa_on_arrival'
 
+  // Family-sponsored only — sponsor metadata + dependent snapshot captured in
+  // the sponsor step. Sponsor signs the NOC inline; the dependent_* fields are
+  // seeded read-only from the applicant's own extracted passport so they
+  // snapshot into the payload alongside the sponsor merge fields.
+  sponsor_name?: string;
+  sponsor_nationality?: string;
+  sponsor_passport_number?: string;
+  sponsor_mobile?: string;
+  sponsor_relationship?: 'husband' | 'wife' | 'father' | 'mother' | 'son' | 'daughter';
+  dependent_name?: string;
+  dependent_nationality?: string;
+  dependent_passport_number?: string;
+  sponsor_noc_signature?: string;
+  sponsor_noc_signed_at?: string; // ISO timestamp
+
   // Other
   other_information?: string;
 }
@@ -257,6 +272,37 @@ export interface StaffDocumentReferences {
     validated?: boolean;
     extracted_data?: Record<string, unknown>;
   };
+  // Sponsor identity documents (family-sponsored only). AI VALIDATES the
+  // uploads (type-check parity with applicant docs) but does NOT extract into
+  // the dependent's own identity fields — pointing the applicant extract
+  // routes at sponsor docs would corrupt the dependent's data. `needsReview`
+  // is set when the user submitted via the 2-strike manual-review fallback.
+  sponsor_passport?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    extracted_data?: Record<string, unknown>;
+    needsReview?: boolean;
+  };
+  sponsor_visa?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    visa_category?: string;
+    needsReview?: boolean;
+  };
+  sponsor_eid_front?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    needsReview?: boolean;
+  };
+  sponsor_eid_back?: {
+    path: string;
+    filename: string;
+    validated?: boolean;
+    needsReview?: boolean;
+  };
   degree_attested?: {
     path: string;
     filename: string;
@@ -278,6 +324,11 @@ export interface StaffDocumentReferences {
 export type OnboardingStep = 'employer' | 'employee' | 'complete';
 export type OnboardingStatus = 'pending' | 'employer_completed' | 'complete' | 'cancelled';
 
+// How the staff member's residence visa is sponsored. Drives the sponsor-step
+// + NOC requirements: 'family' demands sponsor docs + a signed NOC (on both
+// new_hire and renewal); 'company' and 'self_gcc' demand neither.
+export type SponsorshipType = 'company' | 'family' | 'self_gcc';
+
 export interface StaffOnboardingSubmission {
   id: string;
   tme_request_id: string | null;
@@ -293,6 +344,13 @@ export interface StaffOnboardingSubmission {
   prefill_employer_data: Partial<EmployerFormData> | null;
   prefill_employee_data: Partial<EmployeeFormData> | null;
   onboarding_type: 'new_hire' | 'renewal';
+  sponsorship_type?: SponsorshipType | null;
+
+  // Sponsor NOC audit trail (family-sponsored only). Set server-side by
+  // submit-employee, mirroring the employee_signature_* columns.
+  sponsor_noc_signature_data?: string | null;
+  sponsor_noc_signed_at?: string | null;
+  sponsor_noc_signer_ip?: string | null;
 
   // Employer section
   employer_data: EmployerFormData | null;

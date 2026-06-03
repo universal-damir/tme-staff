@@ -2,11 +2,13 @@
 /**
  * Full-flow onboarding/renewal test script.
  *
- * Exercises the real data path end-to-end for 4 scenarios:
- *   1. happy      — non-DMCC, German, new_hire
- *   2. dmcc       — DMCC, German, new_hire, Job Offer Letter
- *   3. pakistani  — non-DMCC, Pakistani, new_hire, Pakistan ID
- *   4. renewal    — non-DMCC, German, renewal, visa_document
+ * Exercises the real data path end-to-end for 5 scenarios:
+ *   1. happy           — non-DMCC, German, new_hire
+ *   2. dmcc            — DMCC, German, new_hire, Job Offer Letter
+ *   3. pakistani       — non-DMCC, Pakistani, new_hire, Pakistan ID
+ *   4. renewal         — non-DMCC, German, renewal, visa_document
+ *   5. family_sponsored — non-DMCC, German, new_hire, sponsorship_type=family,
+ *                         sponsor passport/visa/EID uploads + signed NOC
  *
  * Per scenario:
  *   - Seed Supabase row
@@ -75,7 +77,11 @@ if (!portalRoot) {
 const PORTAL_PUBLIC = process.env.PORTAL_PUBLIC_DIR || (portalRoot ? resolve(portalRoot, 'public') : '');
 
 const SUPABASE_URL = staffEnv.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY = staffEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// This harness seeds + verifies + tears down rows directly, which are admin
+// operations. Since the RLS hardening dropped the anon insert/update policies,
+// the anon key can no longer seed — use the service-role key (falls back to
+// anon for older envs). The service key is local-only and never shipped.
+const SUPABASE_KEY = staffEnv.SUPABASE_SERVICE_KEY || staffEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const STAFF_URL = 'http://localhost:3002';
 const PORTAL_URL = 'http://localhost:3000';
 const CRON_SECRET = portalEnv.CRON_SECRET;
@@ -212,17 +218,26 @@ function buildEmployerData(scenario) {
     base.applicant_in_uae = true;
     base.visa_category = 'employment_visa';
   }
+  if (scenario === 'family_sponsored') {
+    // The portal sync now derives isFamilySponsored from employer_data.sponsor
+    // (via sponsorshipTypeFromSponsor), so the family scenario MUST set a
+    // family-valued sponsor or the NOC won't generate. 'Parent' is consistent
+    // with the scenario's sponsor_relationship: 'father'.
+    base.sponsor = 'Parent';
+  }
   return base;
 }
 
 function buildEmployeeData(scenario, docRefs) {
   const nationalityLabel = scenario === 'pakistani' ? 'Pakistani' : 'German';
+  const isFamily = scenario === 'family_sponsored';
+  const fullName = scenario === 'pakistani' ? 'Test Khan' : 'Test Mueller';
   return {
     title: 'Mr',
     first_name: 'Test',
     middle_name: '',
     last_name: scenario === 'pakistani' ? 'Khan' : 'Mueller',
-    full_name: scenario === 'pakistani' ? 'Test Khan' : 'Test Mueller',
+    full_name: fullName,
     nationality: nationalityLabel,
     passport_number: 'X12345678',
     passport_issue_date: '01.01.2020',
@@ -236,7 +251,7 @@ function buildEmployeeData(scenario, docRefs) {
     home_street_address: '123 Test St',
     home_city: 'Test City',
     home_country: nationalityLabel,
-    uae_presence: 'outside',
+    uae_presence: isFamily ? 'inside' : 'outside',
     personal_email: `test+${Date.now()}@example.com`,
     company_email: '',
     same_emails: true,
@@ -246,6 +261,23 @@ function buildEmployeeData(scenario, docRefs) {
     languages_spoken: ['English'],
     has_uae_bank: false,
     other_information: '',
+    // Family-sponsored: sponsor metadata + dependent snapshot ride inside
+    // employee_data (no dedicated columns), and the NOC signature is captured
+    // in-form before submit. The dependent_* fields snapshot the applicant's
+    // own extracted passport identity for the NOC merge fields.
+    ...(isFamily
+      ? {
+          sponsor_name: 'Test Sponsor Father',
+          sponsor_nationality: 'German',
+          sponsor_passport_number: 'S98765432',
+          sponsor_mobile: '+971559876543',
+          sponsor_relationship: 'father',
+          dependent_name: fullName,
+          dependent_nationality: nationalityLabel,
+          dependent_passport_number: 'X12345678',
+          sponsor_noc_signature: FAKE_SIG,
+        }
+      : {}),
   };
 }
 
@@ -268,6 +300,7 @@ async function runScenario(name) {
   const isRenewal = name === 'renewal';
   const isDmcc = name === 'dmcc';
   const isPakistani = name === 'pakistani';
+  const isFamily = name === 'family_sponsored';
   const nationalityLabel = isPakistani ? 'Pakistani' : 'German';
 
   const prefillEmployer = {};
@@ -275,6 +308,11 @@ async function runScenario(name) {
   if (isRenewal) {
     prefillEmployer.applicant_in_uae = true;
     prefillEmployer.visa_category = 'employment_visa';
+  }
+  if (isFamily) {
+    // Family-sponsored applicants are physically in the UAE (dependent visa
+    // held by a family member); forces Visa + EID mandatory in the form.
+    prefillEmployer.applicant_in_uae = true;
   }
 
   const { data: seed, error: seedErr } = await supabase
@@ -288,6 +326,7 @@ async function runScenario(name) {
       prefill_employer_data: prefillEmployer,
       prefill_employee_data: { nationality: nationalityLabel, first_name: 'Test' },
       onboarding_type: isRenewal ? 'renewal' : 'new_hire',
+      sponsorship_type: isFamily ? 'family' : 'company',
       status: 'pending',
       current_step: 'employer',
       synced_to_tme: false,
@@ -298,6 +337,9 @@ async function runScenario(name) {
   log('seed', true, seed.id);
 
   const submissionId = seed.id;
+  // The public onboarding URL + submit routes resolve by link_token (migration
+  // 282 decoupled it from the row id). Direct DB ops below still key on id.
+  const linkToken = seed.link_token;
   const storageUrls = [];
 
   // 1b. Create onboarding_request in portal DB so sync isn't orphan-dropped.
@@ -345,6 +387,14 @@ async function runScenario(name) {
   if (isRenewal) {
     await pushUpload('visa_document', 'visa_document', pdfBuf, 'pdf', /-visa-document\./, r => (docs.visa_document = r));
   }
+  if (isFamily) {
+    // Sponsor identity docs land under the exact `documents` keys the portal
+    // sync (`processDocuments`) branches on for family-sponsored staff.
+    await pushUpload('sponsor_passport', 'sponsor_passport', pngBuf, 'png', /-sponsor-passport\./, r => (docs.sponsor_passport = r));
+    await pushUpload('sponsor_visa', 'sponsor_visa', pdfBuf, 'pdf', /-sponsor-visa\./, r => (docs.sponsor_visa = r));
+    await pushUpload('sponsor_eid_front', 'sponsor_eid_front', pngBuf, 'png', /-sponsor-eid-front\./, r => (docs.sponsor_eid_front = r));
+    await pushUpload('sponsor_eid_back', 'sponsor_eid_back', pngBuf, 'png', /-sponsor-eid-back\./, r => (docs.sponsor_eid_back = r));
+  }
 
   storageUrls.push(...docEntries.map(e => e.publicUrl));
   log('uploads', true, `${docEntries.length} files`);
@@ -361,7 +411,7 @@ async function runScenario(name) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      id: submissionId,
+      id: linkToken,
       employerData: buildEmployerData(name),
       signature: FAKE_SIG,
       ip: '127.0.0.1',
@@ -378,7 +428,7 @@ async function runScenario(name) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      id: submissionId,
+      id: linkToken,
       employeeData: buildEmployeeData(name, docs),
       signature: FAKE_SIG,
       ip: '127.0.0.1',
@@ -414,6 +464,22 @@ async function runScenario(name) {
     assertions.push(['documents.pakistan_id_back present', !!final.documents?.pakistan_id_back]);
   }
   if (isRenewal) assertions.push(['documents.visa_document present', !!final.documents?.visa_document]);
+  if (isFamily) {
+    assertions.push(['documents.sponsor_passport present', !!final.documents?.sponsor_passport]);
+    assertions.push(['documents.sponsor_visa present', !!final.documents?.sponsor_visa]);
+    assertions.push(['documents.sponsor_eid_front present', !!final.documents?.sponsor_eid_front]);
+    assertions.push(['documents.sponsor_eid_back present', !!final.documents?.sponsor_eid_back]);
+    assertions.push(['employee_data.sponsor_name present', !!final.employee_data?.sponsor_name]);
+    assertions.push(['employee_data.sponsor_nationality present', !!final.employee_data?.sponsor_nationality]);
+    assertions.push(['employee_data.sponsor_passport_number present', !!final.employee_data?.sponsor_passport_number]);
+    assertions.push(['employee_data.sponsor_mobile present', !!final.employee_data?.sponsor_mobile]);
+    assertions.push(['employee_data.sponsor_relationship present', !!final.employee_data?.sponsor_relationship]);
+    // submit-employee lifts the NOC signature to a top-level column (server-set
+    // signed_at + signer_ip) and strips it from employee_data.
+    assertions.push(['sponsor_noc_signature_data present', !!final.sponsor_noc_signature_data]);
+    assertions.push(['sponsor_noc_signed_at present', !!final.sponsor_noc_signed_at]);
+    assertions.push(['sponsor_noc_signature stripped from employee_data', !final.employee_data?.sponsor_noc_signature]);
+  }
 
   for (const [desc, ok] of assertions) {
     if (!ok) {
@@ -424,11 +490,15 @@ async function runScenario(name) {
   log('supabase state', true, `${assertions.length} assertions passed`);
 
   // 6. Verify Supabase Storage URLs reachable ───────────────────────────────
+  // Public-URL reachability is best-effort only: the staff-documents bucket is
+  // private (post security-hardening), so anon HEAD requests 404. The
+  // authoritative verification is the service-role byte-for-byte download
+  // below (and the portal-disk byte-check). Warn-only here.
+  let reachableCount = 0;
   for (const url of storageUrls) {
-    const ok = await headUrl(url);
-    if (!ok) throw new Error(`Storage URL not fetchable: ${url}`);
+    if (await headUrl(url)) reachableCount++;
   }
-  log('storage URLs', true, `${storageUrls.length} reachable`);
+  log('storage URLs', true, `${reachableCount}/${storageUrls.length} public-reachable (private bucket OK)`);
 
   // 6b. Byte-for-byte: download each doc from Supabase + compare with fixture.
   // Catches truncation, corruption, or wrong-file uploads.
@@ -553,7 +623,7 @@ async function runScenario(name) {
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
-const SCENARIOS = ['happy', 'dmcc', 'pakistani', 'renewal'];
+const SCENARIOS = ['happy', 'dmcc', 'pakistani', 'renewal', 'family_sponsored'];
 const toRun = onlyScenario ? [onlyScenario] : SCENARIOS;
 
 console.log('');

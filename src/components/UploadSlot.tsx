@@ -164,10 +164,10 @@ export function UploadSlot({
                 // letterbox with scrollbars.
                 data={`${preview}#view=FitH&toolbar=1`}
                 type="application/pdf"
-                className="w-full h-[90vh] min-h-[500px] rounded-lg bg-white"
+                className="w-full h-64 rounded-lg bg-white"
                 aria-label={label || 'PDF preview'}
               >
-                <div className="w-full h-[90vh] min-h-[500px] flex flex-col items-center justify-center rounded-lg bg-white">
+                <div className="w-full h-64 flex flex-col items-center justify-center rounded-lg bg-white">
                   <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
                   <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
                   <a

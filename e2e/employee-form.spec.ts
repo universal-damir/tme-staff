@@ -41,4 +41,19 @@ test.describe('EmployeeForm — structure and conditional rendering', () => {
       await sub.cleanup();
     }
   });
+
+  test('family-sponsored form adds the sponsor step (Step 1 of 9 indicator)', async ({ page }) => {
+    // Family-sponsored onboarding inserts the "Sponsor Documents & NOC" step
+    // (internal index 9) into the wizard after Family Details, so the visible
+    // step count rises from 8 to 9. The active step label only shows for the
+    // current step, so we assert the navigation-free "of 9" total instead.
+    const sub = await seedSubmission({ step: 'employee', sponsorshipType: 'family' });
+    try {
+      await mockAllAi(page);
+      await page.goto(sub.url);
+      await expect(page.getByText(/of\s*9/).first()).toBeVisible({ timeout: 10_000 });
+    } finally {
+      await sub.cleanup();
+    }
+  });
 });

@@ -77,6 +77,10 @@ const ALLOWED_TYPES = new Set([
   'job_offer_letter',
   'visa_document',
   'previous_visa_document',
+  'sponsor_passport',
+  'sponsor_visa',
+  'sponsor_eid_front',
+  'sponsor_eid_back',
 ]);
 
 export function isAllowedType(t: string): boolean {

@@ -3,7 +3,7 @@
  * Factored out so they can be unit-tested without mounting the components.
  */
 
-import type { PassportPageReference, StaffDocumentReferences, VisaCategory } from '@/types';
+import type { PassportPageReference, SponsorshipType, StaffDocumentReferences, VisaCategory } from '@/types';
 
 /**
  * Merge existing submission documents with employee-side uploaded docs.
@@ -155,4 +155,105 @@ export function normalizeProvidedFlag(value: unknown): ProvidedFlag {
   const v = value.trim().toLowerCase();
   if (v === 'yes' || v === 'allowance') return v;
   return 'no';
+}
+
+/**
+ * Whether the sponsor step (sponsor passport / visa / EID uploads + metadata)
+ * must be collected. Only family-sponsored staff carry a separate sponsor;
+ * company- and self/GCC-sponsored staff have none.
+ */
+export function sponsorDocsRequired(sponsorshipType: SponsorshipType | undefined | null): boolean {
+  return sponsorshipType === 'family';
+}
+
+/**
+ * Whether the sponsor must sign the NOC letter in-session. Family-sponsored
+ * staff require the NOC on BOTH new_hire and renewal (the onboarding type is
+ * accepted for symmetry with the portal call sites but does not change the
+ * answer today).
+ */
+export function requiresSponsorNoc(
+  sponsorshipType: SponsorshipType | undefined | null,
+  _onboardingType?: 'new_hire' | 'renewal',
+): boolean {
+  // Family requires the NOC on BOTH new_hire and renewal.
+  return sponsorshipType === 'family';
+}
+
+/**
+ * Whether the applicant's own Visa + EID uploads are forced mandatory. For
+ * family-sponsored staff TME still files the Labour Card against an existing
+ * residence visa, so the visa + EID must be on file regardless of the visa
+ * category's normal requirement.
+ */
+export function employeeVisaMandatoryOverride(sponsorshipType: SponsorshipType | undefined | null): boolean {
+  return sponsorshipType === 'family';
+}
+
+/**
+ * Collapse the employer's granular `sponsor` pick (Company | Self-sponsored |
+ * Spouse | Parent | Child | NA) into the internal three-value
+ * `SponsorshipType` gate that drives the sponsor step + NOC + mandatory visa.
+ *
+ *   Company                        -> 'company'
+ *   Self-sponsored / NA            -> 'self_gcc'
+ *   Spouse / Parent / Child        -> 'family'
+ *   anything else / undefined / null -> 'company'
+ *
+ * MUST STAY IN SYNC with the portal's `sponsorshipTypeFromSponsor`
+ * (tme-portal `src/lib/clients-v2/sponsor-options.ts`). Never returns null —
+ * unknown/missing inputs fall back to 'company'.
+ */
+export function sponsorshipTypeFromSponsor(
+  sponsor: string | undefined | null
+): SponsorshipType {
+  switch (sponsor) {
+    case 'Company':
+      return 'company';
+    case 'Self-sponsored':
+    case 'GCC National':
+    case 'NA': // legacy value (removed from the picker) — still maps here
+      return 'self_gcc';
+    case 'Spouse':
+    case 'Parent':
+    case 'Child':
+      return 'family';
+    default:
+      return 'company';
+  }
+}
+
+/** The six possible NOC sponsor-relationship values, in display order. */
+export type SponsorRelationship =
+  | 'husband'
+  | 'wife'
+  | 'father'
+  | 'mother'
+  | 'son'
+  | 'daughter';
+
+/**
+ * Narrow the NOC "Relationship to You" options by the employer's sponsor type.
+ *
+ *   Spouse -> ['husband','wife']
+ *   Parent -> ['father','mother']
+ *   Child  -> ['son','daughter']
+ *   anything else / undefined / null -> all six
+ *
+ * Keeps the relationship dropdown consistent with the chosen sponsor so a
+ * mismatched pairing (e.g. Parent + 'son') can't be selected.
+ */
+export function relationshipOptionsForSponsor(
+  sponsor: string | undefined | null
+): SponsorRelationship[] {
+  switch (sponsor) {
+    case 'Spouse':
+      return ['husband', 'wife'];
+    case 'Parent':
+      return ['father', 'mother'];
+    case 'Child':
+      return ['son', 'daughter'];
+    default:
+      return ['husband', 'wife', 'father', 'mother', 'son', 'daughter'];
+  }
 }

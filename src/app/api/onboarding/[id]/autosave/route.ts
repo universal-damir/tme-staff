@@ -65,10 +65,18 @@ export async function POST(
   if (!rowId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
+  // Keep the large NOC signature base64 out of the employee_data jsonb — it is
+  // lifted to the dedicated sponsor_noc_signature_data column server-side on
+  // final submit (see submit-employee). Persisting it via autosave would bloat
+  // the capped jsonb and re-hydrate a stale signature on reload.
+  const employeeDataForSave = { ...body.employeeData };
+  delete employeeDataForSave.sponsor_noc_signature;
+  delete employeeDataForSave.sponsor_noc_signed_at;
+
   const { error } = await supabase
     .from('staff_onboarding_submissions')
     .update({
-      employee_data: body.employeeData,
+      employee_data: employeeDataForSave,
       updated_at: new Date().toISOString(),
     })
     .eq('id', rowId);

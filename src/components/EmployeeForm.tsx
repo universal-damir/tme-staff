@@ -32,7 +32,12 @@ import {
   requiresArrivalDate,
   shouldOfferManualReview,
   buildManualReviewPageRef,
+  sponsorDocsRequired,
+  employeeVisaMandatoryOverride,
+  sponsorshipTypeFromSponsor,
+  relationshipOptionsForSponsor,
 } from '@/lib/staff-form-logic';
+import { buildNocText } from '@/lib/noc-letter';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
 import { calculateFullName, compressImageForAI } from '@/lib/utils';
 import { nationalityToCountryCode, resolveExtractedNationality } from '@/lib/country-utils';
@@ -54,6 +59,7 @@ import {
   CreditCard,
   FileText,
   Phone,
+  ShieldCheck,
 } from 'lucide-react';
 
 // Sort lists alphabetically (with "Other" at the end)
@@ -69,6 +75,11 @@ const SORTED_NATIONALITIES = sortWithOtherLast(NATIONALITIES);
 const SORTED_RELIGIONS = sortWithOtherLast(RELIGIONS);
 
 // --- Step definitions for progressive reveal ---
+// Internal step indices are stable (1..8 = array positions 0..7). The
+// family-sponsored "Sponsor Documents & NOC" step is internal index 9
+// (array position 8) — appended here so the existing 1..8 literals never
+// shift. `visibleStepIndices` appends it as the VERY LAST display step
+// (after Review & Sign) for family-sponsored applicants.
 const STEP_LABELS = [
   'ID Photo',
   'Passport OUTSIDE',
@@ -78,6 +89,7 @@ const STEP_LABELS = [
   'Address & Contact',
   'Education & More',
   'Review & Sign',
+  'Sponsor Documents & NOC',
 ];
 
 // Visa category labels for display
@@ -239,10 +251,17 @@ function StepProgress({
           never sees a placeholder for an empty step. */}
       <div className="flex items-center gap-1.5 mb-2">
         {visibleStepIndices.map((step) => {
-          const isCompleted = step < currentStep;
+          // Compare by DISPLAY position, not raw internal index. The sponsor
+          // step is internal index 9 appended LAST for family-sponsored
+          // applicants (order [1,2,3,4,5,6,7,8,9]); comparing by display
+          // position keeps the dot colouring/gating robust regardless of how
+          // the internal indices map onto display order.
+          const pos = visibleStepIndices.indexOf(step);
+          const currentPos = visibleStepIndices.indexOf(currentStep);
+          const isCompleted = currentPos >= 0 ? pos < currentPos : step < currentStep;
           const isCurrent = step === currentStep;
           const isViewing = step === viewingStep;
-          const isClickable = step <= currentStep;
+          const isClickable = currentPos >= 0 ? pos <= currentPos : step <= currentStep;
           return (
             <button
               key={step}
@@ -362,6 +381,16 @@ export function EmployeeForm({
 
   // Renewal passport confirmation
   const isRenewal = submission.onboarding_type === 'renewal';
+  // Family-sponsored variant — drives the sponsor step + NOC + mandatory
+  // applicant Visa/EID. Derive the gate from the employer's FINAL sponsor pick
+  // (employer_data.sponsor) so the flow reacts to whatever the employer chose;
+  // employer_data is populated by the time the employee section runs. Fall back
+  // to the prefilled sponsorship_type column, then 'company', when absent.
+  const effectiveSponsor = (submission.employer_data as Record<string, unknown> | null)?.sponsor as string | undefined;
+  const sponsorshipType = effectiveSponsor
+    ? sponsorshipTypeFromSponsor(effectiveSponsor)
+    : (submission.sponsorship_type ?? 'company');
+  const isFamilySponsored = sponsorDocsRequired(sponsorshipType);
   const existingDocs = submission.existing_documents;
   const hasExistingPassport = !!(existingDocs?.passport_cover || existingDocs?.passport_inside);
   const [passportConfirmed, setPassportConfirmed] = useState(false);
@@ -456,6 +485,48 @@ export function EmployeeForm({
   React.useEffect(() => { pakistanIdFrontDocRef.current = pakistanIdFrontDoc; }, [pakistanIdFrontDoc]);
   React.useEffect(() => { pakistanIdBackDocRef.current = pakistanIdBackDoc; }, [pakistanIdBackDoc]);
 
+  // Sponsor identity documents (family-sponsored only). Upload-only — no AI
+  // extraction (the applicant extract routes write into the dependent's own
+  // identity fields, so pointing them at sponsor docs would corrupt the data).
+  const [sponsorPassportDoc, setSponsorPassportDoc] = useState(submission.documents?.sponsor_passport);
+  const [sponsorVisaDoc, setSponsorVisaDoc] = useState(submission.documents?.sponsor_visa);
+  const [sponsorEidFrontDoc, setSponsorEidFrontDoc] = useState(submission.documents?.sponsor_eid_front);
+  const [sponsorEidBackDoc, setSponsorEidBackDoc] = useState(submission.documents?.sponsor_eid_back);
+  const [sponsorPassportUI, setSponsorPassportUI] = useState({
+    preview: submission.documents?.sponsor_passport?.path ? getDocumentUrl(submission.documents.sponsor_passport.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const [sponsorVisaUI, setSponsorVisaUI] = useState({
+    preview: submission.documents?.sponsor_visa?.path ? getDocumentUrl(submission.documents.sponsor_visa.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const [sponsorEidFrontUI, setSponsorEidFrontUI] = useState({
+    preview: submission.documents?.sponsor_eid_front?.path ? getDocumentUrl(submission.documents.sponsor_eid_front.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const [sponsorEidBackUI, setSponsorEidBackUI] = useState({
+    preview: submission.documents?.sponsor_eid_back?.path ? getDocumentUrl(submission.documents.sponsor_eid_back.path) : null as string | null,
+    validating: false, error: null as string | null, file: null as File | null,
+  });
+  const sponsorPassportDocRef = React.useRef(sponsorPassportDoc);
+  const sponsorVisaDocRef = React.useRef(sponsorVisaDoc);
+  const sponsorEidFrontDocRef = React.useRef(sponsorEidFrontDoc);
+  const sponsorEidBackDocRef = React.useRef(sponsorEidBackDoc);
+  React.useEffect(() => { sponsorPassportDocRef.current = sponsorPassportDoc; }, [sponsorPassportDoc]);
+  React.useEffect(() => { sponsorVisaDocRef.current = sponsorVisaDoc; }, [sponsorVisaDoc]);
+  React.useEffect(() => { sponsorEidFrontDocRef.current = sponsorEidFrontDoc; }, [sponsorEidFrontDoc]);
+  React.useEffect(() => { sponsorEidBackDocRef.current = sponsorEidBackDoc; }, [sponsorEidBackDoc]);
+
+  // Sponsor NOC signature — INDEPENDENT of the employee/employer signature
+  // (never reused, even in same-person mode). On renewal we force a fresh
+  // signature by initializing to null even though sponsor metadata is
+  // prefilled. Stored into the form via setValue('sponsor_noc_signature') so
+  // it travels inside employeeData to the submit handler.
+  const [sponsorSignature, setSponsorSignature] = useState<string | null>(null);
+  const [sponsorError, setSponsorError] = useState<string | null>(null);
+  const sponsorSignatureRef = React.useRef(sponsorSignature);
+  React.useEffect(() => { sponsorSignatureRef.current = sponsorSignature; }, [sponsorSignature]);
+
   // Visa document state (conditional on employer's visa category)
   const [visaDoc, setVisaDoc] = useState(submission.documents?.visa_document);
   const [visaDocUI, setVisaDocUI] = useState({
@@ -518,6 +589,23 @@ export function EmployeeForm({
   const [additionalRejectionCount, setAdditionalRejectionCount] = useState(0);
   const [additionalManualReviewConfirmed, setAdditionalManualReviewConfirmed] = useState(false);
   const [additionalManualReviewSubmitting, setAdditionalManualReviewSubmitting] = useState(false);
+  // Sponsor docs (family-sponsored) get the same 2-strike manual-review
+  // escape hatch as the applicant passport pages: 2 AI rejections → amber
+  // affordance → user confirms + submits → doc stamped needsReview, TME
+  // verifies later on the portal side. Four independent counters (passport /
+  // visa / EID front / EID back) so a failure on one doesn't unlock another.
+  const [sponsorPassportRejectionCount, setSponsorPassportRejectionCount] = useState(0);
+  const [sponsorPassportManualReviewConfirmed, setSponsorPassportManualReviewConfirmed] = useState(false);
+  const [sponsorPassportManualReviewSubmitting, setSponsorPassportManualReviewSubmitting] = useState(false);
+  const [sponsorVisaRejectionCount, setSponsorVisaRejectionCount] = useState(0);
+  const [sponsorVisaManualReviewConfirmed, setSponsorVisaManualReviewConfirmed] = useState(false);
+  const [sponsorVisaManualReviewSubmitting, setSponsorVisaManualReviewSubmitting] = useState(false);
+  const [sponsorEidFrontRejectionCount, setSponsorEidFrontRejectionCount] = useState(0);
+  const [sponsorEidFrontManualReviewConfirmed, setSponsorEidFrontManualReviewConfirmed] = useState(false);
+  const [sponsorEidFrontManualReviewSubmitting, setSponsorEidFrontManualReviewSubmitting] = useState(false);
+  const [sponsorEidBackRejectionCount, setSponsorEidBackRejectionCount] = useState(0);
+  const [sponsorEidBackManualReviewConfirmed, setSponsorEidBackManualReviewConfirmed] = useState(false);
+  const [sponsorEidBackManualReviewSubmitting, setSponsorEidBackManualReviewSubmitting] = useState(false);
 
   // Refs to track latest values (avoids stale closure issues in callbacks)
   const photoDocRef = React.useRef(photoDoc);
@@ -530,6 +618,7 @@ export function EmployeeForm({
   const familyRef = useRef<HTMLDivElement>(null);
   const contactRef = useRef<HTMLDivElement>(null);
   const educationRef = useRef<HTMLDivElement>(null);
+  const sponsorRef = useRef<HTMLDivElement>(null);
   const signatureRef = useRef<HTMLDivElement>(null);
 
   // Keep refs in sync with state
@@ -587,6 +676,17 @@ export function EmployeeForm({
     register('det_degree_end_date');
     register('det_graduation_year');
     register('det_actual_years_of_degree');
+    // Family-sponsored sponsor metadata + dependent snapshot + NOC signature.
+    register('sponsor_name');
+    register('sponsor_nationality');
+    register('sponsor_passport_number');
+    register('sponsor_mobile');
+    register('sponsor_relationship');
+    register('dependent_name');
+    register('dependent_nationality');
+    register('dependent_passport_number');
+    register('sponsor_noc_signature');
+    register('sponsor_noc_signed_at');
   }, [register]);
 
   const title = watch('title');
@@ -616,15 +716,63 @@ export function EmployeeForm({
   const employeeVisaCategory = watch('visa_category') as VisaCategory | undefined;
   const employeeVisaArrivalDate = watch('visa_arrival_date');
   const visaUploadRule = visaDocumentRequirement(employeeVisaCategory);
-  const showVisaCategoryPicker = employerVisaInUAE;
+  // Family-sponsored staff always carry an existing residence visa + EID held
+  // by their sponsor, so TME needs both on file regardless of the visa
+  // category's normal requirement (and regardless of the employer's in-UAE
+  // answer). The override forces the visa picker + visa doc + EID mandatory.
+  const forceVisaMandatory = employeeVisaMandatoryOverride(sponsorshipType);
+  const showVisaCategoryPicker = employerVisaInUAE || forceVisaMandatory;
   const showArrivalDatePicker = showVisaCategoryPicker && requiresArrivalDate(employeeVisaCategory);
-  const showVisaDocumentUpload = showVisaCategoryPicker && visaUploadRule !== 'none';
-  const visaDocumentRequired = showVisaCategoryPicker && visaUploadRule === 'mandatory';
+  const showVisaDocumentUpload = (showVisaCategoryPicker && visaUploadRule !== 'none') || forceVisaMandatory;
+  const visaDocumentRequired = (showVisaCategoryPicker && visaUploadRule === 'mandatory') || forceVisaMandatory;
   const passportNumber = watch('passport_number');
   const passportIssueDate = watch('passport_issue_date');
   const passportExpiry = watch('passport_expiry');
   const placeOfIssue = watch('place_of_issue');
   const gender = watch('gender');
+
+  // Family-sponsored sponsor metadata (NOC merge fields).
+  const sponsorName = watch('sponsor_name');
+  const sponsorNationality = watch('sponsor_nationality');
+  const sponsorPassportNumber = watch('sponsor_passport_number');
+  const sponsorMobile = watch('sponsor_mobile');
+  const sponsorRelationship = watch('sponsor_relationship') as 'husband' | 'wife' | 'father' | 'mother' | 'son' | 'daughter' | undefined;
+  const fullName = watch('full_name');
+
+  // Narrow the NOC "Relationship to You" options by the employer's sponsor pick
+  // (Spouse -> husband/wife, Parent -> father/mother, Child -> son/daughter;
+  // anything else -> all six). Mapped to {value,label} for the dropdown.
+  const RELATIONSHIP_LABELS: Record<'husband' | 'wife' | 'father' | 'mother' | 'son' | 'daughter', string> = {
+    husband: 'Husband',
+    wife: 'Wife',
+    father: 'Father',
+    mother: 'Mother',
+    son: 'Son',
+    daughter: 'Daughter',
+  };
+  const narrowedRelationships = relationshipOptionsForSponsor(effectiveSponsor);
+  const relationshipOptions = narrowedRelationships.map((r) => ({ value: r, label: RELATIONSHIP_LABELS[r] }));
+  // Stable key for the narrowed set so the effects below only re-run when the
+  // allowed options actually change (not on every render).
+  const narrowedRelationshipsKey = narrowedRelationships.join(',');
+
+  // One-time-per-narrowed-set guard: if a stale sponsor_relationship sits
+  // outside the now-allowed options (e.g. the employer flipped Spouse -> Parent
+  // after a value was picked), clear it so it can't silently persist. Then, for
+  // Spouse only, pre-select the gender-appropriate option from the employee's
+  // own gender (female -> husband, male -> wife) when the field is empty —
+  // never overwrites an existing user choice.
+  React.useEffect(() => {
+    if (sponsorRelationship && !narrowedRelationships.includes(sponsorRelationship)) {
+      setValue('sponsor_relationship', undefined);
+      return;
+    }
+    if (!sponsorRelationship && effectiveSponsor === 'Spouse') {
+      if (gender === 'female') setValue('sponsor_relationship', 'husband');
+      else if (gender === 'male') setValue('sponsor_relationship', 'wife');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrowedRelationshipsKey, effectiveSponsor, gender]);
 
   // DET (Department of Economy & Tourism, Dubai mainland) requires extra
   // education fields. Authority comes from the portal via prefill_employer_data
@@ -632,6 +780,26 @@ export function EmployeeForm({
   // used in EmployerForm.tsx for the Job Offer Letter slot.
   const registeredAuthority = (submission.prefill_employer_data as Record<string, unknown> | null)?.registered_authority as string | undefined;
   const isDET = isDetAuthority(registeredAuthority);
+
+  // NOC merge values (family-sponsored). Company name + job title come from
+  // the employer data: prefer the company-name field from prefill, falling
+  // back to working location / authority; the job title is the employer's
+  // visa job title (filled in the employer step that precedes this one, or
+  // prefilled on renewal). Read like registeredAuthority above.
+  const prefillEmployer = (submission.prefill_employer_data as Record<string, unknown> | null) || {};
+  const nocCompanyName =
+    (prefillEmployer.company_name as string | undefined) ||
+    (prefillEmployer.working_location as string | undefined) ||
+    registeredAuthority ||
+    '';
+  const employerJobTitleVisa =
+    submission.employer_data?.job_title_visa === 'Other'
+      ? submission.employer_data?.job_title_visa_custom
+      : submission.employer_data?.job_title_visa;
+  const nocJobTitle =
+    employerJobTitleVisa ||
+    (prefillEmployer.job_title_visa as string | undefined) ||
+    '';
 
   // DET extended education fields (only relevant when isDET is true).
   // Degree type is captured via the unified Educational Qualification
@@ -783,11 +951,40 @@ export function EmployeeForm({
       (!showArrivalDatePicker || isArrivalDateProvided) &&
       (!visaDocumentRequired || isVisaDocUploaded);
   // Combined "UAE Visa and Emirates ID" section requires a Yes/No answer on
-  // new-hire onboarding. Uploads themselves are optional.
-  const isPreviousUaeDocsAnswered = isRenewal || hasPreviousUaeDocs !== null;
-  const isStep4Complete = isVisaSectionComplete && isPreviousUaeDocsAnswered;
+  // new-hire onboarding. Uploads themselves are optional. Family-sponsored
+  // applicants always hold an existing residence visa and the previous-docs
+  // Yes/No UI is hidden for them (its EID upload is replaced by the dedicated
+  // mandatory family EID block below), so treat the answer as satisfied —
+  // otherwise a family new-hire whose employer didn't flag applicant_in_uae
+  // would be soft-locked at step 4 with no UI to answer.
+  const isPreviousUaeDocsAnswered = isRenewal || isFamilySponsored || hasPreviousUaeDocs !== null;
+  // Family-sponsored applicants MUST upload their own Visa + EID (front + back)
+  // — the override forces the visa doc mandatory above; here we add the EID
+  // requirement. This branch is keyed on isFamilySponsored (not !isRenewal) so
+  // it applies on renewal too.
+  const isFamilyApplicantEidComplete =
+    !isFamilySponsored || !!(eidFrontDoc?.validated && eidBackDoc?.validated);
+  const isStep4Complete =
+    isVisaSectionComplete && isPreviousUaeDocsAnswered && isFamilyApplicantEidComplete;
 
-  // Compute the highest unlocked step (1-indexed, 8 steps total)
+  // Sponsor step (internal index 9) completion gate. Requires the sponsor
+  // metadata, all four sponsor docs, and a fresh NOC signature. No-op (always
+  // complete) for non-family flows.
+  const isSponsorMetadataComplete = !!(
+    sponsorName && sponsorNationality && sponsorPassportNumber && sponsorMobile && sponsorRelationship
+  );
+  const isSponsorDocsComplete = !!(
+    sponsorPassportDoc && sponsorVisaDoc && sponsorEidFrontDoc && sponsorEidBackDoc
+  );
+  const isSponsorStepComplete =
+    !isFamilySponsored ||
+    (isSponsorMetadataComplete && isSponsorDocsComplete && !!sponsorSignature);
+
+  // Compute the highest unlocked step. Internal indices are stable (1..8);
+  // the family-sponsored sponsor step is internal index 9 and is gated as the
+  // VERY LAST step — it only unlocks after the employee has reviewed and
+  // signed at step 8 (Review & Sign). Non-family flows end at step 8.
+  const isEmployeeSigned = !!signature || reuseEmployerSignature;
   const computeCurrentStep = useCallback(() => {
     if (!isPhotoUploaded) return 1;
     if (!isCoverUploaded) return 2;
@@ -797,8 +994,12 @@ export function EmployeeForm({
     if (!isFamilyComplete) return 5;
     if (!isContactComplete) return 6;
     if (!isEducationComplete) return 7;
+    // Steps 1-7 done. For family-sponsored applicants the sponsor step (9) is
+    // the final step but only after the employee has signed at review (8):
+    // not yet signed → stay on 8; signed but sponsor step incomplete → 9.
+    if (isFamilySponsored && isEmployeeSigned && !isSponsorStepComplete) return 9;
     return 8;
-  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, isAdditionalPageUploaded, requiresAdditionalPage, passportDataReady, isPersonalComplete, isStep4Complete, isFamilyComplete, isContactComplete, isEducationComplete]);
+  }, [isPhotoUploaded, isCoverUploaded, isInsidePagesUploaded, isAdditionalPageUploaded, requiresAdditionalPage, passportDataReady, isPersonalComplete, isStep4Complete, isFamilyComplete, isFamilySponsored, isEmployeeSigned, isSponsorStepComplete, isContactComplete, isEducationComplete]);
 
   const currentStep = computeCurrentStep();
 
@@ -809,13 +1010,23 @@ export function EmployeeForm({
   // On renewal where the employer didn't enable the visa picker, both are
   // gone and step 4 has no UI at all. Drop it from the indicator so the
   // user doesn't land on a blank screen.
+  // For family-sponsored staff, showVisaCategoryPicker is forced true (the
+  // visa-mandatory override), so step 4 is never empty — they always take the
+  // non-empty branch. The sponsor step (internal index 9) is the VERY LAST
+  // step in DISPLAY order — appended after Review & Sign (8) — so the sponsor
+  // signs the NOC after the employee has reviewed and signed. StepProgress +
+  // displayedStepNumber derive the "Step X of Y" numbering from this array's
+  // positions automatically.
   const isStep4Empty = !showVisaCategoryPicker && isRenewal;
-  const visibleStepIndices = isStep4Empty
+  const baseStepIndices = isStep4Empty
     ? [1, 2, 3, 5, 6, 7, 8]
     : [1, 2, 3, 4, 5, 6, 7, 8];
+  const visibleStepIndices = isFamilySponsored
+    ? [...baseStepIndices, 9]
+    : baseStepIndices;
 
-  // Map an internal step number (1..8) to the displayed position (1..N) so
-  // the FormSection badges and the "Step X of Y" header match the dot row.
+  // Map an internal step number to its displayed position (1..N) so the
+  // FormSection badges and the "Step X of Y" header match the dot row.
   const displayedStepNumber = (internal: number): number => {
     const idx = visibleStepIndices.indexOf(internal);
     return idx < 0 ? internal : idx + 1;
@@ -911,6 +1122,29 @@ export function EmployeeForm({
     }
   }, [firstName, middleName, lastName, setValue]);
 
+  // Family-sponsored: seed the read-only dependent_* fields from the
+  // applicant's OWN extracted passport so they snapshot into the payload
+  // alongside the sponsor merge fields. One-time per source value — never
+  // overwrites a value the user has already (e.g. via prefill) edited.
+  React.useEffect(() => {
+    if (!isFamilySponsored) return;
+    if (fullName && !getValues('dependent_name')) setValue('dependent_name', fullName);
+    if (nationality && !getValues('dependent_nationality')) setValue('dependent_nationality', nationality);
+    if (passportNumber && !getValues('dependent_passport_number')) setValue('dependent_passport_number', passportNumber);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFamilySponsored, fullName, nationality, passportNumber]);
+
+  // On renewal, force a FRESH NOC signature: clear any prefilled value once on
+  // mount so the sponsor must re-sign even though their metadata is prefilled.
+  React.useEffect(() => {
+    if (isFamilySponsored && isRenewal) {
+      setSponsorSignature(null);
+      setValue('sponsor_noc_signature', undefined);
+      setValue('sponsor_noc_signed_at', undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleFormSubmit = async (data: EmployeeFormData) => {
     // Validate photo is uploaded
     if (!photoDoc) {
@@ -930,12 +1164,45 @@ export function EmployeeForm({
     }
     setPassportError(null);
 
-    // Validate signature
+    // Validate signature. The employee signature is captured on the Review &
+    // Sign step (internal index 8) — jump there on failure (for family the
+    // submit fires from step 9, so we must navigate back to 8).
     if (!signature && !reuseEmployerSignature) {
       setSignatureError('Please sign the form');
+      setViewingStep(8);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     setSignatureError(null);
+
+    // Family-sponsored gate: sponsor metadata + all four sponsor docs + a
+    // fresh NOC signature are mandatory. Use refs for the docs/signature to
+    // avoid stale-closure reads; metadata comes straight off the submitted
+    // form data. Jump to the sponsor step (internal index 9) on failure.
+    if (isFamilySponsored) {
+      const metaComplete = !!(
+        data.sponsor_name && data.sponsor_nationality && data.sponsor_passport_number &&
+        data.sponsor_mobile && data.sponsor_relationship
+      );
+      const docsComplete = !!(
+        sponsorPassportDocRef.current && sponsorVisaDocRef.current &&
+        sponsorEidFrontDocRef.current && sponsorEidBackDocRef.current
+      );
+      const nocSigned = !!sponsorSignatureRef.current;
+      if (!metaComplete || !docsComplete || !nocSigned) {
+        setSponsorError(
+          !metaComplete
+            ? 'Please complete all sponsor details.'
+            : !docsComplete
+            ? 'Please upload all sponsor documents (passport, visa, and Emirates ID front + back).'
+            : 'The sponsor must sign the NOC letter.'
+        );
+        setViewingStep(9);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      setSponsorError(null);
+    }
 
     // Use employer signature if same person mode
     const signatureToUse = reuseEmployerSignature && submission.employer_signature_data
@@ -961,6 +1228,10 @@ export function EmployeeForm({
       pakistan_id_back: pakistanIdBackDocRef.current,
       visa_document: visaDocRef.current,
       previous_visa_document: previousVisaDocRef.current,
+      sponsor_passport: sponsorPassportDocRef.current,
+      sponsor_visa: sponsorVisaDocRef.current,
+      sponsor_eid_front: sponsorEidFrontDocRef.current,
+      sponsor_eid_back: sponsorEidBackDocRef.current,
     });
 
   const handlePhotoUpload = async (file: File) => {
@@ -1079,6 +1350,13 @@ export function EmployeeForm({
       if (!validation.valid) {
         setCoverRejectionCount((c) => c + 1);
         setCoverUI({ preview, validating: false, error: validation.error || 'This does not look like a passport cover spread. Please upload a clearer photo.', file });
+        // Clear any previously-validated cover page so a stale green "Valid"
+        // badge can't sit next to this red error border (mirrors sponsor handlers).
+        const clearedPages = { ...passportPagesRef.current };
+        delete clearedPages.cover;
+        setPassportPages(clearedPages);
+        passportPagesRef.current = clearedPages;
+        await saveDocRefs(buildDocRefs({ passportPages: clearedPages }));
         return false;
       }
     } catch {
@@ -1135,6 +1413,15 @@ export function EmployeeForm({
       if (!validation.valid) {
         setInsideRejectionCount((c) => c + 1);
         setInsideUI({ preview, validating: false, error: validation.error || 'This does not look like a passport inside-pages spread. Please upload a clearer photo.', file });
+        // Clear any previously-validated inside page (and its extracted-data
+        // ready flag) so a stale green "Valid" badge can't sit next to this red
+        // error border (mirrors sponsor handlers + handleInsideRemove).
+        const clearedPages = { ...passportPagesRef.current };
+        delete clearedPages.insidePages;
+        setPassportPages(clearedPages);
+        passportPagesRef.current = clearedPages;
+        setPassportDataReady(false);
+        await saveDocRefs(buildDocRefs({ passportPages: clearedPages }));
         return false;
       }
     } catch {
@@ -1474,6 +1761,11 @@ export function EmployeeForm({
             error: validationResult.errorMessage || 'This does not look like a UAE visa. You can retry or skip this upload.',
             file,
           });
+          // Clear any previously-validated doc so a stale green "Valid" badge
+          // can't sit next to this red error border (mirrors sponsor handlers).
+          setPreviousVisaDoc(undefined);
+          previousVisaDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
           return false;
         }
       }
@@ -1517,20 +1809,34 @@ export function EmployeeForm({
           if (extractResult.success && extractResult.data) {
             if (!extractResult.data.emirates_id_number) {
               setEidFrontUI({ preview, validating: false, error: 'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID.', file });
+              // Clear any previously-validated doc so a stale green "Valid"
+              // badge can't sit next to this red error border (mirrors sponsor handlers).
+              setEidFrontDoc(undefined);
+              eidFrontDocRef.current = undefined;
+              await saveDocRefs(buildDocRefs());
               return false;
             }
             extractedData = extractResult.data;
           } else {
             setEidFrontUI({ preview, validating: false, error: 'Could not read this document. Please upload a clear photo of the front of your Emirates ID card.', file });
+            setEidFrontDoc(undefined);
+            eidFrontDocRef.current = undefined;
+            await saveDocRefs(buildDocRefs());
             return false;
           }
         } else {
           setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+          setEidFrontDoc(undefined);
+          eidFrontDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
           return false;
         }
       } catch (err) {
         console.error('EID front validation error:', err);
         setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+        setEidFrontDoc(undefined);
+        eidFrontDocRef.current = undefined;
+        await saveDocRefs(buildDocRefs());
         return false;
       }
     }
@@ -1579,6 +1885,11 @@ export function EmployeeForm({
           const extractResult = await response.json();
           if (!extractResult.success) {
             setEidBackUI({ preview, validating: false, error: 'This does not appear to be the back of an Emirates ID card. Please upload a clear photo of the back.', file });
+            // Clear any previously-validated doc so a stale green "Valid" badge
+            // can't sit next to this red error border (mirrors sponsor handlers).
+            setEidBackDoc(undefined);
+            eidBackDocRef.current = undefined;
+            await saveDocRefs(buildDocRefs());
             return false;
           }
         }
@@ -1599,6 +1910,387 @@ export function EmployeeForm({
     eidBackDocRef.current = newDoc;
     await saveDocRefs(buildDocRefs());
     return true;
+  };
+
+  // --- Sponsor document uploads (family-sponsored only) ---
+  // AI VALIDATES each sponsor upload (type-check parity with the applicant
+  // docs) before marking `validated: true`, so the green "Valid" badge is
+  // truthful. We do NOT extract into form fields — the applicant extract
+  // routes write into the dependent's OWN identity fields, so pointing them
+  // at sponsor docs would corrupt the dependent's data. The typed sponsor
+  // metadata fields remain the source of truth for the NOC. Any extracted
+  // payload is used only to decide valid/invalid and is then discarded.
+  //
+  // PDF-safe: mirrors handlePreviousVisaUpload — images go through
+  // compressImageForAI, PDFs pass the data URL straight to the model (the
+  // validation libs accept PDF data URLs via Claude's `document` block).
+  // Soft-on-route-error: a thrown validation-infra error logs + continues
+  // (must not hard-block a genuine upload). Hard-block on an explicit
+  // invalid verdict. Two failed validations surface the manual-review
+  // affordance (see handleSponsor*ManualReview below).
+
+  const handleSponsorPassportUpload = async (file: File): Promise<boolean> => {
+    const reader = new FileReader();
+    const preview = await new Promise<string>((resolve) => {
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+    setSponsorPassportUI({ preview, validating: true, error: null, file });
+
+    try {
+      const isImage = file.type.startsWith('image/');
+      const imageData = isImage ? await compressImageForAI(preview) : preview;
+      // Sponsor passport is validated as the photo/data page spread
+      // (INSIDE_PAGES) — that validator's VALID criteria are exactly the
+      // data page (photo + MRZ + name) plus its opposite half, which is the
+      // sponsor passport page TME needs. It does NOT write applicant fields.
+      const response = await fetch('/api/validate-passport-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData, expectedType: 'INSIDE_PAGES', submissionId: submission.id, token: aiToken }),
+      });
+      if (response.ok) {
+        const validationResult = await response.json();
+        if (!validationResult.matches) {
+          setSponsorPassportRejectionCount((c) => c + 1);
+          setSponsorPassportUI({
+            preview,
+            validating: false,
+            error: validationResult.errorMessage || "This does not look like the sponsor's passport page. Please upload the passport spread open showing the photo / data page.",
+            file,
+          });
+          // Clear any previously-validated doc so a stale green "Valid" badge
+          // can't sit next to this red error border.
+          setSponsorPassportDoc(undefined);
+          sponsorPassportDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
+        }
+      }
+    } catch (err) {
+      console.error('Sponsor passport validation error:', err);
+    }
+
+    const result = await uploadDocument(submission.id, 'sponsor_passport', file);
+    if (!result) {
+      setSponsorPassportUI({ preview, validating: false, error: 'Failed to upload', file });
+      return false;
+    }
+    const newDoc = { ...result, validated: true };
+    setSponsorPassportDoc(newDoc);
+    sponsorPassportDocRef.current = newDoc;
+    setSponsorPassportUI({ preview, validating: false, error: null, file });
+    setSponsorPassportRejectionCount(0);
+    setSponsorPassportManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs());
+
+    // Auto-fill the typed SPONSOR metadata (name / nationality / passport no.)
+    // from the sponsor's passport so the user doesn't re-type them and the NOC
+    // matches the document. Non-fatal: the upload above already validated, so a
+    // failed/unreadable extraction must NOT block it — silently skip and let the
+    // user type manually. Writes SPONSOR fields ONLY (never applicant fields).
+    // Empty-guard: only fill a field the user hasn't already filled, mirroring
+    // the applicant's one-time seed pattern.
+    try {
+      const isImageForExtract = file.type.startsWith('image/');
+      const imageData = isImageForExtract ? await compressImageForAI(preview) : preview;
+      const extractResponse = await fetch('/api/extract-passport', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData, submissionId: submission.id, token: aiToken }),
+      });
+      if (extractResponse.ok) {
+        const extractResult = await extractResponse.json();
+        if (extractResult.success && extractResult.data) {
+          const data = extractResult.data as {
+            first_name?: string;
+            middle_name?: string;
+            family_name?: string;
+            nationality?: string;
+            passport_no?: string;
+          };
+
+          // sponsor_name = full printed name = given name(s) + surname.
+          const fullName = [data.first_name, data.middle_name, data.family_name]
+            .filter((part) => typeof part === 'string' && part.trim().length > 0)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (fullName && !getValues('sponsor_name')) {
+            setValue('sponsor_name', fullName);
+          }
+
+          if (data.nationality && !getValues('sponsor_nationality')) {
+            const resolved = resolveExtractedNationality(data.nationality, NATIONALITIES);
+            if (resolved) setValue('sponsor_nationality', resolved);
+          }
+
+          const passportNo = data.passport_no?.trim();
+          if (passportNo && !getValues('sponsor_passport_number')) {
+            setValue('sponsor_passport_number', passportNo);
+          }
+
+          // Persist after setValue (setTimeout lets the values propagate first),
+          // mirroring handlePassportExtracted's auto-save.
+          setTimeout(() => {
+            autoSave(getValues());
+          }, 100);
+        }
+      }
+    } catch (err) {
+      // Non-fatal: upload already validated; user can type the fields manually.
+      console.error('Sponsor passport auto-fill error:', err);
+    }
+
+    return true;
+  };
+
+  const handleSponsorVisaUpload = async (file: File): Promise<boolean> => {
+    const reader = new FileReader();
+    const preview = await new Promise<string>((resolve) => {
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+    setSponsorVisaUI({ preview, validating: true, error: null, file });
+
+    try {
+      const isImage = file.type.startsWith('image/');
+      const imageData = isImage ? await compressImageForAI(preview) : preview;
+      // Reuse the applicant previous-visa category ('previous_visa') — both
+      // mean "an existing UAE residence visa". Safe: no applicant writes.
+      const response = await fetch('/api/validate-visa-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData, expectedCategory: 'previous_visa', submissionId: submission.id, token: aiToken }),
+      });
+      if (response.ok) {
+        const validationResult = await response.json();
+        if (!validationResult.valid) {
+          setSponsorVisaRejectionCount((c) => c + 1);
+          setSponsorVisaUI({
+            preview,
+            validating: false,
+            error: validationResult.errorMessage || "This does not look like the sponsor's UAE residence visa. You can retry or submit it for manual review.",
+            file,
+          });
+          // Clear any previously-validated doc so a stale green "Valid" badge
+          // can't sit next to this red error border.
+          setSponsorVisaDoc(undefined);
+          sponsorVisaDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
+        }
+      }
+    } catch (err) {
+      console.error('Sponsor visa validation error:', err);
+    }
+
+    const result = await uploadDocument(submission.id, 'sponsor_visa', file);
+    if (!result) {
+      setSponsorVisaUI({ preview, validating: false, error: 'Failed to upload', file });
+      return false;
+    }
+    const newDoc = { ...result, validated: true };
+    setSponsorVisaDoc(newDoc);
+    sponsorVisaDocRef.current = newDoc;
+    setSponsorVisaUI({ preview, validating: false, error: null, file });
+    setSponsorVisaRejectionCount(0);
+    setSponsorVisaManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs());
+    return true;
+  };
+
+  const handleSponsorEidFrontUpload = async (file: File): Promise<boolean> => {
+    const reader = new FileReader();
+    const preview = await new Promise<string>((resolve) => {
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+    setSponsorEidFrontUI({ preview, validating: true, error: null, file });
+
+    try {
+      const isImage = file.type.startsWith('image/');
+      const imageData = isImage ? await compressImageForAI(preview) : preview;
+      // TYPE-CHECK ONLY via /api/extract-eid. Front EID is valid when the
+      // route returns success AND an EID-shaped number. The extracted data
+      // is DISCARDED — we never setValue() it onto the applicant.
+      const response = await fetch('/api/extract-eid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData, side: 'front', submissionId: submission.id, token: aiToken }),
+      });
+      if (response.ok) {
+        const extractResult = await response.json();
+        if (!extractResult.success || !extractResult.data?.emirates_id_number) {
+          setSponsorEidFrontRejectionCount((c) => c + 1);
+          setSponsorEidFrontUI({
+            preview,
+            validating: false,
+            error: "This does not look like the front of the sponsor's Emirates ID. Please upload the front of a valid UAE Emirates ID, or submit it for manual review.",
+            file,
+          });
+          // Clear any previously-validated doc so a stale green "Valid" badge
+          // can't sit next to this red error border.
+          setSponsorEidFrontDoc(undefined);
+          sponsorEidFrontDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
+        }
+      }
+    } catch (err) {
+      console.error('Sponsor EID front validation error:', err);
+    }
+
+    const result = await uploadDocument(submission.id, 'sponsor_eid_front', file);
+    if (!result) {
+      setSponsorEidFrontUI({ preview, validating: false, error: 'Failed to upload', file });
+      return false;
+    }
+    const newDoc = { ...result, validated: true };
+    setSponsorEidFrontDoc(newDoc);
+    sponsorEidFrontDocRef.current = newDoc;
+    setSponsorEidFrontUI({ preview, validating: false, error: null, file });
+    setSponsorEidFrontRejectionCount(0);
+    setSponsorEidFrontManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs());
+    return true;
+  };
+
+  const handleSponsorEidBackUpload = async (file: File): Promise<boolean> => {
+    const reader = new FileReader();
+    const preview = await new Promise<string>((resolve) => {
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+    setSponsorEidBackUI({ preview, validating: true, error: null, file });
+
+    try {
+      const isImage = file.type.startsWith('image/');
+      const imageData = isImage ? await compressImageForAI(preview) : preview;
+      // TYPE-CHECK ONLY via /api/extract-eid (back). The back is valid when
+      // the route returns success (is_valid_back true). Data is DISCARDED.
+      const response = await fetch('/api/extract-eid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData, side: 'back', submissionId: submission.id, token: aiToken }),
+      });
+      if (response.ok) {
+        const extractResult = await response.json();
+        if (!extractResult.success) {
+          setSponsorEidBackRejectionCount((c) => c + 1);
+          setSponsorEidBackUI({
+            preview,
+            validating: false,
+            error: "This does not look like the back of the sponsor's Emirates ID. Please upload a clear photo of the back, or submit it for manual review.",
+            file,
+          });
+          // Clear any previously-validated doc so a stale green "Valid" badge
+          // can't sit next to this red error border.
+          setSponsorEidBackDoc(undefined);
+          sponsorEidBackDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
+        }
+      }
+    } catch (err) {
+      console.error('Sponsor EID back validation error:', err);
+    }
+
+    const result = await uploadDocument(submission.id, 'sponsor_eid_back', file);
+    if (!result) {
+      setSponsorEidBackUI({ preview, validating: false, error: 'Failed to upload', file });
+      return false;
+    }
+    const newDoc = { ...result, validated: true };
+    setSponsorEidBackDoc(newDoc);
+    sponsorEidBackDocRef.current = newDoc;
+    setSponsorEidBackUI({ preview, validating: false, error: null, file });
+    setSponsorEidBackRejectionCount(0);
+    setSponsorEidBackManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs());
+    return true;
+  };
+
+  // --- Sponsor manual-review fallbacks ---
+  // Mirror the applicant passport cover/inside manual-review path: bypass the
+  // AI gate after 2 rejections, upload as-is, stamp validated:true (unblocks
+  // the form) AND needsReview:true (TME verifies on the portal side via the
+  // needs_review column). needsReview flows through buildDocRefs because it
+  // lives on the same ref object pulled into saveDocRefs.
+  const handleSponsorPassportManualReview = async () => {
+    if (!sponsorPassportUI.file || !sponsorPassportUI.preview) return;
+    setSponsorPassportUI({ preview: sponsorPassportUI.preview, file: sponsorPassportUI.file, validating: false, error: null });
+    setSponsorPassportManualReviewSubmitting(true);
+    const result = await uploadDocument(submission.id, 'sponsor_passport', sponsorPassportUI.file);
+    if (!result) {
+      setSponsorPassportUI({ preview: sponsorPassportUI.preview, file: sponsorPassportUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setSponsorPassportManualReviewSubmitting(false);
+      return;
+    }
+    setSponsorPassportManualReviewSubmitting(false);
+    const newDoc = { ...result, validated: true, needsReview: true };
+    setSponsorPassportDoc(newDoc);
+    sponsorPassportDocRef.current = newDoc;
+    setSponsorPassportRejectionCount(0);
+    setSponsorPassportManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs());
+  };
+
+  const handleSponsorVisaManualReview = async () => {
+    if (!sponsorVisaUI.file || !sponsorVisaUI.preview) return;
+    setSponsorVisaUI({ preview: sponsorVisaUI.preview, file: sponsorVisaUI.file, validating: false, error: null });
+    setSponsorVisaManualReviewSubmitting(true);
+    const result = await uploadDocument(submission.id, 'sponsor_visa', sponsorVisaUI.file);
+    if (!result) {
+      setSponsorVisaUI({ preview: sponsorVisaUI.preview, file: sponsorVisaUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setSponsorVisaManualReviewSubmitting(false);
+      return;
+    }
+    setSponsorVisaManualReviewSubmitting(false);
+    const newDoc = { ...result, validated: true, needsReview: true };
+    setSponsorVisaDoc(newDoc);
+    sponsorVisaDocRef.current = newDoc;
+    setSponsorVisaRejectionCount(0);
+    setSponsorVisaManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs());
+  };
+
+  const handleSponsorEidFrontManualReview = async () => {
+    if (!sponsorEidFrontUI.file || !sponsorEidFrontUI.preview) return;
+    setSponsorEidFrontUI({ preview: sponsorEidFrontUI.preview, file: sponsorEidFrontUI.file, validating: false, error: null });
+    setSponsorEidFrontManualReviewSubmitting(true);
+    const result = await uploadDocument(submission.id, 'sponsor_eid_front', sponsorEidFrontUI.file);
+    if (!result) {
+      setSponsorEidFrontUI({ preview: sponsorEidFrontUI.preview, file: sponsorEidFrontUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setSponsorEidFrontManualReviewSubmitting(false);
+      return;
+    }
+    setSponsorEidFrontManualReviewSubmitting(false);
+    const newDoc = { ...result, validated: true, needsReview: true };
+    setSponsorEidFrontDoc(newDoc);
+    sponsorEidFrontDocRef.current = newDoc;
+    setSponsorEidFrontRejectionCount(0);
+    setSponsorEidFrontManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs());
+  };
+
+  const handleSponsorEidBackManualReview = async () => {
+    if (!sponsorEidBackUI.file || !sponsorEidBackUI.preview) return;
+    setSponsorEidBackUI({ preview: sponsorEidBackUI.preview, file: sponsorEidBackUI.file, validating: false, error: null });
+    setSponsorEidBackManualReviewSubmitting(true);
+    const result = await uploadDocument(submission.id, 'sponsor_eid_back', sponsorEidBackUI.file);
+    if (!result) {
+      setSponsorEidBackUI({ preview: sponsorEidBackUI.preview, file: sponsorEidBackUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setSponsorEidBackManualReviewSubmitting(false);
+      return;
+    }
+    setSponsorEidBackManualReviewSubmitting(false);
+    const newDoc = { ...result, validated: true, needsReview: true };
+    setSponsorEidBackDoc(newDoc);
+    sponsorEidBackDocRef.current = newDoc;
+    setSponsorEidBackRejectionCount(0);
+    setSponsorEidBackManualReviewConfirmed(false);
+    await saveDocRefs(buildDocRefs());
   };
 
   const handlePakistanIdFrontUpload = async (file: File): Promise<boolean> => {
@@ -1622,16 +2314,27 @@ export function EmployeeForm({
           const extractResult = await response.json();
           if (!extractResult.success) {
             setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
+            // Clear any previously-validated doc so a stale green "Valid" badge
+            // can't sit next to this red error border (mirrors sponsor handlers).
+            setPakistanIdFrontDoc(undefined);
+            pakistanIdFrontDocRef.current = undefined;
+            await saveDocRefs(buildDocRefs());
             return false;
           }
           if (extractResult.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
         } else {
           setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+          setPakistanIdFrontDoc(undefined);
+          pakistanIdFrontDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
           return false;
         }
       } catch (err) {
         console.error('Pakistan ID front validation error:', err);
         setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+        setPakistanIdFrontDoc(undefined);
+        pakistanIdFrontDocRef.current = undefined;
+        await saveDocRefs(buildDocRefs());
         return false;
       }
     }
@@ -1671,6 +2374,11 @@ export function EmployeeForm({
           const extractResult = await response.json();
           if (!extractResult.success) {
             setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
+            // Clear any previously-validated doc so a stale green "Valid" badge
+            // can't sit next to this red error border (mirrors sponsor handlers).
+            setPakistanIdBackDoc(undefined);
+            pakistanIdBackDocRef.current = undefined;
+            await saveDocRefs(buildDocRefs());
             return false;
           }
           if (extractResult.data?.address) {
@@ -1708,6 +2416,10 @@ export function EmployeeForm({
   const eidBackScan = useScannerIntercept(handleEidBackUpload);
   const pakistanIdFrontScan = useScannerIntercept(handlePakistanIdFrontUpload);
   const pakistanIdBackScan = useScannerIntercept(handlePakistanIdBackUpload);
+  const sponsorPassportScan = useScannerIntercept(handleSponsorPassportUpload);
+  const sponsorVisaScan = useScannerIntercept(handleSponsorVisaUpload);
+  const sponsorEidFrontScan = useScannerIntercept(handleSponsorEidFrontUpload);
+  const sponsorEidBackScan = useScannerIntercept(handleSponsorEidBackUpload);
 
   // Fallback: if inside pages are uploaded but extraction hasn't run yet
   // (e.g. page reload with saved data), unlock the form
@@ -2453,10 +3165,16 @@ export function EmployeeForm({
             <FormSection
               title="UAE Visa Status"
               icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+              /* Family-sponsored hides the previous-docs section below (which
+                 normally carries the step-4 badge), so surface the badge here
+                 instead so the indicator numbering stays consistent. */
+              stepNumber={isFamilySponsored ? displayedStepNumber(4) : undefined}
             >
               <div className="space-y-4">
                 <p className="text-sm text-gray-600">
-                  {submission.is_same_person
+                  {isFamilySponsored
+                    ? 'Please confirm the visa you currently hold (sponsored by your family member) and upload a copy below.'
+                    : submission.is_same_person
                     ? 'Please confirm your current visa status.'
                     : 'Your employer has indicated that you are currently in the UAE. Please confirm your current visa status.'}
                 </p>
@@ -2560,8 +3278,12 @@ export function EmployeeForm({
           )}
 
           {/* UAE Visa and Emirates ID — combined previous-documents section.
-              New-hire path only (on renewal we already have these on file). */}
-          {!isRenewal && (
+              New-hire path only (on renewal we already have these on file).
+              Hidden for family-sponsored: their EID is mandatory and handled
+              by the dedicated "Your Emirates ID" block below, so we don't
+              render the optional previous-docs version (would duplicate the
+              same eid_front/eid_back slots). */}
+          {!isRenewal && !isFamilySponsored && (
           <FormSection
             title="UAE Visa and Emirates ID"
             icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -2760,7 +3482,92 @@ export function EmployeeForm({
           </FormSection>
           )}
 
-          {!employerVisaInUAE && hasPreviousUaeDocs === false && (
+          {/* Family-sponsored: applicant's OWN Emirates ID is MANDATORY
+              (front + back), regardless of renewal status. The applicant's
+              residence visa is collected by the visa-status section above
+              (forced visible + mandatory via the visa override). This block
+              is keyed on isFamilySponsored — NOT the !isRenewal section — so
+              it also shows on renewal. */}
+          {isFamilySponsored && (
+            <FormSection
+              title="Your Emirates ID"
+              icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            >
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#FEF3C7' }}>
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
+                  <p className="text-sm text-amber-800 font-medium">
+                    Please upload the front and back of your own Emirates ID. This is required for your
+                    employment ID / labour card application.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
+                  {/* Applicant EID Front */}
+                  <div className="flex flex-col">
+                    <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                    <UploadSlot
+                      label=""
+                      description="Front of your Emirates ID"
+                      expectedType="INSIDE_PAGES"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      maxSizeMB={10}
+                      file={eidFrontUI.file}
+                      preview={eidFrontUI.preview || undefined}
+                      validated={!!eidFrontDoc?.validated}
+                      validating={eidFrontUI.validating}
+                      error={eidFrontUI.error || undefined}
+                      onUpload={eidFrontScan.intercepted}
+                      onRemove={async () => {
+                        setEidFrontUI({ preview: null, validating: false, error: null, file: null });
+                        setEidFrontDoc(undefined);
+                        eidFrontDocRef.current = undefined;
+                        setValue('eid_number', undefined);
+                        setValue('eid_issue_date', undefined);
+                        setValue('eid_expiry_date', undefined);
+                        await saveDocRefs(buildDocRefs());
+                      }}
+                    />
+                    {eidFrontScan.scannerModal}
+                  </div>
+
+                  {/* Applicant EID Back */}
+                  <div className="flex flex-col">
+                    <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                    <UploadSlot
+                      label=""
+                      description="Back of your Emirates ID"
+                      expectedType="INSIDE_PAGES"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      maxSizeMB={10}
+                      file={eidBackUI.file}
+                      preview={eidBackUI.preview || undefined}
+                      validated={!!eidBackDoc?.validated}
+                      validating={eidBackUI.validating}
+                      error={eidBackUI.error || undefined}
+                      onUpload={eidBackScan.intercepted}
+                      onRemove={async () => {
+                        setEidBackUI({ preview: null, validating: false, error: null, file: null });
+                        setEidBackDoc(undefined);
+                        eidBackDocRef.current = undefined;
+                        await saveDocRefs(buildDocRefs());
+                      }}
+                    />
+                    {eidBackScan.scannerModal}
+                  </div>
+                </div>
+
+                {eidFrontDoc?.validated && eidBackDoc?.validated && (
+                  <div className="flex items-center gap-2 text-green-600 text-sm">
+                    <CheckCircle className="w-4 h-4" />
+                    Emirates ID uploaded (front and back).
+                  </div>
+                )}
+              </div>
+            </FormSection>
+          )}
+
+          {!employerVisaInUAE && !isFamilySponsored && hasPreviousUaeDocs === false && (
             <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
               <div className="flex items-center gap-2">
                 <Info className="w-4 h-4 text-gray-400" />
@@ -2838,7 +3645,11 @@ export function EmployeeForm({
               )}
             </div>
             {viewingStep === 5 && (
-              <StepNavButtons enabled={isFamilyComplete} onContinue={() => setViewingStep(6)} onBack={() => setViewingStep(4)} />
+              <StepNavButtons
+                enabled={isFamilyComplete}
+                onContinue={() => setViewingStep(6)}
+                onBack={() => setViewingStep(4)}
+              />
             )}
           </FormSection>
         </div>
@@ -3047,7 +3858,11 @@ export function EmployeeForm({
             </div>
           </FormSection>
           {viewingStep === 6 && (
-            <StepNavButtons enabled={isContactComplete} onContinue={() => setViewingStep(7)} onBack={() => setViewingStep(5)} />
+            <StepNavButtons
+              enabled={isContactComplete}
+              onContinue={() => setViewingStep(7)}
+              onBack={() => setViewingStep(5)}
+            />
           )}
         </div>
       </RevealSection>
@@ -3436,6 +4251,411 @@ export function EmployeeForm({
         </div>
       </RevealSection>
 
+      {/* Sponsor Documents & NOC (internal index 9) — family-sponsored only.
+          This is the VERY LAST display step (after Review & Sign 8) per
+          visibleStepIndices: the sponsor signs the NOC and the form is
+          submitted from here. */}
+      {isFamilySponsored && (
+      <RevealSection
+        show={viewingStep === 9}
+        onReveal={() => scrollToRef(sponsorRef)}
+      >
+        <div ref={sponsorRef} className="space-y-6">
+          {/* Sponsor identity documents */}
+          <FormSection
+            title="Sponsor Documents"
+            icon={<ShieldCheck className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            stepNumber={displayedStepNumber(9)}
+          >
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  Your residence visa is sponsored by a family member — please upload your sponsor&apos;s documents below.
+                </p>
+              </div>
+
+              {/* Sponsor passport */}
+              <div className="space-y-2">
+                <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Sponsor&apos;s Passport <span className="text-red-500">*</span></p>
+                <div
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: '#EBF4FF' }}
+                >
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Upload your sponsor&apos;s passport — the data page with their photo.</p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      PDF or a clear photo. A crop of just the photo may be rejected.
+                    </p>
+                    <SampleImageToggle imageSrc="/samples/passport-inside-example.png" altText="Example sponsor passport data page with photo" label="See example photo" imageClassName="w-64 h-auto" />
+                  </div>
+                </div>
+                <UploadSlot
+                  label=""
+                  description="Scan or photo of your sponsor's passport (PDF or image)"
+                  expectedType="INSIDE_PAGES"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  maxSizeMB={10}
+                  file={sponsorPassportUI.file}
+                  preview={sponsorPassportUI.preview || undefined}
+                  validated={!!sponsorPassportDoc?.validated}
+                  validating={sponsorPassportUI.validating}
+                  error={sponsorPassportUI.error || undefined}
+                  onUpload={sponsorPassportScan.intercepted}
+                  onRemove={async () => {
+                    setSponsorPassportUI({ preview: null, validating: false, error: null, file: null });
+                    // Keep sponsorPassportRejectionCount (same rationale as
+                    // handleCoverRemove) so the manual-review threshold stays
+                    // reachable through the remove + re-upload path.
+                    setSponsorPassportManualReviewConfirmed(false);
+                    setSponsorPassportDoc(undefined);
+                    sponsorPassportDocRef.current = undefined;
+                    await saveDocRefs(buildDocRefs());
+                  }}
+                />
+                {sponsorPassportScan.scannerModal}
+                {shouldOfferManualReview(sponsorPassportRejectionCount) && sponsorPassportUI.file && !sponsorPassportDoc?.validated && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+                    <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your sponsor&apos;s passport, you can submit it for manual review.
+                    </p>
+                    <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 flex-shrink-0"
+                        checked={sponsorPassportManualReviewConfirmed}
+                        onChange={(e) => setSponsorPassportManualReviewConfirmed(e.target.checked)}
+                      />
+                      <span>I confirm this is my sponsor&apos;s passport. I understand a TME team member will verify it manually.</span>
+                    </label>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleSponsorPassportManualReview}
+                        disabled={!sponsorPassportManualReviewConfirmed || sponsorPassportManualReviewSubmitting}
+                        className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ backgroundColor: TME_COLORS.primary }}
+                      >
+                        {sponsorPassportManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sponsor visa */}
+              <div className="space-y-2">
+                <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Sponsor&apos;s Residence Visa <span className="text-red-500">*</span></p>
+                <div
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: '#EBF4FF' }}
+                >
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Upload your sponsor&apos;s UAE residence visa.</p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      The visa showing their name and visa details.
+                    </p>
+                    <SampleImageToggle imageSrc="/samples/visa-example.png" altText="Example sponsor UAE residence visa" label="See example photo" imageClassName="w-64 h-auto" />
+                  </div>
+                </div>
+                <UploadSlot
+                  label=""
+                  description="Scan or photo of your sponsor's residence visa (PDF or image)"
+                  expectedType="INSIDE_PAGES"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  maxSizeMB={10}
+                  file={sponsorVisaUI.file}
+                  preview={sponsorVisaUI.preview || undefined}
+                  validated={!!sponsorVisaDoc?.validated}
+                  validating={sponsorVisaUI.validating}
+                  error={sponsorVisaUI.error || undefined}
+                  onUpload={sponsorVisaScan.intercepted}
+                  onRemove={async () => {
+                    setSponsorVisaUI({ preview: null, validating: false, error: null, file: null });
+                    setSponsorVisaManualReviewConfirmed(false);
+                    setSponsorVisaDoc(undefined);
+                    sponsorVisaDocRef.current = undefined;
+                    await saveDocRefs(buildDocRefs());
+                  }}
+                />
+                {sponsorVisaScan.scannerModal}
+                {shouldOfferManualReview(sponsorVisaRejectionCount) && sponsorVisaUI.file && !sponsorVisaDoc?.validated && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+                    <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your sponsor&apos;s residence visa, you can submit it for manual review.
+                    </p>
+                    <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 flex-shrink-0"
+                        checked={sponsorVisaManualReviewConfirmed}
+                        onChange={(e) => setSponsorVisaManualReviewConfirmed(e.target.checked)}
+                      />
+                      <span>I confirm this is my sponsor&apos;s UAE residence visa. I understand a TME team member will verify it manually.</span>
+                    </label>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleSponsorVisaManualReview}
+                        disabled={!sponsorVisaManualReviewConfirmed || sponsorVisaManualReviewSubmitting}
+                        className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ backgroundColor: TME_COLORS.primary }}
+                      >
+                        {sponsorVisaManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sponsor EID front + back */}
+              <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Sponsor&apos;s Emirates ID <span className="text-red-500">*</span></p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
+                <div className="flex flex-col">
+                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                  <div
+                    className="flex items-start gap-3 p-4 rounded-lg mb-2"
+                    style={{ backgroundColor: '#EBF4FF' }}
+                  >
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <p className="font-medium">Front of your sponsor&apos;s Emirates ID.</p>
+                      <SampleImageToggle imageSrc="/samples/eid-front-example.png" altText="Example front of sponsor's Emirates ID" label="See example photo" imageClassName="max-w-full h-auto" />
+                    </div>
+                  </div>
+                  <UploadSlot
+                    label=""
+                    description="Front of sponsor's Emirates ID"
+                    expectedType="INSIDE_PAGES"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    maxSizeMB={10}
+                    file={sponsorEidFrontUI.file}
+                    preview={sponsorEidFrontUI.preview || undefined}
+                    validated={!!sponsorEidFrontDoc?.validated}
+                    validating={sponsorEidFrontUI.validating}
+                    error={sponsorEidFrontUI.error || undefined}
+                    onUpload={sponsorEidFrontScan.intercepted}
+                    onRemove={async () => {
+                      setSponsorEidFrontUI({ preview: null, validating: false, error: null, file: null });
+                      setSponsorEidFrontManualReviewConfirmed(false);
+                      setSponsorEidFrontDoc(undefined);
+                      sponsorEidFrontDocRef.current = undefined;
+                      await saveDocRefs(buildDocRefs());
+                    }}
+                  />
+                  {sponsorEidFrontScan.scannerModal}
+                  {shouldOfferManualReview(sponsorEidFrontRejectionCount) && sponsorEidFrontUI.file && !sponsorEidFrontDoc?.validated && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+                      <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                        <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is the front of your sponsor&apos;s Emirates ID, you can submit it for manual review.
+                      </p>
+                      <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 flex-shrink-0"
+                          checked={sponsorEidFrontManualReviewConfirmed}
+                          onChange={(e) => setSponsorEidFrontManualReviewConfirmed(e.target.checked)}
+                        />
+                        <span>I confirm this is the front of my sponsor&apos;s Emirates ID. I understand a TME team member will verify it manually.</span>
+                      </label>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleSponsorEidFrontManualReview}
+                          disabled={!sponsorEidFrontManualReviewConfirmed || sponsorEidFrontManualReviewSubmitting}
+                          className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ backgroundColor: TME_COLORS.primary }}
+                        >
+                          {sponsorEidFrontManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col">
+                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                  <div
+                    className="flex items-start gap-3 p-4 rounded-lg mb-2"
+                    style={{ backgroundColor: '#EBF4FF' }}
+                  >
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <p className="font-medium">Back of your sponsor&apos;s Emirates ID.</p>
+                      <SampleImageToggle imageSrc="/samples/eid-back-example.png" altText="Example back of sponsor's Emirates ID" label="See example photo" imageClassName="max-w-full h-auto" />
+                    </div>
+                  </div>
+                  <UploadSlot
+                    label=""
+                    description="Back of sponsor's Emirates ID"
+                    expectedType="INSIDE_PAGES"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    maxSizeMB={10}
+                    file={sponsorEidBackUI.file}
+                    preview={sponsorEidBackUI.preview || undefined}
+                    validated={!!sponsorEidBackDoc?.validated}
+                    validating={sponsorEidBackUI.validating}
+                    error={sponsorEidBackUI.error || undefined}
+                    onUpload={sponsorEidBackScan.intercepted}
+                    onRemove={async () => {
+                      setSponsorEidBackUI({ preview: null, validating: false, error: null, file: null });
+                      setSponsorEidBackManualReviewConfirmed(false);
+                      setSponsorEidBackDoc(undefined);
+                      sponsorEidBackDocRef.current = undefined;
+                      await saveDocRefs(buildDocRefs());
+                    }}
+                  />
+                  {sponsorEidBackScan.scannerModal}
+                  {shouldOfferManualReview(sponsorEidBackRejectionCount) && sponsorEidBackUI.file && !sponsorEidBackDoc?.validated && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+                      <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                        <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is the back of your sponsor&apos;s Emirates ID, you can submit it for manual review.
+                      </p>
+                      <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 flex-shrink-0"
+                          checked={sponsorEidBackManualReviewConfirmed}
+                          onChange={(e) => setSponsorEidBackManualReviewConfirmed(e.target.checked)}
+                        />
+                        <span>I confirm this is the back of my sponsor&apos;s Emirates ID. I understand a TME team member will verify it manually.</span>
+                      </label>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleSponsorEidBackManualReview}
+                          disabled={!sponsorEidBackManualReviewConfirmed || sponsorEidBackManualReviewSubmitting}
+                          className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ backgroundColor: TME_COLORS.primary }}
+                        >
+                          {sponsorEidBackManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </FormSection>
+
+          {/* Sponsor metadata — NOC merge fields */}
+          <FormSection
+            title="Sponsor Details"
+            icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Sponsor's Full Name"
+                  required
+                  value={sponsorName || ''}
+                  onChange={(e) => setValue('sponsor_name', e.target.value)}
+                />
+                <CustomDropdown
+                  label="Sponsor's Nationality"
+                  options={SORTED_NATIONALITIES.map((n) => ({ value: n, label: n }))}
+                  value={sponsorNationality || ''}
+                  onChange={(val) => setValue('sponsor_nationality', val)}
+                  placeholder="Select nationality"
+                  required
+                  searchable
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Sponsor's Passport Number"
+                  required
+                  value={sponsorPassportNumber || ''}
+                  onChange={(e) => setValue('sponsor_passport_number', e.target.value)}
+                />
+                <CustomDropdown
+                  label="Relationship to You"
+                  options={relationshipOptions}
+                  value={sponsorRelationship || ''}
+                  onChange={(val) => setValue('sponsor_relationship', val as 'husband' | 'wife' | 'father' | 'mother' | 'son' | 'daughter')}
+                  placeholder="Select relationship"
+                  required
+                />
+              </div>
+              <PhoneInput
+                label="Sponsor's Mobile"
+                value={sponsorMobile}
+                onChange={(value) => setValue('sponsor_mobile', value || '')}
+                defaultCountry="AE"
+              />
+            </div>
+          </FormSection>
+
+          {/* Inline NOC letter review + sponsor signature */}
+          <FormSection
+            title="No Objection Certificate (NOC)"
+            icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Please review the No Objection Certificate below. The sponsor must read and sign it to
+                confirm they have no objection to you working at the company.
+              </p>
+              <div className="rounded-lg border-2 border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
+                {buildNocText({
+                  sponsorName,
+                  sponsorNationality,
+                  sponsorPassportNumber,
+                  sponsorMobile,
+                  relationship: sponsorRelationship,
+                  dependentName: fullName,
+                  dependentNationality: nationality,
+                  dependentPassportNumber: passportNumber,
+                  dependentGender: gender,
+                  companyName: nocCompanyName,
+                  jobTitle: nocJobTitle,
+                })}
+              </div>
+              <SignaturePad
+                onSignatureChange={(value) => {
+                  setSponsorSignature(value);
+                  setValue('sponsor_noc_signature', value ?? undefined);
+                  setValue('sponsor_noc_signed_at', value ? new Date().toISOString() : undefined);
+                  if (value && sponsorError) setSponsorError(null);
+                }}
+                disabled={isSubmitting}
+                label="Sponsor Signature (NOC)"
+                initialValue={sponsorSignature}
+              />
+              {sponsorError && (
+                <p className="text-sm text-red-500">{sponsorError}</p>
+              )}
+            </div>
+          </FormSection>
+
+          {/* Sponsor step is the FINAL step for family-sponsored applicants:
+              Back returns to Review & Sign (8); the form is submitted via the
+              Submit button below (the form's only submit). */}
+          {viewingStep === 9 && (
+            <div className="flex justify-between items-center mt-6">
+              <button
+                type="button"
+                onClick={() => setViewingStep(8)}
+                className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border-2 hover:bg-gray-50"
+                style={{ color: TME_COLORS.primary, borderColor: TME_COLORS.primary }}
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Back
+              </button>
+              <Button
+                type="submit"
+                loading={isSubmitting}
+                size="lg"
+              >
+                {submission.onboarding_type === 'renewal' ? 'Submit Renewal Form' : 'Submit Onboarding Form'}
+              </Button>
+            </div>
+          )}
+        </div>
+      </RevealSection>
+      )}
+
       {/* Step 8: Review & Sign */}
       <RevealSection
         show={viewingStep === 8}
@@ -3456,6 +4676,7 @@ export function EmployeeForm({
                   onSignatureChange={setSignature}
                   disabled={isSubmitting}
                   label="Employee Signature"
+                  initialValue={signature}
                 />
                 {signatureError && (
                   <p className="text-sm text-red-500">{signatureError}</p>
@@ -3483,16 +4704,29 @@ export function EmployeeForm({
             </div>
           )}
 
-          {/* Submit Button */}
-          <div className="flex justify-end mt-6">
-            <Button
-              type="submit"
-              loading={isSubmitting}
-              size="lg"
-            >
-              {submission.onboarding_type === 'renewal' ? 'Submit Renewal Form' : 'Submit Onboarding Form'}
-            </Button>
-          </div>
+          {/* Non-family: Review & Sign is the FINAL step — submit here. */}
+          {!isFamilySponsored && (
+            <div className="flex justify-end mt-6">
+              <Button
+                type="submit"
+                loading={isSubmitting}
+                size="lg"
+              >
+                {submission.onboarding_type === 'renewal' ? 'Submit Renewal Form' : 'Submit Onboarding Form'}
+              </Button>
+            </div>
+          )}
+
+          {/* Family-sponsored: the sponsor signs the NOC AFTER review, so this
+              is not the final step. Continue to the Sponsor step (9) once the
+              employee signature is present; Back returns to Education (7). */}
+          {isFamilySponsored && (
+            <StepNavButtons
+              enabled={!!signature || reuseEmployerSignature}
+              onContinue={() => setViewingStep(9)}
+              onBack={() => setViewingStep(7)}
+            />
+          )}
         </div>
       </RevealSection>
     </form>

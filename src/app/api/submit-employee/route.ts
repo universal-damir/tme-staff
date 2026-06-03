@@ -55,6 +55,21 @@ export async function POST(req: NextRequest) {
     // P2-3: derive signer IP from request headers, never from body.
     const signerIp = getSignerIp(req);
 
+    // Sponsor NOC signature (family-sponsored flow): the base64 PNG travels
+    // inside employeeData. Extract it BEFORE sanitizeFreeText runs so the
+    // large base64 isn't truncated by the 2000-char cap, write it to the
+    // top-level Supabase column (signed_at + signer_ip set server-side, like
+    // the employee signature), then delete it (and any client-sent timestamp)
+    // from employeeData so it isn't duplicated inside the employee_data jsonb.
+    const sponsorNocSignature =
+      employeeData && typeof employeeData === 'object'
+        ? (employeeData as Record<string, unknown>).sponsor_noc_signature
+        : undefined;
+    if (employeeData && typeof employeeData === 'object') {
+      delete (employeeData as Record<string, unknown>).sponsor_noc_signature;
+      delete (employeeData as Record<string, unknown>).sponsor_noc_signed_at;
+    }
+
     // P2-13: strip control chars / angle brackets / cap string lengths.
     const cleanEmployeeData = sanitizeFreeText(employeeData) as Record<string, unknown>;
     const cleanEmployerData = isSamePerson && employerData
@@ -62,6 +77,17 @@ export async function POST(req: NextRequest) {
       : null;
 
     const now = new Date().toISOString();
+
+    // Top-level sponsor NOC columns, written only when a signature was
+    // captured. signed_at / signer_ip are server-derived (never from body).
+    const sponsorNocFields: Record<string, unknown> =
+      typeof sponsorNocSignature === 'string' && sponsorNocSignature.length > 0
+        ? {
+            sponsor_noc_signature_data: sponsorNocSignature,
+            sponsor_noc_signed_at: now,
+            sponsor_noc_signer_ip: signerIp,
+          }
+        : {};
 
     // 1. Save to Supabase
     let updateData: Record<string, unknown>;
@@ -77,6 +103,7 @@ export async function POST(req: NextRequest) {
         employee_signature_data: signature,
         employee_signed_at: now,
         employee_signer_ip: signerIp,
+        ...sponsorNocFields,
         current_step: 'complete',
         status: 'complete',
         updated_at: now,
@@ -88,6 +115,7 @@ export async function POST(req: NextRequest) {
         employee_signature_data: signature,
         employee_signed_at: now,
         employee_signer_ip: signerIp,
+        ...sponsorNocFields,
         current_step: 'complete',
         status: 'complete',
         updated_at: now,

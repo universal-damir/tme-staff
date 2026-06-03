@@ -50,7 +50,7 @@ export async function autoSaveEmployeeData(
 
 export async function uploadDocument(
   submissionId: string,
-  type: 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional' | 'job_offer_letter' | 'visa_document' | 'previous_visa_document' | 'eid_front' | 'eid_back' | 'pakistan_id_front' | 'pakistan_id_back',
+  type: 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional' | 'job_offer_letter' | 'visa_document' | 'previous_visa_document' | 'eid_front' | 'eid_back' | 'pakistan_id_front' | 'pakistan_id_back' | 'sponsor_passport' | 'sponsor_visa' | 'sponsor_eid_front' | 'sponsor_eid_back',
   file: File
 ): Promise<{ path: string; filename: string } | null> {
   const fd = new FormData();

@@ -9,18 +9,28 @@ interface SignaturePadProps {
   onSignatureChange: (data: string | null) => void;
   disabled?: boolean;
   label?: string;
+  // Restore a previously-captured signature on mount. When a non-empty data
+  // URL is supplied the pad starts in the LOCKED state showing that image, so
+  // navigating away and back (which remounts this component) does not visually
+  // lose a signature the parent still holds. Seeded ONCE on mount only.
+  initialValue?: string | null;
 }
 
-export function SignaturePad({ onSignatureChange, disabled = false, label = 'Signature' }: SignaturePadProps) {
+export function SignaturePad({ onSignatureChange, disabled = false, label = 'Signature', initialValue }: SignaturePadProps) {
+  // A non-empty data URL means the parent already has a saved signature; start
+  // locked so the first render shows it (with the Edit button) instead of an
+  // empty canvas. We do NOT call onSignatureChange on mount — the parent value
+  // is already correct — and we only read initialValue for the initial state.
+  const hasInitialSignature = !!(initialValue && initialValue.startsWith('data:'));
   const sigCanvas = useRef<SignatureCanvas>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isEmpty, setIsEmpty] = useState(true);
+  const [isEmpty, setIsEmpty] = useState(!hasInitialSignature);
   const [history, setHistory] = useState<string[]>([]);
   const [canUndo, setCanUndo] = useState(false);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   // Lock mode: after signing, show static image so user can scroll past without erasing
-  const [isLocked, setIsLocked] = useState(false);
-  const [lockedImage, setLockedImage] = useState<string | null>(null);
+  const [isLocked, setIsLocked] = useState(hasInitialSignature);
+  const [lockedImage, setLockedImage] = useState<string | null>(hasInitialSignature ? initialValue! : null);
 
   useEffect(() => {
     setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);

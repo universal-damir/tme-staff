@@ -11,6 +11,11 @@ import {
   MANUAL_REVIEW_THRESHOLD,
   shouldOfferManualReview,
   buildManualReviewPageRef,
+  sponsorDocsRequired,
+  requiresSponsorNoc,
+  employeeVisaMandatoryOverride,
+  sponsorshipTypeFromSponsor,
+  relationshipOptionsForSponsor,
 } from './staff-form-logic';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -336,5 +341,112 @@ describe('normalizeProvidedFlag', () => {
     expect(normalizeProvidedFlag(1)).toBe('no');
     expect(normalizeProvidedFlag(true)).toBe('no');
     expect(normalizeProvidedFlag({})).toBe('no');
+  });
+});
+
+describe('sponsorDocsRequired', () => {
+  it('is true only for family-sponsored staff', () => {
+    expect(sponsorDocsRequired('family')).toBe(true);
+  });
+
+  it('is false for company- and self/GCC-sponsored staff', () => {
+    expect(sponsorDocsRequired('company')).toBe(false);
+    expect(sponsorDocsRequired('self_gcc')).toBe(false);
+  });
+
+  it('is false for undefined / null (defaults to no sponsor step)', () => {
+    expect(sponsorDocsRequired(undefined)).toBe(false);
+    expect(sponsorDocsRequired(null)).toBe(false);
+  });
+});
+
+describe('requiresSponsorNoc', () => {
+  it('requires the NOC for family-sponsored on BOTH new_hire and renewal', () => {
+    expect(requiresSponsorNoc('family', 'new_hire')).toBe(true);
+    expect(requiresSponsorNoc('family', 'renewal')).toBe(true);
+  });
+
+  it('is true for family even when the onboarding type is omitted', () => {
+    expect(requiresSponsorNoc('family')).toBe(true);
+  });
+
+  it('does not require the NOC for company on either onboarding type', () => {
+    expect(requiresSponsorNoc('company', 'new_hire')).toBe(false);
+    expect(requiresSponsorNoc('company', 'renewal')).toBe(false);
+  });
+
+  it('does not require the NOC for self/GCC on either onboarding type', () => {
+    expect(requiresSponsorNoc('self_gcc', 'new_hire')).toBe(false);
+    expect(requiresSponsorNoc('self_gcc', 'renewal')).toBe(false);
+  });
+
+  it('is false for undefined / null', () => {
+    expect(requiresSponsorNoc(undefined, 'new_hire')).toBe(false);
+    expect(requiresSponsorNoc(null, 'renewal')).toBe(false);
+  });
+});
+
+describe('employeeVisaMandatoryOverride', () => {
+  it('forces the applicant Visa + EID mandatory only for family-sponsored staff', () => {
+    expect(employeeVisaMandatoryOverride('family')).toBe(true);
+  });
+
+  it('does not override for company- or self/GCC-sponsored staff', () => {
+    expect(employeeVisaMandatoryOverride('company')).toBe(false);
+    expect(employeeVisaMandatoryOverride('self_gcc')).toBe(false);
+  });
+
+  it('does not override for undefined / null', () => {
+    expect(employeeVisaMandatoryOverride(undefined)).toBe(false);
+    expect(employeeVisaMandatoryOverride(null)).toBe(false);
+  });
+});
+
+describe('sponsorshipTypeFromSponsor', () => {
+  it('maps Company to company', () => {
+    expect(sponsorshipTypeFromSponsor('Company')).toBe('company');
+  });
+
+  it('maps Self-sponsored, GCC National and legacy NA to self_gcc', () => {
+    expect(sponsorshipTypeFromSponsor('Self-sponsored')).toBe('self_gcc');
+    expect(sponsorshipTypeFromSponsor('GCC National')).toBe('self_gcc');
+    expect(sponsorshipTypeFromSponsor('NA')).toBe('self_gcc'); // legacy data
+  });
+
+  it('maps Spouse, Parent and Child to family', () => {
+    expect(sponsorshipTypeFromSponsor('Spouse')).toBe('family');
+    expect(sponsorshipTypeFromSponsor('Parent')).toBe('family');
+    expect(sponsorshipTypeFromSponsor('Child')).toBe('family');
+  });
+
+  it('falls back to company for unknown / undefined / null', () => {
+    expect(sponsorshipTypeFromSponsor('Something Else')).toBe('company');
+    expect(sponsorshipTypeFromSponsor('')).toBe('company');
+    expect(sponsorshipTypeFromSponsor(undefined)).toBe('company');
+    expect(sponsorshipTypeFromSponsor(null)).toBe('company');
+  });
+});
+
+describe('relationshipOptionsForSponsor', () => {
+  it('narrows Spouse to husband / wife', () => {
+    expect(relationshipOptionsForSponsor('Spouse')).toEqual(['husband', 'wife']);
+  });
+
+  it('narrows Parent to father / mother', () => {
+    expect(relationshipOptionsForSponsor('Parent')).toEqual(['father', 'mother']);
+  });
+
+  it('narrows Child to son / daughter', () => {
+    expect(relationshipOptionsForSponsor('Child')).toEqual(['son', 'daughter']);
+  });
+
+  it('returns all six options for non-family / unknown / undefined / null', () => {
+    const all = ['husband', 'wife', 'father', 'mother', 'son', 'daughter'];
+    expect(relationshipOptionsForSponsor('Company')).toEqual(all);
+    expect(relationshipOptionsForSponsor('NA')).toEqual(all);
+    expect(relationshipOptionsForSponsor('Self-sponsored')).toEqual(all);
+    expect(relationshipOptionsForSponsor('weird')).toEqual(all);
+    expect(relationshipOptionsForSponsor(undefined)).toEqual(all);
+    expect(relationshipOptionsForSponsor(null)).toEqual(all);
   });
 });

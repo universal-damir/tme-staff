@@ -49,6 +49,7 @@ export type SeedOptions = {
     | 'immigration_cancellation'
     | 'other_na';
   applicantInUae?: boolean;
+  sponsorshipType?: 'company' | 'family' | 'self_gcc';
   label?: string;
 };
 
@@ -130,6 +131,7 @@ export async function seedSubmission(opts: SeedOptions = {}): Promise<SeededSubm
     prefill_employer_data: prefillEmployerData,
     prefill_employee_data: { nationality: nationalityLabel, first_name: 'Test', last_name: 'User' },
     onboarding_type: opts.renewal ? 'renewal' : 'new_hire',
+    sponsorship_type: opts.sponsorshipType ?? 'company',
     employer_data: step === 'employer' ? null : fakeEmployerData,
     employer_signature_data: step === 'employer' ? null : 'data:image/png;base64,iVBORw0KGgo=',
     employer_signed_at: step === 'employer' ? null : new Date().toISOString(),

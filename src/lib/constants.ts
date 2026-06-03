@@ -100,9 +100,10 @@ export type WorkingLocation = (typeof WORKING_LOCATIONS)[number];
 export const SPONSOR_OPTIONS = [
   'Company',
   'Self-sponsored',
+  'GCC National',
   'Spouse',
   'Parent',
-  'NA',
+  'Child',
 ] as const;
 
 export type SponsorOption = (typeof SPONSOR_OPTIONS)[number];
