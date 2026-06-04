@@ -135,6 +135,22 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const registeredAuthority = (submission.prefill_employer_data as Record<string, unknown> | null)?.registered_authority as string | undefined;
   const isDMCC = isDmccAuthority(registeredAuthority);
 
+  // The portal pre-fills dates as ISO (YYYY-MM-DD); CustomDatePicker — and the
+  // rest of this form — speak dd.mm.yyyy. Normalize prefilled date fields so a
+  // pre-filled starting date both DISPLAYS correctly and SUBMITS in the same
+  // format a manual calendar pick produces (string split, not Date(), to avoid
+  // timezone day-shifts). Anything already dd.mm.yyyy passes through.
+  const normalizedPrefill = ((): Record<string, unknown> | null => {
+    const raw = submission.prefill_employer_data as Record<string, unknown> | null;
+    if (!raw) return raw;
+    const sd = raw.starting_date;
+    if (typeof sd === 'string') {
+      const m = sd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m) return { ...raw, starting_date: `${m[3]}.${m[2]}.${m[1]}` };
+    }
+    return raw;
+  })();
+
   // Job Offer Letter state (DMCC only)
   const [jobOfferLetterDoc, setJobOfferLetterDoc] = useState(submission.documents?.job_offer_letter);
 
@@ -169,8 +185,10 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       // the employer must consciously choose each (validated on submit) rather
       // than silently accepting a presumed default. AI extraction or saved data
       // (incl. renewals via prefill below) fills them in when available.
-      // Merge pre-fill data from TME Portal (renewals) — overrides defaults, but saved data overrides prefill
-      ...submission.prefill_employer_data,
+      // Merge pre-fill data from TME Portal (renewals + new-hire LOI/contract) —
+      // overrides defaults, but saved data overrides prefill. Dates normalized
+      // to dd.mm.yyyy (see normalizedPrefill above).
+      ...normalizedPrefill,
     },
   });
 
