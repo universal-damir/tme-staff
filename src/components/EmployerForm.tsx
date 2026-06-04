@@ -165,12 +165,10 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       notice_period_value: 1,
       probation_period_value: 6,
       sponsor: 'Company',
-      // Default to 'allowance' for accommodation/transport (matches the typical
-      // UAE 60/30/10 split) and 'no' for food (rarely provided as cash). AI
-      // extraction or saved data overrides these.
-      accommodation_provided: 'allowance',
-      transport_provided: 'allowance',
-      food_provided: 'no',
+      // Accommodation / Transport / Food "Provided" intentionally start unset so
+      // the employer must consciously choose each (validated on submit) rather
+      // than silently accepting a presumed default. AI extraction or saved data
+      // (incl. renewals via prefill below) fills them in when available.
       // Merge pre-fill data from TME Portal (renewals) — overrides defaults, but saved data overrides prefill
       ...submission.prefill_employer_data,
     },
@@ -205,6 +203,13 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   const accommodationProvided = watch('accommodation_provided');
   const transportProvided = watch('transport_provided');
   const foodProvided = watch('food_provided');
+  // Validation errors for the "Provided" dropdowns — these are set via setValue
+  // (not register), so react-hook-form doesn't validate them; we check on submit.
+  const [salaryProvidedErrors, setSalaryProvidedErrors] = useState<{
+    accommodation?: string;
+    transport?: string;
+    food?: string;
+  }>({});
 
   const handleFormSubmit = async (data: EmployerFormData) => {
     if (!isRenewal && applicantInUAE === null) {
@@ -212,6 +217,18 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       return;
     }
     setApplicantInUAEError(null);
+
+    // The "Provided" dropdowns start unset and must be chosen explicitly.
+    const providedErrors: typeof salaryProvidedErrors = {};
+    if (!data.accommodation_provided) providedErrors.accommodation = 'Please select';
+    if (!data.transport_provided) providedErrors.transport = 'Please select';
+    if (!data.food_provided) providedErrors.food = 'Please select';
+    if (providedErrors.accommodation || providedErrors.transport || providedErrors.food) {
+      setSalaryProvidedErrors(providedErrors);
+      return;
+    }
+    setSalaryProvidedErrors({});
+
     if (!signature) {
       setSignatureError('Please sign the form');
       return;
@@ -247,9 +264,18 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     if (values.salary_other_breakdown !== undefined) {
       setValue('salary_other_breakdown', values.salary_other_breakdown);
     }
-    if (values.accommodation_provided !== undefined) setValue('accommodation_provided', values.accommodation_provided);
-    if (values.transport_provided !== undefined) setValue('transport_provided', values.transport_provided);
-    if (values.food_provided !== undefined) setValue('food_provided', values.food_provided);
+    if (values.accommodation_provided !== undefined) {
+      setValue('accommodation_provided', values.accommodation_provided);
+      setSalaryProvidedErrors((prev) => ({ ...prev, accommodation: undefined }));
+    }
+    if (values.transport_provided !== undefined) {
+      setValue('transport_provided', values.transport_provided);
+      setSalaryProvidedErrors((prev) => ({ ...prev, transport: undefined }));
+    }
+    if (values.food_provided !== undefined) {
+      setValue('food_provided', values.food_provided);
+      setSalaryProvidedErrors((prev) => ({ ...prev, food: undefined }));
+    }
   };
 
   const showMatchFeedback = (label: string) => {
@@ -480,12 +506,15 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
           food={salaryFood}
           other={salaryOther}
           otherBreakdown={salaryOtherBreakdown}
-          accommodationProvided={accommodationProvided || 'no'}
-          transportProvided={transportProvided || 'no'}
-          foodProvided={foodProvided || 'no'}
+          accommodationProvided={accommodationProvided || ''}
+          transportProvided={transportProvided || ''}
+          foodProvided={foodProvided || ''}
           onChange={handleSalaryChange}
           errors={{
             total: errors.salary_total?.message,
+            accommodationProvided: salaryProvidedErrors.accommodation,
+            transportProvided: salaryProvidedErrors.transport,
+            foodProvided: salaryProvidedErrors.food,
           }}
         />
       </FormSection>

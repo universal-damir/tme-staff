@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   TME_COLORS,
   SALARY_BREAKDOWN_EXPLANATION,
@@ -28,19 +28,13 @@ const CURRENCY_OPTIONS = [
   { value: 'CHF', label: 'CHF' },
 ];
 
-// Helper functions for number formatting
-const formatNumber = (value: number | undefined | null): string => {
-  if (value === undefined || value === null || isNaN(value)) return '';
-  return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
-};
-
-const parseFormattedNumber = (value: string): number | undefined => {
-  if (!value || value.trim() === '') return undefined;
-  // Remove commas and parse
-  const cleaned = value.replace(/,/g, '');
-  const parsed = parseFloat(cleaned);
-  return isNaN(parsed) ? undefined : parsed;
-};
+// Number formatting helpers — salary amounts allow up to 2 decimals.
+// `formatNumber` is the display formatter; `applySalaryInput` processes raw
+// keystrokes (preserving a mid-typed "100." / "100.50").
+import {
+  formatSalaryAmount as formatNumber,
+  applySalaryInput,
+} from '@/lib/salary-amount';
 
 interface SalaryBreakdownProps {
   currency: string;
@@ -53,9 +47,11 @@ interface SalaryBreakdownProps {
   /** Typed allowance breakdown — when at least one entry exists, the plain
    *  "Other" input becomes read-only and reflects the sum. */
   otherBreakdown?: PayrollOtherBreakdownEntry[];
-  accommodationProvided: ProvidedFlag;
-  transportProvided: ProvidedFlag;
-  foodProvided: ProvidedFlag;
+  // '' = not yet chosen (renders the "Select…" placeholder). The employer must
+  // pick a value before submitting; EmployerForm validates this.
+  accommodationProvided: ProvidedFlag | '';
+  transportProvided: ProvidedFlag | '';
+  foodProvided: ProvidedFlag | '';
   onChange: (values: {
     salary_currency: string;
     salary_total: number | undefined;
@@ -75,6 +71,9 @@ interface SalaryBreakdownProps {
     basic?: string;
     accommodation?: string;
     transport?: string;
+    accommodationProvided?: string;
+    transportProvided?: string;
+    foodProvided?: string;
   };
 }
 
@@ -90,29 +89,26 @@ interface SalaryInputProps {
 }
 
 function SalaryInput({ label, value, onChange, error, placeholder, required, disabled }: SalaryInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const [displayValue, setDisplayValue] = useState(formatNumber(value));
 
-  // Sync display value when external value changes
+  // Re-sync from the external value only while the field is unfocused. While
+  // the user is typing, the parent re-renders on every change; if we resynced
+  // unconditionally it would snap a mid-typed decimal ("100." / "100.50") back
+  // to the parsed number and the decimal point could never be entered.
   useEffect(() => {
-    setDisplayValue(formatNumber(value));
+    if (document.activeElement !== inputRef.current) {
+      setDisplayValue(formatNumber(value));
+    }
   }, [value]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
-    const inputValue = e.target.value;
-    // Remove all non-numeric except decimal
-    const cleaned = inputValue.replace(/[^0-9.]/g, '');
-
-    // Parse and format with commas
-    const parsed = parseFormattedNumber(cleaned);
+    // Preserve what the user typed (incl. a trailing "." / zero) in the display
+    // while emitting the parsed number — see applySalaryInput.
+    const { display, value: parsed } = applySalaryInput(e.target.value);
+    setDisplayValue(display);
     onChange(parsed);
-
-    // Show formatted value immediately
-    if (parsed !== undefined) {
-      setDisplayValue(formatNumber(parsed));
-    } else {
-      setDisplayValue('');
-    }
   };
 
   return (
@@ -127,6 +123,7 @@ function SalaryInput({ label, value, onChange, error, placeholder, required, dis
         </label>
       )}
       <input
+        ref={inputRef}
         type="text"
         inputMode="decimal"
         value={displayValue}
@@ -158,6 +155,8 @@ export function SalaryBreakdown({
   onChange,
   errors,
 }: SalaryBreakdownProps) {
+  // Expanded by default; the explanation renders in the right cell beside the
+  // Currency selector and can be collapsed to a compact link.
   const [showInfo, setShowInfo] = useState(true);
 
   const breakdownRows: PayrollOtherBreakdownEntry[] = otherBreakdown ?? [];
@@ -335,7 +334,7 @@ export function SalaryBreakdown({
       {/* Currency selector. The monthly total is no longer typed here — the
           employer enters each component below and the total is summed for them
           at the bottom of the section. */}
-      <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-start">
         <CustomDropdown
           label="Currency"
           value={currency}
@@ -354,28 +353,44 @@ export function SalaryBreakdown({
           error={errors?.currency}
           required
         />
-        <div />
-      </div>
-
-      {/* Info Toggle */}
-      <button
-        type="button"
-        onClick={() => setShowInfo(!showInfo)}
-        className="flex items-center gap-2 text-sm hover:underline"
-        style={{ color: TME_COLORS.primary }}
-      >
-        <Info className="w-4 h-4" />
-        {showInfo ? 'Hide salary breakdown info' : 'About salary breakdown'}
-      </button>
-
-      {showInfo && (
-        <div
-          className="p-4 rounded-lg text-sm"
-          style={{ backgroundColor: '#EBF4FF', color: TME_COLORS.primary }}
-        >
-          {SALARY_BREAKDOWN_EXPLANATION}
+        {/* Salary breakdown info — lives in the right cell beside the Currency
+            selector, expanded by default and collapsible to a compact link. The
+            invisible label spacer top-aligns it with the dropdown. */}
+        <div>
+          <span className="block text-sm font-medium mb-1 invisible select-none" aria-hidden="true">
+            .
+          </span>
+          {showInfo ? (
+            <div
+              className="relative rounded-lg text-sm p-3 pr-9"
+              style={{ backgroundColor: '#EBF4FF', color: TME_COLORS.primary }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowInfo(false)}
+                className="absolute top-2.5 right-2.5 hover:opacity-70 transition-opacity"
+                aria-label="Hide salary breakdown info"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="flex items-start gap-2">
+                <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{SALARY_BREAKDOWN_EXPLANATION}</span>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowInfo(true)}
+              className="flex items-center gap-2 text-sm hover:underline h-[42px]"
+              style={{ color: TME_COLORS.primary }}
+            >
+              <Info className="w-4 h-4" />
+              About salary breakdown
+            </button>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Breakdown Fields — always visible since they are the primary inputs.
           4-column grid throughout: amounts in row 1
@@ -497,6 +512,8 @@ export function SalaryBreakdown({
                 value={accommodationProvided}
                 onChange={(val) => handleProvidedChange('accommodation_provided', val as ProvidedFlag)}
                 options={PROVIDED_OPTIONS}
+                placeholder="Select…"
+                error={errors?.accommodationProvided}
               />
             </div>
             <div>
@@ -511,6 +528,8 @@ export function SalaryBreakdown({
                 value={transportProvided}
                 onChange={(val) => handleProvidedChange('transport_provided', val as ProvidedFlag)}
                 options={PROVIDED_OPTIONS}
+                placeholder="Select…"
+                error={errors?.transportProvided}
               />
             </div>
             <div>
@@ -525,6 +544,8 @@ export function SalaryBreakdown({
                 value={foodProvided}
                 onChange={(val) => handleProvidedChange('food_provided', val as ProvidedFlag)}
                 options={PROVIDED_OPTIONS}
+                placeholder="Select…"
+                error={errors?.foodProvided}
               />
             </div>
             <div aria-hidden="true" />
@@ -560,10 +581,9 @@ export function SalaryBreakdown({
                   inputMode="decimal"
                   value={totalDisplay}
                   onChange={(e) => {
-                    const cleaned = e.target.value.replace(/[^0-9.]/g, '');
-                    const parsed = parseFormattedNumber(cleaned);
-                    handleTotalChange(parsed);
-                    setTotalDisplay(parsed !== undefined ? formatNumber(parsed) : '');
+                    const { display, value } = applySalaryInput(e.target.value);
+                    handleTotalChange(value);
+                    setTotalDisplay(display);
                   }}
                   placeholder="0"
                   aria-label="Monthly salary total"
