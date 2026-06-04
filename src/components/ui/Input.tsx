@@ -10,7 +10,7 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, helperText, className = '', ...props }, ref) => {
+  ({ label, error, helperText, className = '', onFocus, onBlur, ...props }, ref) => {
     return (
       <div className="w-full">
         {label && (
@@ -32,11 +32,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             if (!error) {
               e.target.style.borderColor = TME_COLORS.primary;
             }
+            onFocus?.(e);
           }}
           onBlur={(e) => {
             if (!error) {
               e.target.style.borderColor = '#e5e7eb';
             }
+            onBlur?.(e);
           }}
           {...props}
         />

@@ -39,7 +39,7 @@ import {
 } from '@/lib/staff-form-logic';
 import { buildNocText } from '@/lib/noc-letter';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
-import { calculateFullName, compressImageForAI } from '@/lib/utils';
+import { calculateFullName, compressImageForAI, normalizePersonName } from '@/lib/utils';
 import { nationalityToCountryCode, resolveExtractedNationality } from '@/lib/country-utils';
 import { SampleImageToggle } from '@/components/SampleImageToggle';
 import {
@@ -2823,17 +2823,25 @@ export function EmployeeForm({
                   label="First Name"
                   error={errors.first_name?.message}
                   required
-                  {...register('first_name', { required: 'Required' })}
+                  {...register('first_name', {
+                    required: 'Required',
+                    onBlur: (e) => setValue('first_name', normalizePersonName(e.target.value), { shouldValidate: true }),
+                  })}
                 />
                 <Input
                   label="Middle Name"
-                  {...register('middle_name')}
+                  {...register('middle_name', {
+                    onBlur: (e) => setValue('middle_name', normalizePersonName(e.target.value)),
+                  })}
                 />
                 <Input
                   label="Family Name"
                   error={errors.last_name?.message}
                   required
-                  {...register('last_name', { required: 'Required' })}
+                  {...register('last_name', {
+                    required: 'Required',
+                    onBlur: (e) => setValue('last_name', normalizePersonName(e.target.value), { shouldValidate: true }),
+                  })}
                 />
               </div>
 
@@ -3603,13 +3611,19 @@ export function EmployeeForm({
                   label="Father's Full Name"
                   error={errors.father_full_name?.message}
                   required
-                  {...register('father_full_name', { required: 'Required' })}
+                  {...register('father_full_name', {
+                    required: 'Required',
+                    onBlur: (e) => setValue('father_full_name', normalizePersonName(e.target.value), { shouldValidate: true }),
+                  })}
                 />
                 <Input
                   label="Mother's Full Name"
                   error={errors.mother_full_name?.message}
                   required
-                  {...register('mother_full_name', { required: 'Required' })}
+                  {...register('mother_full_name', {
+                    required: 'Required',
+                    onBlur: (e) => setValue('mother_full_name', normalizePersonName(e.target.value), { shouldValidate: true }),
+                  })}
                 />
               </div>
 
@@ -3640,6 +3654,7 @@ export function EmployeeForm({
                   required
                   {...register('spouse_name', {
                     required: maritalStatus === 'Married' ? 'Required' : false,
+                    onBlur: (e) => setValue('spouse_name', normalizePersonName(e.target.value), { shouldValidate: true }),
                   })}
                 />
               )}
@@ -4551,6 +4566,7 @@ export function EmployeeForm({
                   required
                   value={sponsorName || ''}
                   onChange={(e) => setValue('sponsor_name', e.target.value)}
+                  onBlur={(e) => setValue('sponsor_name', normalizePersonName(e.target.value))}
                 />
                 <CustomDropdown
                   label="Sponsor's Nationality"

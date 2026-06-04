@@ -103,7 +103,36 @@ export function calculateFullName(
   lastName: string
 ): string {
   const parts = [firstName, middleName, lastName].filter(Boolean);
-  return parts.join(' ');
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Conservative person-name casing normalizer (mirrors the tme-portal sync-side
+ * helper so typed names and document-extracted names end up cased the same way).
+ *
+ * Rule:
+ *   - A word that is entirely UPPERCASE or entirely lowercase is re-cased to
+ *     Title Case ("ANITTA DAVIS" / "anitta davis" -> "Anitta Davis").
+ *   - A word that already has mixed case is left untouched, so deliberately
+ *     cased names survive: "McDonald", "al-Rashid", "O'Brien".
+ *   - Accidental double/leading/trailing whitespace is collapsed (also repairs
+ *     a trailing space in the first name, which produced "ANITTA  DAVIS").
+ */
+export function normalizePersonName(raw?: string | null): string {
+  const collapsed = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!collapsed) return collapsed;
+
+  return collapsed
+    .split(' ')
+    .map((token) => {
+      const isAllUpper = token === token.toUpperCase();
+      const isAllLower = token === token.toLowerCase();
+      if (!isAllUpper && !isAllLower) return token;
+      return token
+        .toLowerCase()
+        .replace(/(^|[-'.’])(\p{L})/gu, (_m, sep, ch) => sep + ch.toUpperCase());
+    })
+    .join(' ');
 }
 
 // ===================================================================
