@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { Upload, CheckCircle, AlertCircle, Loader2, FileText, RefreshCw } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
+import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 
 interface UploadSlotProps {
   label: string;
@@ -50,6 +51,10 @@ export function UploadSlot({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // Rendered page-1 image of an uploaded PDF (null while rendering or if it
+  // failed — in which case we fall back to the generic "PDF uploaded" card).
+  const [pdfThumb, setPdfThumb] = useState<string | null>(null);
+  const [pdfThumbLoading, setPdfThumbLoading] = useState(false);
 
   const isPdfPreview =
     !!preview &&
@@ -57,6 +62,63 @@ export function UploadSlot({
       preview.toLowerCase().endsWith('.pdf'));
 
   const MAX_FILE_SIZE = maxSizeMB * 1024 * 1024;
+
+  // Render the first page of a PDF preview to an inline thumbnail. Re-runs
+  // whenever the previewed PDF changes; cancels cleanly if it changes again
+  // mid-render so a stale thumbnail can't land on the new file.
+  useEffect(() => {
+    if (!isPdfPreview || !preview) {
+      setPdfThumb(null);
+      setPdfThumbLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPdfThumb(null);
+    setPdfThumbLoading(true);
+    renderPdfFirstPage(preview)
+      .then((thumb) => {
+        if (!cancelled) {
+          setPdfThumb(thumb);
+          setPdfThumbLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPdfThumb(null);
+          setPdfThumbLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPdfPreview, preview]);
+
+  // Open the original PDF in a new tab. data: URLs are unreliable for
+  // top-level navigation (Chrome blocks/downloads them), so convert to a
+  // short-lived blob URL that opens cleanly in the browser's native viewer.
+  const openPdf = () => {
+    if (!preview) return;
+    if (!preview.startsWith('data:')) {
+      window.open(preview, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    try {
+      const comma = preview.indexOf(',');
+      const mime = preview.slice(5, preview.indexOf(';')) || 'application/pdf';
+      const binary = atob(preview.slice(comma + 1));
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      window.open(url, '_blank', 'noopener,noreferrer');
+      // Revoke after a delay so the new tab has time to load the document.
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      window.open(preview, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  // The lightbox enlarges the actual image, or the rendered PDF page.
+  const lightboxSrc = isPdfPreview ? pdfThumb : preview;
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -153,34 +215,42 @@ export function UploadSlot({
         {/* Preview or Upload Prompt */}
         {preview ? (
           <div className="relative p-2">
-            {/* Images preview inline. PDFs render via <object>, with a
-                generic "PDF uploaded" icon as fallback for browsers that
-                refuse data: URLs (some mobile browsers). */}
+            {/* Images preview inline. PDFs render page 1 to an image
+                (pdf.js) so they preview just like a photo under the strict
+                CSP. While that renders we show a spinner; if it fails we
+                fall back to a generic "PDF uploaded" card. */}
             {isPdfPreview ? (
-              <object
-                // #view=FitH = "Fit horizontal" — tells the browser PDF
-                // viewer to scale the page to the container width so the
-                // user sees the full document instead of a squashed
-                // letterbox with scrollbars.
-                data={`${preview}#view=FitH&toolbar=1`}
-                type="application/pdf"
-                className="w-full h-64 rounded-lg bg-white"
-                aria-label={label || 'PDF preview'}
-              >
+              pdfThumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={pdfThumb}
+                  alt={label || 'PDF preview'}
+                  className="w-full h-64 object-contain rounded-lg bg-white cursor-zoom-in"
+                  onClick={() => setLightboxOpen(true)}
+                />
+              ) : (
                 <div className="w-full h-64 flex flex-col items-center justify-center rounded-lg bg-white">
-                  <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
-                  <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
-                  <a
-                    href={preview}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 text-xs underline"
-                    style={{ color: TME_COLORS.primary }}
-                  >
-                    Open PDF
-                  </a>
+                  {pdfThumbLoading ? (
+                    <>
+                      <Loader2 className="w-8 h-8 mb-3 animate-spin" style={{ color: TME_COLORS.primary }} />
+                      <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Loading preview…</p>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
+                      <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
+                      <button
+                        type="button"
+                        onClick={openPdf}
+                        className="mt-2 text-xs underline"
+                        style={{ color: TME_COLORS.primary }}
+                      >
+                        Open PDF
+                      </button>
+                    </>
+                  )}
                 </div>
-              </object>
+              )
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -272,9 +342,9 @@ export function UploadSlot({
         </p>
       )}
 
-      {preview && !isPdfPreview && (
+      {lightboxSrc && (
         <ImageLightbox
-          src={preview}
+          src={lightboxSrc}
           alt={label}
           open={lightboxOpen}
           onClose={() => setLightboxOpen(false)}

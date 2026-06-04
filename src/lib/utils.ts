@@ -165,6 +165,13 @@ export function cn(...classes: (string | boolean | undefined | null)[]): string 
  * Resizes to max 1500px and compresses to JPEG
  */
 export async function compressImageForAI(base64Image: string): Promise<string> {
+  // PDFs can't be decoded by an <img> element, so the resize path below would
+  // throw (or hit the decode timeout). The backend accepts PDFs directly via
+  // Claude's `document` content block (see passport-page-validation.ts), so
+  // pass them through untouched rather than failing validation/extraction.
+  if (base64Image.startsWith('data:application/pdf')) {
+    return base64Image;
+  }
   return new Promise((resolve, reject) => {
     const img = new Image();
     let settled = false;
