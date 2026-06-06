@@ -5,6 +5,12 @@ import { isValidSubmissionId } from '@/lib/file-validation';
 export const runtime = 'nodejs';
 
 const SIGNED_URL_TTL_SECONDS = 300;
+// Browser-cache the redirect (and the image it points to) briefly so going back
+// a step / refreshing within a session serves from cache instead of re-fetching
+// and re-downloading every time. `private` keeps it out of shared/CDN caches —
+// only the user's own browser. MUST stay well under SIGNED_URL_TTL_SECONDS so a
+// cached redirect can never point at an already-expired signed URL.
+const REDIRECT_CACHE_SECONDS = 120;
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
@@ -59,7 +65,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     const res = NextResponse.redirect(data.signedUrl, 302);
-    res.headers.set('Cache-Control', 'private, max-age=0, no-store');
+    res.headers.set('Cache-Control', `private, max-age=${REDIRECT_CACHE_SECONDS}`);
     return res;
   } catch (err) {
     console.error('storage/file: unexpected error', err instanceof Error ? err.message : err);

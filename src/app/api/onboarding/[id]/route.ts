@@ -20,6 +20,40 @@ import {
   verifyOnboardingAccess,
   scrubOnboardingForBrowser,
 } from '@/lib/onboarding-token';
+import { getSupabaseAdmin, STORAGE_BUCKET } from '@/lib/supabase-server';
+
+/**
+ * `existing_documents` (passports + the renewal Job Offer Letter, uploaded by
+ * TME Portal) stores a signed URL captured at upload time. Those URLs expire
+ * while the renewal link (14 days) is still live, so the client would see
+ * broken images if they open the form after the URL lapsed. Re-sign each entry
+ * from its stored `path` on every read so the URL is always fresh. Files live
+ * in STORAGE_BUCKET ('staff-documents') — the same bucket TME Portal uploads to.
+ *
+ * `documents.*` don't need this: they're rendered via `/api/storage/file`,
+ * which re-signs on demand. Only `existing_documents` bakes the URL in.
+ */
+async function refreshExistingDocumentUrls(
+  docs: Record<string, unknown> | null | undefined,
+): Promise<void> {
+  if (!docs || typeof docs !== 'object') return;
+  const supabase = getSupabaseAdmin();
+  const TTL_SECONDS = 60 * 60; // re-signed on every load — only needs to outlast one viewing session
+  await Promise.all(
+    Object.values(docs).map(async (entry) => {
+      const doc = entry as { path?: string; publicUrl?: string } | null;
+      if (!doc || typeof doc !== 'object' || !doc.path) return;
+      try {
+        const { data } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .createSignedUrl(doc.path, TTL_SECONDS);
+        if (data?.signedUrl) doc.publicUrl = data.signedUrl;
+      } catch {
+        // Keep the stored URL as a fallback; never block the form load on signing.
+      }
+    }),
+  );
+}
 
 export async function GET(
   req: NextRequest,
@@ -57,5 +91,6 @@ export async function GET(
   }
 
   const scrubbed = scrubOnboardingForBrowser(result.row!);
+  await refreshExistingDocumentUrls(scrubbed.existing_documents as Record<string, unknown> | null);
   return NextResponse.json({ ...scrubbed, id });
 }

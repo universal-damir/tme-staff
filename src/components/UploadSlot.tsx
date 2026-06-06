@@ -55,6 +55,14 @@ export function UploadSlot({
   // failed — in which case we fall back to the generic "PDF uploaded" card).
   const [pdfThumb, setPdfThumb] = useState<string | null>(null);
   const [pdfThumbLoading, setPdfThumbLoading] = useState(false);
+  // Whether the network-fetched preview image has painted. The storage route
+  // sends no-store, so the image re-downloads on every revisit/refresh — show a
+  // spinner instead of an empty box while it loads. Data-URL previews (a fresh
+  // upload this session) resolve almost instantly.
+  const [imgLoaded, setImgLoaded] = useState(false);
+  useEffect(() => {
+    setImgLoaded(false);
+  }, [preview]);
 
   const isPdfPreview =
     !!preview &&
@@ -252,13 +260,22 @@ export function UploadSlot({
                 </div>
               )
             ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={preview}
-                alt={label}
-                className="w-full h-64 object-contain rounded-lg cursor-zoom-in"
-                onClick={() => setLightboxOpen(true)}
-              />
+              <div className="relative w-full h-64">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={preview}
+                  alt={label}
+                  onLoad={() => setImgLoaded(true)}
+                  onError={() => setImgLoaded(true)}
+                  className="w-full h-64 object-contain rounded-lg cursor-zoom-in"
+                  onClick={() => setLightboxOpen(true)}
+                />
+                {!imgLoaded && (
+                  <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-gray-50">
+                    <Loader2 className="w-7 h-7 animate-spin" style={{ color: TME_COLORS.primary }} />
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Status Badge */}

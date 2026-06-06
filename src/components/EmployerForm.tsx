@@ -134,6 +134,10 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
   // DMCC detection from portal-provided authority
   const registeredAuthority = (submission.prefill_employer_data as Record<string, unknown> | null)?.registered_authority as string | undefined;
   const isDMCC = isDmccAuthority(registeredAuthority);
+  // Renewal: TME may have attached the renewed Job Offer Letter in the portal.
+  // When present the client reviews it read-only; otherwise they upload it
+  // themselves below (mirrors the new-hire slot).
+  const tmeJobOfferLetter = isRenewal ? submission.existing_documents?.job_offer_letter : undefined;
 
   // The portal pre-fills dates as ISO (YYYY-MM-DD); CustomDatePicker — and the
   // rest of this form — speak dd.mm.yyyy. Normalize prefilled date fields so a
@@ -553,7 +557,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
             >
               <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-gray-500" />
               <p className="text-sm text-gray-700">
-                This is the payroll currently on file — what is actually paid each month. It may differ from the contract above (e.g. after a raise). The renewed contract will use the figures in <strong>Salary Contract</strong>, not this. Use “Match to current payroll” above if you want to align the contract with what is being paid.
+                This is the payroll currently on file — what is actually paid each month.
               </p>
             </div>
             <ReadOnlySalarySummary
@@ -702,9 +706,12 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
         </div>
       </FormSection>
 
-      {/* DMCC Job Offer Letter — only for DMCC authority, new-hire path.
-          Skipped on renewal (already on file from the original onboarding). */}
-      {isDMCC && !isRenewal && (
+      {/* DMCC Job Offer Letter — DMCC authority only.
+          New-hire: the employer uploads the signed letter.
+          Renewal: if TME attached the renewed letter in the portal it shows
+          read-only for the client to review; otherwise the client uploads it
+          themselves (mirrors the new-hire slot). */}
+      {isDMCC && (
         <FormSection
           title="Job Offer Letter (DMCC Requirement)"
           icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -717,30 +724,54 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
               <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
               <div className="text-sm text-amber-800">
                 <p className="font-medium">DMCC requires the Job Offer Letter to be stamped and duly signed with a blue pen by both the employer and the employee.</p>
-                <p className="mt-1 text-xs">Please upload the signed and stamped copy. This document will be included in the onboarding confirmation.</p>
+                <p className="mt-1 text-xs">
+                  {tmeJobOfferLetter
+                    ? 'TME has attached the renewed Job Offer Letter below. Please review it.'
+                    : 'Please upload the signed and stamped copy. This document will be included in the onboarding confirmation.'}
+                </p>
               </div>
             </div>
-            <FileUploadSlot
-              label="Signed Job Offer Letter"
-              description="PDF or image of the stamped and blue-pen signed letter"
-              uploaded={!!jobOfferLetterDoc}
-              filename={jobOfferLetterDoc?.filename}
-              onUpload={async (file) => {
-                const result = await uploadDocument(submission.id, 'job_offer_letter', file);
-                if (result) {
-                  setJobOfferLetterDoc(result);
+            {tmeJobOfferLetter ? (
+              <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="w-4 h-4 flex-shrink-0" style={{ color: TME_COLORS.primary }} />
+                  <span className="text-sm truncate" style={{ color: TME_COLORS.primary }}>
+                    {tmeJobOfferLetter.filename || 'Job Offer Letter'}
+                  </span>
+                </div>
+                <a
+                  href={tmeJobOfferLetter.publicUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg border whitespace-nowrap"
+                  style={{ color: TME_COLORS.primary, borderColor: TME_COLORS.primary }}
+                >
+                  View / download
+                </a>
+              </div>
+            ) : (
+              <FileUploadSlot
+                label="Signed Job Offer Letter"
+                description="PDF or image of the stamped and blue-pen signed letter"
+                uploaded={!!jobOfferLetterDoc}
+                filename={jobOfferLetterDoc?.filename}
+                onUpload={async (file) => {
+                  const result = await uploadDocument(submission.id, 'job_offer_letter', file);
+                  if (result) {
+                    setJobOfferLetterDoc(result);
+                    const currentDocs: StaffDocumentReferences = submission.documents || {};
+                    await updateDocumentReferences(submission.id, { ...currentDocs, job_offer_letter: result });
+                  }
+                  return result;
+                }}
+                onRemove={async () => {
+                  setJobOfferLetterDoc(undefined);
                   const currentDocs: StaffDocumentReferences = submission.documents || {};
-                  await updateDocumentReferences(submission.id, { ...currentDocs, job_offer_letter: result });
-                }
-                return result;
-              }}
-              onRemove={async () => {
-                setJobOfferLetterDoc(undefined);
-                const currentDocs: StaffDocumentReferences = submission.documents || {};
-                const { job_offer_letter: _, ...rest } = currentDocs;
-                await updateDocumentReferences(submission.id, rest as StaffDocumentReferences);
-              }}
-            />
+                  const { job_offer_letter: _, ...rest } = currentDocs;
+                  await updateDocumentReferences(submission.id, rest as StaffDocumentReferences);
+                }}
+              />
+            )}
           </div>
         </FormSection>
       )}

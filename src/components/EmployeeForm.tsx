@@ -721,7 +721,12 @@ export function EmployeeForm({
   // category's normal requirement (and regardless of the employer's in-UAE
   // answer). The override forces the visa picker + visa doc + EID mandatory.
   const forceVisaMandatory = employeeVisaMandatoryOverride(sponsorshipType);
-  const showVisaCategoryPicker = employerVisaInUAE || forceVisaMandatory;
+  // On renewal the employee already holds the employment visa being renewed, so
+  // the "current visa status" picker is redundant and must NOT appear — without
+  // the `!isRenewal` guard the employer's locked in-UAE answer (always true on
+  // renewal) would resurface it. Family-sponsored renewals still force it (they
+  // carry a sponsor-held residence visa TME needs on file → forceVisaMandatory).
+  const showVisaCategoryPicker = (!isRenewal && employerVisaInUAE) || forceVisaMandatory;
   const showArrivalDatePicker = showVisaCategoryPicker && requiresArrivalDate(employeeVisaCategory);
   const showVisaDocumentUpload = (showVisaCategoryPicker && visaUploadRule !== 'none') || forceVisaMandatory;
   const visaDocumentRequired = (showVisaCategoryPicker && visaUploadRule === 'mandatory') || forceVisaMandatory;
@@ -2585,8 +2590,9 @@ export function EmployeeForm({
               <button
                 type="button"
                 onClick={() => {
-                  // Skip passport upload steps, go to step 4 (Identity & Visa) or 5 (Family)
-                  setViewingStep(4);
+                  // Skip passport upload steps. Step 4 (Identity & Visa) is empty
+                  // on a standard renewal, so jump straight to step 5 then.
+                  setViewingStep(isStep4Empty ? 5 : 4);
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white text-sm"
                 style={{ backgroundColor: TME_COLORS.primary }}
@@ -3155,7 +3161,7 @@ export function EmployeeForm({
           {viewingStep === 3 && (
             <StepNavButtons
               enabled={isInsidePagesUploaded && passportDataReady && isPersonalComplete && (!requiresAdditionalPage || isAdditionalPageUploaded)}
-              onContinue={() => setViewingStep(4)}
+              onContinue={() => setViewingStep(isStep4Empty ? 5 : 4)}
               onBack={() => setViewingStep(2)}
             />
           )}
@@ -3663,7 +3669,7 @@ export function EmployeeForm({
               <StepNavButtons
                 enabled={isFamilyComplete}
                 onContinue={() => setViewingStep(6)}
-                onBack={() => setViewingStep(4)}
+                onBack={() => setViewingStep(isStep4Empty ? 3 : 4)}
               />
             )}
           </FormSection>

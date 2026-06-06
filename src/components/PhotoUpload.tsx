@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
 import { compressImageForAI } from '@/lib/utils';
@@ -133,6 +133,15 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
   // Build the image source: prefer local preview, fall back to Supabase storage URL
   const imageSrc = preview || (value?.path ? getDocumentUrl(value.path) : null);
 
+  // Track whether the (often network-fetched) image has actually painted, so we
+  // can show a spinner instead of an empty grey box while it loads. The storage
+  // route sends no-store, so this fires on every revisit/refresh/back-nav, not
+  // just the first paint. Local data-URL previews resolve almost instantly.
+  const [imgLoaded, setImgLoaded] = useState(false);
+  useEffect(() => {
+    setImgLoaded(false);
+  }, [imageSrc]);
+
   return (
     <div className="w-full">
       <label
@@ -195,6 +204,8 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
                 alt="Photo preview"
                 loading="eager"
                 decoding="async"
+                onLoad={() => setImgLoaded(true)}
+                onError={() => setImgLoaded(true)}
                 className="absolute inset-0 w-full h-full object-contain"
               />
             ) : (
@@ -202,7 +213,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
                 <Upload className="w-8 h-8 text-gray-300" />
               </div>
             )}
-            {(isUploading || isValidating) && (
+            {(isUploading || isValidating || (!!imageSrc && !imgLoaded)) && (
               <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
                 <Loader2 className="w-8 h-8 animate-spin" style={{ color: TME_COLORS.primary }} />
               </div>
