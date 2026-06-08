@@ -25,17 +25,36 @@ const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-service
 
 export async function GET() {
   // 1) Primary: Supabase mirror (full list pushed by the portal).
+  //    PostgREST caps each response at 1000 rows (db-max-rows), and the list
+  //    is larger than that, so page through with .range() until exhausted —
+  //    otherwise the dropdown silently loses everything past the 1000th
+  //    alphabetical entry.
   try {
     const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase
-      .from('mohre_professions')
-      .select('description_english, description_arabic, job_code, professional_level')
-      .eq('is_active', true)
-      .order('description_english', { ascending: true });
+    const PAGE = 1000;
+    type Row = {
+      description_english: string;
+      description_arabic: string | null;
+      job_code: string | null;
+      professional_level: number | null;
+    };
+    const professions: Row[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('mohre_professions')
+        .select('description_english, description_arabic, job_code, professional_level')
+        .eq('is_active', true)
+        .order('description_english', { ascending: true })
+        .range(from, from + PAGE - 1);
 
-    if (error) throw error;
-    if (data && data.length > 0) {
-      return NextResponse.json({ professions: data });
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      professions.push(...(data as Row[]));
+      if (data.length < PAGE) break;
+    }
+
+    if (professions.length > 0) {
+      return NextResponse.json({ professions });
     }
     // Empty mirror (not yet seeded) — fall through to the portal/fallback.
   } catch (err) {
