@@ -16,7 +16,17 @@ import {
   LANGUAGES,
   UAE_EMIRATES,
 } from '@/lib/constants';
-import { lookupBankFromIban, isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
+import {
+  lookupBankFromIban,
+  isUaeIban,
+  validateIbanFormat,
+  getBankNameOptions,
+  findBanksByName,
+  routingIbanBankMismatch,
+  bankCodeFromRouting,
+  ibanBankCode,
+  INTERNATIONAL_BANK_LABEL,
+} from '@/lib/uae-bank-directory';
 import { Input, Button, MultiSelectDropdown, CustomDropdown, CustomDatePicker, PhoneInput } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
@@ -113,6 +123,13 @@ const EMPLOYEE_VISA_CATEGORY_OPTIONS: Array<{ value: string; label: string }> = 
   { value: 'dependent_visa', label: 'Dependent visa' },
   { value: 'other', label: 'Other' },
 ];
+
+// Bank options for the "UAE IBAN not in directory" fallback dropdown. The
+// international label is excluded here: this branch only fires for a valid UAE
+// IBAN, so the bank is a UAE one we simply don't have listed yet.
+const UAE_BANK_PICK_OPTIONS = getBankNameOptions().filter(
+  (o) => o.value !== INTERNATIONAL_BANK_LABEL
+);
 
 interface FormSectionProps {
   title: string;
@@ -697,6 +714,8 @@ export function EmployeeForm({
   const sameEmails = watch('same_emails');
   const hasUAEBank = watch('has_uae_bank');
   const bankIban = watch('bank_iban');
+  const bankName = watch('bank_name');
+  const bankRoutingCode = watch('bank_routing_code');
   const firstName = watch('first_name');
   const middleName = watch('middle_name');
   const lastName = watch('last_name');
@@ -862,15 +881,34 @@ export function EmployeeForm({
         setValue('bank_routing_code', bankInfo.routingCode);
       } else {
         setBankLookupResult({ found: false, isUae: true, isInternational: false });
+        // Bank not in directory: clear any routing code derived from a
+        // previously-entered (recognized) IBAN so it can't silently mismatch
+        // this one. bank_name/bank_swift stay editable for manual entry.
+        setValue('bank_routing_code', '');
       }
     } else if (/^[A-Z]{2}/.test(clean) && !clean.startsWith('AE')) {
-      // International IBAN
+      // International IBAN — no UAE routing code applies; clear any stale one.
       setBankLookupResult({ found: false, isUae: false, isInternational: true });
+      setValue('bank_routing_code', '');
     } else {
       setBankLookupResult(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bankIban]);
+
+  // Picking a bank from the fallback dropdown (UAE IBAN not in directory) fills
+  // SWIFT + routing from the directory. If the picked bank's routing doesn't
+  // match the IBAN's bank, the mismatch warning below flags it for the employee.
+  const handleUnrecognizedBankPick = (name: string) => {
+    setValue('bank_name', name, { shouldValidate: true });
+    const matches = findBanksByName(name);
+    if (matches.length === 1) {
+      setValue('bank_swift', matches[0].swift11);
+      setValue('bank_routing_code', matches[0].routingCode);
+    }
+    // Ambiguous multi-entity banks (e.g. First Abu Dhabi Bank): leave SWIFT and
+    // routing blank rather than guessing the wrong entity.
+  };
 
   // New checkbox states for nationality and address
   const [hasOtherNationality, setHasOtherNationality] = useState(
@@ -4194,27 +4232,44 @@ export function EmployeeForm({
                     </div>
                   )}
 
-                  {/* UAE IBAN — bank code not recognized: warning + manual fields */}
+                  {/* UAE IBAN — bank code not recognized: pick the bank + manual SWIFT */}
                   {bankLookupResult?.isUae && !bankLookupResult.found && (
                     <>
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                         <div className="flex items-center gap-2">
                           <Info className="w-4 h-4 text-amber-600" />
-                          <span className="text-sm text-amber-800">Bank not recognized from IBAN. Please enter details manually.</span>
+                          <span className="text-sm text-amber-800">Bank not recognized from this IBAN. Please pick your bank below — double-check your IBAN if your bank isn&apos;t listed.</span>
                         </div>
                       </div>
+                      {/* Hidden field keeps bank_name required + submitted; the
+                          dropdown drives it via setValue. */}
+                      <input
+                        type="hidden"
+                        {...register('bank_name', { required: hasUAEBank ? 'Required' : false })}
+                      />
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Input
+                        <CustomDropdown
                           label="Bank Name"
                           required
-                          {...register('bank_name', { required: 'Required' })}
-                          error={errors.bank_name?.message}
+                          value={bankName || ''}
+                          onChange={handleUnrecognizedBankPick}
+                          options={UAE_BANK_PICK_OPTIONS}
+                          placeholder="Select your bank..."
+                          searchable
+                          error={errors.bank_name?.message as string | undefined}
                         />
                         <Input
                           label="SWIFT Code"
                           {...register('bank_swift')}
                         />
                       </div>
+                      {routingIbanBankMismatch(bankRoutingCode, bankIban) && (
+                        <p className="text-sm text-red-600">
+                          The selected bank&apos;s routing code (bank {bankCodeFromRouting(bankRoutingCode)})
+                          doesn&apos;t match your IBAN (bank {ibanBankCode(bankIban)}). Re-check your IBAN or
+                          your bank selection — payroll will reject a mismatch.
+                        </p>
+                      )}
                     </>
                   )}
 

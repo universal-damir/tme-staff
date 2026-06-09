@@ -207,3 +207,73 @@ export function formatIbanDisplay(iban: string): string {
   }
   return out;
 }
+
+/**
+ * Routing-code / IBAN bank-match helpers.
+ *
+ * Mirror of tme-portal `src/lib/clients-v2/uae-bank-directory.ts`. The portal's
+ * payroll/WPS generation hard-blocks any bank employee whose routing-code bank
+ * differs from the IBAN's bank; these helpers let the onboarding form surface
+ * the same mismatch to the employee before they submit.
+ *
+ * Comparison is branch-tolerant: routing positions 2-4 (the bank digits) vs
+ * IBAN positions 5-7, so legitimate branch variants of the same bank still pass.
+ */
+
+/** Label used in the bank dropdown for an international / non-UAE bank. */
+export const INTERNATIONAL_BANK_LABEL = 'International / non-UAE bank';
+
+/** Bank digits (positions 2-4) of a 9-digit local routing code, or null. */
+export function bankCodeFromRouting(routing?: string | null): string | null {
+  if (!routing) return null;
+  const digits = routing.replace(/\D/g, '');
+  return digits.length === 9 ? digits.substring(1, 4) : null;
+}
+
+/** 3-digit bank code (IBAN positions 5-7) for a UAE IBAN, or null. */
+export function ibanBankCode(iban?: string | null): string | null {
+  if (!iban) return null;
+  const clean = iban.replace(/\s/g, '').toUpperCase();
+  if (!isUaeIban(clean)) return null;
+  return clean.substring(4, 7);
+}
+
+/** True only when both a routing bank code and a UAE IBAN bank code exist and differ. */
+export function routingIbanBankMismatch(routing?: string | null, iban?: string | null): boolean {
+  const rc = bankCodeFromRouting(routing);
+  const ic = ibanBankCode(iban);
+  return rc !== null && ic !== null && rc !== ic;
+}
+
+/**
+ * Bank-name options for a dropdown: banks first (A-Z), then exchange houses
+ * (A-Z), then the international fallback. Names are de-duplicated so banks with
+ * multiple legacy entity codes (e.g. First Abu Dhabi Bank) appear once.
+ */
+export function getBankNameOptions(): { value: string; label: string }[] {
+  const seen = new Set<string>();
+  const banks: string[] = [];
+  const exchanges: string[] = [];
+  for (const info of UAE_BANK_DIRECTORY.values()) {
+    if (seen.has(info.name)) continue;
+    seen.add(info.name);
+    (info.entityType === 'EX' ? exchanges : banks).push(info.name);
+  }
+  banks.sort((a, b) => a.localeCompare(b));
+  exchanges.sort((a, b) => a.localeCompare(b));
+  const toOpt = (n: string) => ({ value: n, label: n });
+  return [
+    ...banks.map(toOpt),
+    ...exchanges.map(toOpt),
+    { value: INTERNATIONAL_BANK_LABEL, label: INTERNATIONAL_BANK_LABEL },
+  ];
+}
+
+/** All directory entries sharing a bank name (>1 only for multi-entity banks). */
+export function findBanksByName(name: string): UaeBankInfo[] {
+  const out: UaeBankInfo[] = [];
+  for (const info of UAE_BANK_DIRECTORY.values()) {
+    if (info.name === name) out.push(info);
+  }
+  return out;
+}
