@@ -24,7 +24,7 @@ import {
  *   3. Update EXPECTED_DIRECTORY_SHA256 in BOTH repos to the new value.
  */
 const EXPECTED_DIRECTORY_SHA256 =
-  '043cdeefce4269eae06550a135007cb1651af0835d5c7d4a9bcc6ad0552b84e5';
+  '9b330a5938eb1bdbbc930aa1079c28a71ab85ae245e7c689540e5f2f878c28eb';
 const EXPECTED_DIRECTORY_SIZE = 107;
 
 describe('UAE_BANK_DIRECTORY cross-repo sync tripwire', () => {
