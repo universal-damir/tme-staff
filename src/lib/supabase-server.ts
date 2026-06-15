@@ -16,3 +16,7 @@ export function getSupabaseAdmin(): SupabaseClient {
 }
 
 export const STORAGE_BUCKET = 'staff-documents';
+
+// Private bucket for the e-invoicing gap-analysis intake (sample invoices the
+// client uploads). Service-role only; the air-gapped portal pulls + analyses.
+export const GAP_INTAKE_BUCKET = 'gap-intake-documents';

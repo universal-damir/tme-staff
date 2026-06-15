@@ -1,0 +1,370 @@
+'use client';
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { TME_COLORS } from '@/lib/constants';
+import { CustomDropdown } from '@/components/ui';
+import {
+  Loader2,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  UploadCloud,
+  FileText,
+  FileCode2,
+} from 'lucide-react';
+
+type PageState =
+  | 'loading'
+  | 'form'
+  | 'success'
+  | 'already_submitted'
+  | 'not_found'
+  | 'closed' // cancelled / expired
+  | 'error';
+
+interface UploadedFile {
+  filename: string;
+  channel: 'digital_xml' | 'physical';
+}
+
+interface IntakeData {
+  company_name: string | null;
+  status: string;
+  accounting_software: string | null;
+  accounting_software_other: string | null;
+  files: UploadedFile[];
+  software_options: string[];
+}
+
+const ACCEPT = '.pdf,.xml,application/pdf,application/xml,text/xml,image/jpeg,image/png,image/webp';
+
+// NOTE: Shell and Header are defined at MODULE scope (not inside the page
+// component). Defining them inline would give them a new identity on every
+// render, so React would remount the whole subtree on each keystroke and the
+// "Other" text input would lose focus after one character.
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Header({ companyName }: { companyName?: string | null }) {
+  return (
+    <div className="mb-8">
+      <div
+        className="text-xs font-semibold tracking-wide uppercase mb-2"
+        style={{ color: TME_COLORS.secondary }}
+      >
+        TME Services — E-Invoicing
+      </div>
+      <h1 className="text-2xl font-bold" style={{ color: TME_COLORS.primary }}>
+        E-Invoicing Readiness Check
+      </h1>
+      {companyName && <p className="text-gray-600 mt-1">{companyName}</p>}
+    </div>
+  );
+}
+
+export default function EInvoicingIntakePage() {
+  const params = useParams();
+  const token = String(params?.token ?? '');
+
+  const [state, setState] = useState<PageState>('loading');
+  const [data, setData] = useState<IntakeData | null>(null);
+  const [software, setSoftware] = useState('');
+  const [softwareOther, setSoftwareOther] = useState('');
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/e-invoicing/${token}`);
+        if (cancelled) return;
+        if (res.status === 404) return setState('not_found');
+        if (res.status === 410) return setState('closed');
+        if (!res.ok) return setState('error');
+        const json: IntakeData = await res.json();
+        setData(json);
+        setFiles(json.files ?? []);
+        setSoftware(json.accounting_software ?? '');
+        setSoftwareOther(json.accounting_software_other ?? '');
+        if (json.status === 'submitted' || json.status === 'synced') {
+          setState('already_submitted');
+        } else {
+          setState('form');
+        }
+      } catch {
+        if (!cancelled) setState('error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const handleFiles = useCallback(
+    async (fileList: FileList | null) => {
+      if (!fileList || fileList.length === 0) return;
+      setError(null);
+      setUploading(true);
+      try {
+        for (const file of Array.from(fileList)) {
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch(`/api/e-invoicing/${token}/upload`, {
+            method: 'POST',
+            body: fd,
+          });
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            const code = j?.error ?? 'upload_failed';
+            const msg =
+              code === 'unsupported_file_type'
+                ? `"${file.name}" isn't a PDF, image, or XML invoice.`
+                : code === 'file_size_out_of_range'
+                ? `"${file.name}" is too large (max 15 MB).`
+                : code === 'too_many_files'
+                ? 'You can upload at most 10 invoices.'
+                : `Could not upload "${file.name}". Please try again.`;
+            setError(msg);
+            break;
+          }
+          const j: { files: UploadedFile[] } = await res.json();
+          setFiles(j.files ?? []);
+        }
+      } catch {
+        setError('Upload failed — please check your connection and try again.');
+      } finally {
+        setUploading(false);
+        if (inputRef.current) inputRef.current.value = '';
+      }
+    },
+    [token]
+  );
+
+  const canSubmit =
+    !!software &&
+    (software !== 'Other' || softwareOther.trim().length > 0) &&
+    files.length > 0 &&
+    !uploading &&
+    !submitting;
+
+  const handleSubmit = useCallback(async () => {
+    if (!canSubmit) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/e-invoicing/${token}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accounting_software: software,
+          accounting_software_other: software === 'Other' ? softwareOther.trim() : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(
+          j?.error === 'no_invoices_uploaded'
+            ? 'Please upload at least one invoice before submitting.'
+            : 'Could not submit — please try again.'
+        );
+        setSubmitting(false);
+        return;
+      }
+      setState('success');
+    } catch {
+      setError('Submission failed — please try again.');
+      setSubmitting(false);
+    }
+  }, [canSubmit, token, software, softwareOther]);
+
+  if (state === 'loading') {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center py-16 text-gray-500">
+          <Loader2 className="w-8 h-8 animate-spin mb-3" style={{ color: TME_COLORS.primary }} />
+          Loading…
+        </div>
+      </Shell>
+    );
+  }
+
+  if (state === 'not_found' || state === 'error') {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center py-12 text-center">
+          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+            This link isn’t valid
+          </h2>
+          <p className="text-gray-600">
+            The link may be incorrect. Please use the link from your TME email, or contact your TME
+            consultant.
+          </p>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (state === 'closed') {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center py-12 text-center">
+          <AlertTriangle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.secondary }} />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+            This link has expired
+          </h2>
+          <p className="text-gray-600">
+            Please contact your TME consultant to receive a fresh link.
+          </p>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (state === 'success' || state === 'already_submitted') {
+    return (
+      <Shell>
+        <Header companyName={data?.company_name} />
+        <div className="flex flex-col items-center py-10 text-center">
+          <CheckCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.success }} />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+            Thank you — we’ve received your submission
+          </h2>
+          <p className="text-gray-600 max-w-md">
+            Our team will review your invoices and accounting setup, and your TME consultant will be
+            in touch with the next steps. No further action is needed from you right now.
+          </p>
+        </div>
+      </Shell>
+    );
+  }
+
+  // ---------- Form ----------
+  const softwareOptions = (data?.software_options ?? []).map((o) => ({ value: o, label: o }));
+  return (
+    <Shell>
+      <Header companyName={data?.company_name} />
+
+      <p className="text-gray-600 mb-8 text-sm leading-relaxed">
+        To assess your readiness for the UAE’s mandatory e-invoicing, we need just two things: the
+        accounting system you use, and a few sample invoices. Your files are used only for this
+        assessment.
+      </p>
+
+      {/* Accounting software */}
+      <div className="mb-8">
+        <CustomDropdown
+          label="Which accounting / ERP system do you use?"
+          value={software}
+          onChange={setSoftware}
+          options={softwareOptions}
+          placeholder="Select…"
+        />
+        {software === 'Other' && (
+          <input
+            type="text"
+            value={softwareOther}
+            onChange={(e) => setSoftwareOther(e.target.value)}
+            placeholder="Please specify your system"
+            className="w-full mt-2 px-3 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200"
+            style={{ height: 42 }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
+            onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+          />
+        )}
+      </div>
+
+      {/* Invoice upload */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
+          Sample invoices (PDF or XML)
+        </label>
+        <p className="text-xs text-gray-500 mb-3">
+          Upload 1–10 recent sales invoices. XML (e-invoice) files give the most accurate result, but
+          PDF or a clear photo is fine too.
+        </p>
+
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="w-full border-2 border-dashed rounded-xl py-8 flex flex-col items-center justify-center gap-2 transition-colors disabled:opacity-60"
+          style={{ borderColor: TME_COLORS.border }}
+        >
+          {uploading ? (
+            <Loader2 className="w-6 h-6 animate-spin" style={{ color: TME_COLORS.primary }} />
+          ) : (
+            <UploadCloud className="w-6 h-6" style={{ color: TME_COLORS.primary }} />
+          )}
+          <span className="text-sm text-gray-600">
+            {uploading ? 'Uploading…' : 'Click to choose files'}
+          </span>
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={ACCEPT}
+          multiple
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+
+        {files.length > 0 && (
+          <ul className="mt-4 space-y-2">
+            {files.map((f, i) => (
+              <li
+                key={`${f.filename}-${i}`}
+                className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100"
+              >
+                {f.channel === 'digital_xml' ? (
+                  <FileCode2 className="w-5 h-5 shrink-0" style={{ color: TME_COLORS.primary }} />
+                ) : (
+                  <FileText className="w-5 h-5 shrink-0" style={{ color: TME_COLORS.primary }} />
+                )}
+                <span className="text-sm text-gray-700 truncate flex-1">{f.filename}</span>
+                <span
+                  className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: 'rgba(36,63,123,0.08)', color: TME_COLORS.primary }}
+                >
+                  {f.channel === 'digital_xml' ? 'XML' : 'PDF / image'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {error && (
+        <div
+          className="mb-4 text-sm rounded-lg p-3"
+          style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: TME_COLORS.error }}
+        >
+          {error}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={handleSubmit}
+        disabled={!canSubmit}
+        className="w-full py-3 rounded-lg font-semibold text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        style={{ backgroundColor: TME_COLORS.primary }}
+      >
+        {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+        {submitting ? 'Submitting…' : 'Submit for review'}
+      </button>
+    </Shell>
+  );
+}
