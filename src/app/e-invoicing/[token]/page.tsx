@@ -344,7 +344,7 @@ export default function EInvoicingIntakePage() {
       {/* Accounting software */}
       <div className="mb-8">
         <CustomDropdown
-          label="Which accounting / ERP system do you use?"
+          label="Which invoicing system do you use?"
           value={software}
           onChange={setSoftware}
           options={softwareOptions}
@@ -368,11 +368,11 @@ export default function EInvoicingIntakePage() {
       {/* Invoice upload */}
       <div className="mb-6">
         <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
-          Sample invoices (PDF or XML)
+          Sample invoices (XML file preferred)
         </label>
         <p className="text-xs text-gray-500 mb-3">
           Upload 1–10 recent sales invoices. XML (e-invoice) files give the most accurate result, but
-          PDF or a clear photo is fine too.
+          PDF is fine too, although results may vary.
         </p>
 
         <button

@@ -21,7 +21,6 @@ export const GAP_INTAKE_UUID_REGEX =
 // free-text field. The portal stores the picked value in `accounting_software`
 // and the free text in `accounting_software_other`.
 export const ACCOUNTING_SOFTWARE_OPTIONS = [
-  'DATEV',
   'Focus',
   'FreshBooks',
   'Microsoft Dynamics 365',
@@ -68,10 +67,6 @@ export interface AccountingSoftwareGuidance {
 }
 
 export const ACCOUNTING_SOFTWARE_GUIDANCE: Record<string, AccountingSoftwareGuidance> = {
-  DATEV: {
-    xml: 'yes',
-    note: 'DATEV supports structured e-invoices such as ZUGFeRD and XRechnung, so it can output invoices as XML. Your DATEV advisor can enable the format that fits the UAE requirement.',
-  },
   Focus: {
     xml: 'yes',
     note: 'Focus (Focus Softnet) is built for the region and supports e-invoicing, so it can export invoices as structured XML. Your Focus consultant can switch on the UAE e-invoice format.',
