@@ -104,3 +104,58 @@ export async function POST(
     files: updatedFiles.map((f) => ({ filename: f.filename, channel: f.channel })),
   });
 }
+
+// DELETE /api/e-invoicing/[token]/upload?index=N
+// Removes a single uploaded file (client realised they picked the wrong one).
+// Deletes by array index — a single client uploads one at a time, so the index
+// the page rendered is stable. Returns the updated file list.
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ token: string }> }
+): Promise<NextResponse> {
+  const { token } = await params;
+
+  // Writes: an already-submitted/synced row is closed.
+  const access = await verifyGapIntakeAccess(token, { allowSubmitted: false });
+  if (!access.ok || !access.row) {
+    return NextResponse.json(
+      { error: access.reason ?? 'not_found' },
+      { status: access.status ?? 404 }
+    );
+  }
+  const row = access.row;
+
+  const index = Number(req.nextUrl.searchParams.get('index'));
+  const existing = row.invoice_files ?? [];
+  if (!Number.isInteger(index) || index < 0 || index >= existing.length) {
+    return NextResponse.json({ error: 'invalid_index' }, { status: 400 });
+  }
+
+  const target = existing[index];
+  const updatedFiles = existing.filter((_, i) => i !== index);
+
+  const supabase = getSupabaseAdmin();
+
+  // Update the row FIRST so a failed storage delete leaves a harmless orphan
+  // object, never a DB ref pointing at bytes that are already gone.
+  const { error: updErr } = await supabase
+    .from('gap_intake_submissions')
+    .update({ invoice_files: updatedFiles })
+    .eq('id', row.id);
+
+  if (updErr) {
+    console.error('e-invoicing/upload: failed to remove file ref');
+    return NextResponse.json({ error: 'save_failed' }, { status: 500 });
+  }
+
+  if (target?.path) {
+    const { error: rmErr } = await supabase.storage
+      .from(GAP_INTAKE_BUCKET)
+      .remove([target.path]);
+    if (rmErr) console.error('e-invoicing/upload: storage remove failed (orphan left)');
+  }
+
+  return NextResponse.json({
+    files: updatedFiles.map((f) => ({ filename: f.filename, channel: f.channel })),
+  });
+}

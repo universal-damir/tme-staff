@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyGapIntakeAccess, ACCOUNTING_SOFTWARE_OPTIONS } from '@/lib/gap-intake-token';
+import {
+  verifyGapIntakeAccess,
+  ACCOUNTING_SOFTWARE_OPTIONS,
+  ACCOUNTING_SOFTWARE_GUIDANCE,
+} from '@/lib/gap-intake-token';
 
 export const runtime = 'nodejs';
 
@@ -32,5 +36,6 @@ export async function GET(
       channel: f.channel,
     })),
     software_options: ACCOUNTING_SOFTWARE_OPTIONS,
+    software_guidance: ACCOUNTING_SOFTWARE_GUIDANCE,
   });
 }

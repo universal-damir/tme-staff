@@ -15,22 +15,25 @@ import { getSupabaseAdmin } from './supabase-server';
 export const GAP_INTAKE_UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Accounting / ERP systems offered in the intake dropdown. Keep "Other" last —
-// it reveals the free-text field. The portal stores the picked value in
-// `accounting_software` and the free text in `accounting_software_other`.
+// Accounting / ERP systems offered in the intake dropdown. The named systems are
+// listed alphabetically; the two catch-alls ("None / spreadsheets", then "Other")
+// always sit at the bottom — "Other" must stay last because it reveals the
+// free-text field. The portal stores the picked value in `accounting_software`
+// and the free text in `accounting_software_other`.
 export const ACCOUNTING_SOFTWARE_OPTIONS = [
-  'SAP',
-  'Oracle NetSuite',
-  'Microsoft Dynamics 365',
-  'Zoho Books',
-  'QuickBooks',
-  'Xero',
-  'Tally',
-  'Sage',
-  'Odoo',
-  'Wafeq',
-  'FreshBooks',
+  'DATEV',
   'Focus',
+  'FreshBooks',
+  'Microsoft Dynamics 365',
+  'Odoo',
+  'Oracle NetSuite',
+  'QuickBooks',
+  'Sage',
+  'SAP',
+  'Tally',
+  'Wafeq',
+  'Xero',
+  'Zoho Books',
   'None / spreadsheets',
   'Other',
 ] as const;
@@ -40,6 +43,88 @@ export type AccountingSoftwareOption = (typeof ACCOUNTING_SOFTWARE_OPTIONS)[numb
 export function isAllowedAccountingSoftware(v: string): boolean {
   return (ACCOUNTING_SOFTWARE_OPTIONS as ReadonlyArray<string>).includes(v);
 }
+
+/**
+ * Per-system guidance on producing the structured XML that UAE e-invoicing needs.
+ *
+ * This is TME's working estimate from each vendor's public documentation, not a
+ * guarantee — exact capability depends on the client's edition, region and plan,
+ * which the consultant confirms during the assessment. The intake page shows the
+ * matching entry as soon as a client picks their system, so they immediately see
+ * whether their tool can export XML and roughly how. "Other" has no entry (we
+ * can't map free text) and "None / spreadsheets" is handled as a reassurance.
+ *
+ * `xml`:
+ *   'yes'   — the system natively produces structured XML e-invoices
+ *   'maybe' — possible, but typically via a specific plan, region or add-on
+ *   'no'    — no structured XML on its own; we'll recommend the simplest route
+ */
+export type XmlCapability = 'yes' | 'maybe' | 'no';
+
+export interface AccountingSoftwareGuidance {
+  xml: XmlCapability;
+  /** One client-friendly sentence on how to obtain the XML / what to expect. */
+  note: string;
+}
+
+export const ACCOUNTING_SOFTWARE_GUIDANCE: Record<string, AccountingSoftwareGuidance> = {
+  DATEV: {
+    xml: 'yes',
+    note: 'DATEV supports structured e-invoices such as ZUGFeRD and XRechnung, so it can output invoices as XML. Your DATEV advisor can enable the format that fits the UAE requirement.',
+  },
+  Focus: {
+    xml: 'yes',
+    note: 'Focus (Focus Softnet) is built for the region and supports e-invoicing, so it can export invoices as structured XML. Your Focus consultant can switch on the UAE e-invoice format.',
+  },
+  FreshBooks: {
+    xml: 'no',
+    note: "FreshBooks focuses on PDF invoicing and doesn't produce structured XML on its own. That's no problem — we'll suggest the simplest connector to make you compliant.",
+  },
+  'Microsoft Dynamics 365': {
+    xml: 'yes',
+    note: 'Dynamics 365 Finance includes Electronic Invoicing, which outputs invoices as XML using a configurable format. Your partner can map it to the UAE e-invoice standard.',
+  },
+  Odoo: {
+    xml: 'yes',
+    note: "Odoo's Accounting app can generate structured e-invoices (UBL / PEPPOL). Once e-invoicing is enabled in settings, the XML is attached to each customer invoice.",
+  },
+  'Oracle NetSuite': {
+    xml: 'yes',
+    note: "NetSuite's Electronic Invoicing SuiteApp generates UBL / PEPPOL XML. Once it's installed and enabled, invoices can be exported or sent as XML.",
+  },
+  QuickBooks: {
+    xml: 'maybe',
+    note: "QuickBooks sends PDF invoices by default. Structured XML is available through PEPPOL e-invoicing in some regions or via a connector app — we'll help you choose the right option.",
+  },
+  Sage: {
+    xml: 'yes',
+    note: 'Most Sage products (e.g. Sage 200, Sage X3) support UBL / PEPPOL e-invoicing, sometimes through an add-on. Your Sage partner can enable structured XML export.',
+  },
+  SAP: {
+    xml: 'yes',
+    note: "SAP's Document and Reporting Compliance (DRC) module produces statutory e-invoices in XML. Your SAP team can enable the UAE format and export it from the billing document.",
+  },
+  Tally: {
+    xml: 'yes',
+    note: 'TallyPrime has built-in e-invoicing that produces the structured invoice file. Enable e-invoicing under Features (F11) and export the XML from the voucher.',
+  },
+  Wafeq: {
+    xml: 'yes',
+    note: 'Wafeq is built for regional e-invoicing and generates compliant XML automatically. Once e-invoicing is switched on, you can download the XML from each invoice.',
+  },
+  Xero: {
+    xml: 'yes',
+    note: "Xero supports PEPPOL e-invoicing and structured invoice data. Where PEPPOL isn't yet available in your region, an approved e-invoicing app can generate the XML.",
+  },
+  'Zoho Books': {
+    xml: 'maybe',
+    note: 'Zoho Books supports e-invoicing and can export invoice data as XML, depending on your plan and region. Enable e-invoicing in Settings, then export the file or use the API.',
+  },
+  'None / spreadsheets': {
+    xml: 'no',
+    note: "Working from spreadsheets means there's no structured XML yet — and that's completely fine. We'll recommend a simple, right-sized tool so you're ready for the mandate.",
+  },
+};
 
 export interface GapIntakeFileRef {
   path: string;

@@ -12,7 +12,16 @@ import {
   UploadCloud,
   FileText,
   FileCode2,
+  Info,
+  Trash2,
 } from 'lucide-react';
+
+type XmlCapability = 'yes' | 'maybe' | 'no';
+
+interface SoftwareGuidance {
+  xml: XmlCapability;
+  note: string;
+}
 
 type PageState =
   | 'loading'
@@ -35,6 +44,7 @@ interface IntakeData {
   accounting_software_other: string | null;
   files: UploadedFile[];
   software_options: string[];
+  software_guidance?: Record<string, SoftwareGuidance>;
 }
 
 const ACCEPT = '.pdf,.xml,application/pdf,application/xml,text/xml,image/jpeg,image/png,image/webp';
@@ -63,9 +73,50 @@ function Header({ companyName }: { companyName?: string | null }) {
         TME Services — E-Invoicing
       </div>
       <h1 className="text-2xl font-bold" style={{ color: TME_COLORS.primary }}>
-        E-Invoicing Readiness Check
+        E-Invoicing Readiness Pre-Assessment
       </h1>
       {companyName && <p className="text-gray-600 mt-1">{companyName}</p>}
+    </div>
+  );
+}
+
+// Contextual hint shown once a client picks their accounting system: whether it
+// can export the structured XML that UAE e-invoicing needs, and roughly how. The
+// content is TME's estimate from vendor docs (see ACCOUNTING_SOFTWARE_GUIDANCE);
+// kept reassuring so a "no" never reads as a dead end.
+function XmlGuidance({ software, guidance }: { software: string; guidance: SoftwareGuidance }) {
+  const tone =
+    guidance.xml === 'yes'
+      ? {
+          bg: 'rgba(34,197,94,0.08)',
+          color: TME_COLORS.success,
+          Icon: CheckCircle,
+          headline: `Good news — ${software} can export invoices as XML`,
+        }
+      : guidance.xml === 'maybe'
+      ? {
+          bg: 'rgba(36,63,123,0.06)',
+          color: TME_COLORS.primary,
+          Icon: FileCode2,
+          headline: `${software} can usually export invoices as XML`,
+        }
+      : {
+          bg: 'rgba(36,63,123,0.04)',
+          color: TME_COLORS.primary,
+          Icon: Info,
+          headline: "We'll help you get export-ready",
+        };
+
+  const { Icon } = tone;
+  return (
+    <div className="mt-3 rounded-xl p-4 flex gap-3" style={{ backgroundColor: tone.bg }}>
+      <Icon className="w-5 h-5 shrink-0 mt-0.5" style={{ color: tone.color }} />
+      <div>
+        <p className="text-sm font-semibold" style={{ color: TME_COLORS.primary }}>
+          {tone.headline}
+        </p>
+        <p className="text-sm text-gray-600 mt-1 leading-relaxed">{guidance.note}</p>
+      </div>
     </div>
   );
 }
@@ -80,6 +131,7 @@ export default function EInvoicingIntakePage() {
   const [softwareOther, setSoftwareOther] = useState('');
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -152,11 +204,35 @@ export default function EInvoicingIntakePage() {
     [token]
   );
 
+  const handleDelete = useCallback(
+    async (index: number) => {
+      setError(null);
+      setDeletingIndex(index);
+      try {
+        const res = await fetch(`/api/e-invoicing/${token}/upload?index=${index}`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) {
+          setError('Could not remove that file — please try again.');
+          return;
+        }
+        const j: { files: UploadedFile[] } = await res.json();
+        setFiles(j.files ?? []);
+      } catch {
+        setError('Could not remove that file — please check your connection and try again.');
+      } finally {
+        setDeletingIndex(null);
+      }
+    },
+    [token]
+  );
+
   const canSubmit =
     !!software &&
     (software !== 'Other' || softwareOther.trim().length > 0) &&
     files.length > 0 &&
     !uploading &&
+    deletingIndex === null &&
     !submitting;
 
   const handleSubmit = useCallback(async () => {
@@ -253,14 +329,16 @@ export default function EInvoicingIntakePage() {
 
   // ---------- Form ----------
   const softwareOptions = (data?.software_options ?? []).map((o) => ({ value: o, label: o }));
+  const guidance =
+    software && software !== 'Other' ? data?.software_guidance?.[software] ?? null : null;
   return (
     <Shell>
       <Header companyName={data?.company_name} />
 
       <p className="text-gray-600 mb-8 text-sm leading-relaxed">
-        To assess your readiness for the UAE’s mandatory e-invoicing, we need just two things: the
-        accounting system you use, and a few sample invoices. Your files are used only for this
-        assessment.
+        The UAE is introducing mandatory e-invoicing. To pre-assess how ready your business is, we
+        need just two things from you: the accounting system you use and a few sample invoices. Your
+        files are used only for this pre-assessment and are never shared.
       </p>
 
       {/* Accounting software */}
@@ -284,6 +362,7 @@ export default function EInvoicingIntakePage() {
             onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
           />
         )}
+        {guidance && <XmlGuidance software={software} guidance={guidance} />}
       </div>
 
       {/* Invoice upload */}
@@ -340,6 +419,20 @@ export default function EInvoicingIntakePage() {
                 >
                   {f.channel === 'digital_xml' ? 'XML' : 'PDF / image'}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(i)}
+                  disabled={deletingIndex !== null || uploading || submitting}
+                  aria-label={`Remove ${f.filename}`}
+                  title="Remove this file"
+                  className="shrink-0 p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                >
+                  {deletingIndex === i ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                </button>
               </li>
             ))}
           </ul>
