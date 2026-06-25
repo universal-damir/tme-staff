@@ -805,6 +805,16 @@ export function EmployeeForm({
   const registeredAuthority = (submission.prefill_employer_data as Record<string, unknown> | null)?.registered_authority as string | undefined;
   const isDET = isDetAuthority(registeredAuthority);
 
+  // STL lock: when the portal has issued a Salary Transfer Letter for this
+  // staff member, bank details are managed by TME and the employee may NOT edit
+  // them here. The portal sets `bank_locked` in the employee prefill; we hide
+  // the entire Bank Details step when it's set (existing bank values still flow
+  // through unchanged via prefill, and the portal ignores any bank edits on
+  // sync-back as a backstop).
+  const bankLocked = Boolean(
+    (submission.prefill_employee_data as Record<string, unknown> | null)?.bank_locked
+  );
+
   // NOC merge values (family-sponsored). Company name + job title come from
   // the employer data: prefer the company-name field from prefill, falling
   // back to working location / authority; the job title is the employer's
@@ -4142,7 +4152,9 @@ export function EmployeeForm({
             </div>
           </FormSection>
 
-          {/* Bank Details */}
+          {/* Bank Details — hidden when a Salary Transfer Letter (STL) has been
+              issued; bank details are then managed by TME and not editable here. */}
+          {!bankLocked && (
           <FormSection
             title="Bank Details"
             icon={<Building2 className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -4309,6 +4321,7 @@ export function EmployeeForm({
               )}
             </div>
           </FormSection>
+          )}
 
           {/* Other Information */}
           <FormSection
