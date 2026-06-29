@@ -25,7 +25,11 @@ export async function POST(
   }
   const row = access.row;
 
-  let body: { accounting_software?: unknown; accounting_software_other?: unknown };
+  let body: {
+    accounting_software?: unknown;
+    accounting_software_other?: unknown;
+    price_agreed?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -49,6 +53,12 @@ export async function POST(
     return NextResponse.json({ error: 'no_invoices_uploaded' }, { status: 400 });
   }
 
+  // If a pre-assessment fee was quoted, the client must tick "I agree" first.
+  const priceAgreed = body.price_agreed === true;
+  if (row.price_aed != null && !priceAgreed) {
+    return NextResponse.json({ error: 'price_not_agreed' }, { status: 400 });
+  }
+
   const supabase = getSupabaseAdmin();
   const { error } = await supabase
     .from('gap_intake_submissions')
@@ -58,6 +68,8 @@ export async function POST(
       status: 'submitted',
       synced_to_tme: false,
       submitted_at: new Date().toISOString(),
+      price_agreed: priceAgreed,
+      agreed_at: priceAgreed ? new Date().toISOString() : null,
     })
     .eq('id', row.id)
     // Guard against double-submit racing the row to 'submitted' twice.

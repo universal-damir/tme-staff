@@ -29,6 +29,7 @@ export async function GET(
   return NextResponse.json({
     company_name: row.company_name,
     status: row.status,
+    price_aed: row.price_aed,
     accounting_software: row.accounting_software,
     accounting_software_other: row.accounting_software_other,
     files: (row.invoice_files ?? []).map((f) => ({

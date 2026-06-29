@@ -40,6 +40,7 @@ interface UploadedFile {
 interface IntakeData {
   company_name: string | null;
   status: string;
+  price_aed: number | null;
   accounting_software: string | null;
   accounting_software_other: string | null;
   files: UploadedFile[];
@@ -129,6 +130,7 @@ export default function EInvoicingIntakePage() {
   const [data, setData] = useState<IntakeData | null>(null);
   const [software, setSoftware] = useState('');
   const [softwareOther, setSoftwareOther] = useState('');
+  const [priceAgreed, setPriceAgreed] = useState(false);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
@@ -227,10 +229,13 @@ export default function EInvoicingIntakePage() {
     [token]
   );
 
+  // When a fee was quoted, the client must tick "I agree to the price".
+  const priceRequired = data?.price_aed != null;
   const canSubmit =
     !!software &&
     (software !== 'Other' || softwareOther.trim().length > 0) &&
     files.length > 0 &&
+    (!priceRequired || priceAgreed) &&
     !uploading &&
     deletingIndex === null &&
     !submitting;
@@ -246,6 +251,7 @@ export default function EInvoicingIntakePage() {
         body: JSON.stringify({
           accounting_software: software,
           accounting_software_other: software === 'Other' ? softwareOther.trim() : undefined,
+          price_agreed: priceAgreed,
         }),
       });
       if (!res.ok) {
@@ -253,7 +259,9 @@ export default function EInvoicingIntakePage() {
         setError(
           j?.error === 'no_invoices_uploaded'
             ? 'Please upload at least one invoice before submitting.'
-            : 'Could not submit — please try again.'
+            : j?.error === 'price_not_agreed'
+              ? 'Please agree to the pre-assessment fee before submitting.'
+              : 'Could not submit — please try again.'
         );
         setSubmitting(false);
         return;
@@ -263,7 +271,7 @@ export default function EInvoicingIntakePage() {
       setError('Submission failed — please try again.');
       setSubmitting(false);
     }
-  }, [canSubmit, token, software, softwareOther]);
+  }, [canSubmit, token, software, softwareOther, priceAgreed]);
 
   if (state === 'loading') {
     return (
@@ -438,6 +446,28 @@ export default function EInvoicingIntakePage() {
           </ul>
         )}
       </div>
+
+      {data?.price_aed != null && (
+        <label
+          className="mb-4 flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
+          style={{ borderColor: TME_COLORS.border }}
+        >
+          <input
+            type="checkbox"
+            checked={priceAgreed}
+            onChange={(e) => setPriceAgreed(e.target.checked)}
+            className="mt-0.5 w-4 h-4 shrink-0"
+            style={{ accentColor: TME_COLORS.primary }}
+          />
+          <span className="text-sm text-gray-700">
+            I agree to the pre-assessment fee of{' '}
+            <strong style={{ color: TME_COLORS.primary }}>
+              AED {data.price_aed.toLocaleString('en-US')}
+            </strong>{' '}
+            (plus 5% VAT). On submission you will be invoiced for this amount.
+          </span>
+        </label>
+      )}
 
       {error && (
         <div

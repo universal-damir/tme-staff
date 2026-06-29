@@ -136,10 +136,12 @@ export interface GapIntakeRow {
   invoice_files: GapIntakeFileRef[] | null;
   status: 'invited' | 'submitted' | 'synced' | 'cancelled';
   expires_at: string | null;
+  // E-invoicing pre-assessment fee the client must agree to before submitting.
+  price_aed: number | null;
 }
 
 const SAFE_COLUMNS =
-  'id, link_token, company_name, accounting_software, accounting_software_other, invoice_files, status, expires_at';
+  'id, link_token, company_name, accounting_software, accounting_software_other, invoice_files, status, expires_at, price_aed';
 
 export type GapIntakeAccessFailure =
   | 'invalid_token'
