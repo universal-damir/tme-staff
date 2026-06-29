@@ -3461,8 +3461,10 @@ export function EmployeeForm({
                   </div>
 
 
-                  {/* Sample images — shown together above upload areas */}
-                  <div className="grid grid-cols-2 gap-3 mb-4">
+                  {/* EID sample images — stacked on mobile so each renders the
+                      same size as the visa example above (a 2-col grid squeezed
+                      them too small on phones); side-by-side from sm up. */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                     <div className="text-center">
                       <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
                       <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">

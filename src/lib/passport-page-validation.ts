@@ -108,12 +108,13 @@ const SCAN_QUALITY = `
 
 SCAN QUALITY (assess this IN ADDITION to the page layout above — a correct layout is NOT enough on its own):
 - ALL FOUR CORNERS of the open passport must be inside the frame. If any corner or outer edge of the passport is cut off by the edge of the image, set all_corners_visible=false.
-- This MUST be a proper scan (or a clean, perfectly flat, straight-on capture that looks exactly like one) — NOT a casual hand-held phone photo. Set quality_issue (a short description) whenever you see ANY of these phone-photo signs:
-  • the passport is lying on a visible surface — wooden table, desk, lap, jeans/clothing, bed, floor — with the surrounding background showing around the document. A real scan fills the frame edge-to-edge (at most a thin white/black scanner margin); it never shows a table or lap.
-  • the page is angled or skewed so it looks like a trapezoid / parallelogram instead of a straight, square-on rectangle (keystone/perspective distortion)
+- ACCEPTABLE (set all_corners_visible=true and leave quality_issue empty): the passport is flat and square-on to the frame, all four corners visible, text sharp and readable, on a PLAIN / UNIFORM background — a scanner bed, or the passport laid on a sheet of WHITE A4 paper. A large white (or plain light) margin/border around the passport is COMPLETELY FINE — do NOT reject just because there is empty/white space around the document, and do NOT require it to fill the frame. The background colour does not matter as long as it is plain and uniform. Wear, stamps, and stickers are also fine.
+- REJECT (set quality_issue to a short description) ONLY for the signs of a casual hand-held phone snapshot:
+  • the passport sits on a real-world TEXTURED or patterned surface — wooden table, desk, lap, jeans/clothing, bed, carpet, floor — i.e. a non-uniform/cluttered background around it. (A clean white-paper or scanner background is NOT this — that is fine.)
+  • the page is clearly angled or skewed so it looks like a trapezoid / parallelogram instead of a straight, square-on rectangle (strong perspective / keystone distortion)
   • heavy glare or reflection washing out text, deep shadows, fingers covering the page, or motion-blur / out-of-focus text that cannot be read
-  Examples for quality_issue: "phone photo on a wooden table, not a scan", "angled hand-held photo, page skewed", "passport on a lap with background visible", "heavy glare on data page", "blurry, text not readable", "top-right corner cut off".
-- Be reasonable: a clean, flat, straight-on scan where the passport fills the frame and the text is sharp is FINE even if it has wear, stamps, or stickers — set all_corners_visible=true and leave quality_issue empty. Only flag clear, obvious problems; do not invent issues.`;
+  Examples for quality_issue: "passport on a wooden table, angled phone photo", "strong perspective skew", "heavy glare on data page", "blurry, text not readable", "top-right corner cut off".
+- Decision rule: if the passport is flat, square-on, fully in frame with all four corners, sharp and readable — ACCEPT it, even on a white A4 sheet or scanner with a wide margin around it. Only flag a clear textured-surface phone photo, strong skew, heavy glare, blur, or a cut-off corner. When unsure, prefer to accept.`;
 
 /**
  * Validate passport page using tool_use (prevents model refusals)
