@@ -50,6 +50,7 @@ import {
 import { buildNocText } from '@/lib/noc-letter';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
 import { calculateFullName, compressImageForAI, normalizePersonName } from '@/lib/utils';
+import { useIsMobile } from '@/lib/useIsMobile';
 import { nationalityToCountryCode, resolveExtractedNationality } from '@/lib/country-utils';
 import { SampleImageToggle } from '@/components/SampleImageToggle';
 import {
@@ -360,6 +361,10 @@ export function EmployeeForm({
   // which now back the autosave + document-refs writes that used to hit
   // anon Supabase directly.
   const aiToken = useSearchParams().get('token');
+  // Drives device-specific upload copy: on mobile we accept scanned PDFs only
+  // (camera disabled); on desktop, PDF or JPEG. Never show the mobile camera
+  // wording on desktop.
+  const isMobile = useIsMobile();
   // Pre-bound wrappers so the 30+ callsites below stay terse and don't have
   // to thread submission.id + aiToken through every line.
   const submissionId = submission.id;
@@ -2675,6 +2680,12 @@ export function EmployeeForm({
                   <p className="mt-2 text-xs text-gray-600">
                     Single page photos are not accepted. Passport must be spread open.
                   </p>
+                  <p className="mt-2 text-xs text-gray-600">
+                    All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
+                    {isMobile
+                      ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
+                      : 'Upload a PDF or a clear JPEG scan (not a photo of the passport on a table).'}
+                  </p>
                   <SampleImageToggle imageSrc="/samples/passport-cover-example.png" altText="Example passport cover spread" label="See example photo" />
                 </div>
               </div>
@@ -2683,7 +2694,7 @@ export function EmployeeForm({
                 label="Passport Cover"
                 description="Spread open: front + back cover visible"
                 expectedType="COVER"
-                accept="image/jpeg,image/png,image/webp,application/pdf"
+                accept="application/pdf,image/jpeg"
                 file={coverUI.file}
                 preview={coverUI.preview || undefined}
                 validated={!!passportPages.cover?.validated}
@@ -2774,6 +2785,12 @@ export function EmployeeForm({
                   <p className="mt-2 text-xs text-gray-600">
                     Your details will be automatically extracted from this page.
                   </p>
+                  <p className="mt-2 text-xs text-gray-600">
+                    All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
+                    {isMobile
+                      ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
+                      : 'Upload a PDF or a clear JPEG scan (not a photo of the passport on a table).'}
+                  </p>
                   <SampleImageToggle imageSrc="/samples/passport-inside-example.png" altText="Example passport inside pages spread" label="See example photo" />
                 </div>
               </div>
@@ -2782,7 +2799,7 @@ export function EmployeeForm({
                 label=""
                 description="Spread open: data page + opposite page"
                 expectedType="INSIDE_PAGES"
-                accept="image/jpeg,image/png,image/webp,application/pdf"
+                accept="application/pdf,image/jpeg"
                 file={insideUI.file}
                 preview={insideUI.preview || undefined}
                 validated={!!passportPages.insidePages?.validated}
@@ -3053,7 +3070,7 @@ export function EmployeeForm({
                   label=""
                   description="Last page with parents' names and address"
                   expectedType="INSIDE_PAGES"
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  accept="application/pdf,image/jpeg"
                   file={additionalPageUI.file}
                   preview={additionalPageUI.preview || undefined}
                   validated={!!passportPages.additionalPage?.validated}
@@ -3152,7 +3169,7 @@ export function EmployeeForm({
                         label=""
                         description="Front of Pakistan ID"
                         expectedType="INSIDE_PAGES"
-                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        accept="application/pdf,image/jpeg"
                         maxSizeMB={10}
                         file={pakistanIdFrontUI.file}
                         preview={pakistanIdFrontUI.preview || undefined}
@@ -3177,7 +3194,7 @@ export function EmployeeForm({
                         label=""
                         description="Back of Pakistan ID"
                         expectedType="INSIDE_PAGES"
-                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        accept="application/pdf,image/jpeg"
                         maxSizeMB={10}
                         file={pakistanIdBackUI.file}
                         preview={pakistanIdBackUI.preview || undefined}
@@ -3296,7 +3313,7 @@ export function EmployeeForm({
                       label=""
                       description={`Scan or photo of your ${VISA_CATEGORY_LABELS[employeeVisaCategory!] || 'supporting document'} (PDF or image)`}
                       expectedType="INSIDE_PAGES"
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      accept="application/pdf,image/jpeg"
                       maxSizeMB={10}
                       file={visaDocUI.file}
                       preview={visaDocUI.preview || undefined}
@@ -3425,7 +3442,7 @@ export function EmployeeForm({
                       label=""
                       description="Scan or photo of your previous UAE visa (PDF or image)"
                       expectedType="INSIDE_PAGES"
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      accept="application/pdf,image/jpeg"
                       maxSizeMB={10}
                       file={previousVisaUI.file}
                       preview={previousVisaUI.preview || undefined}
@@ -3470,7 +3487,7 @@ export function EmployeeForm({
                           label=""
                           description="Front of Emirates ID"
                           expectedType="INSIDE_PAGES"
-                          accept="image/jpeg,image/png,image/webp,application/pdf"
+                          accept="application/pdf,image/jpeg"
                           maxSizeMB={10}
                           file={eidFrontUI.file}
                           preview={eidFrontUI.preview || undefined}
@@ -3498,7 +3515,7 @@ export function EmployeeForm({
                           label=""
                           description="Back of Emirates ID"
                           expectedType="INSIDE_PAGES"
-                          accept="image/jpeg,image/png,image/webp,application/pdf"
+                          accept="application/pdf,image/jpeg"
                           maxSizeMB={10}
                           file={eidBackUI.file}
                           preview={eidBackUI.preview || undefined}
@@ -3572,7 +3589,7 @@ export function EmployeeForm({
                       label=""
                       description="Front of your Emirates ID"
                       expectedType="INSIDE_PAGES"
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      accept="application/pdf,image/jpeg"
                       maxSizeMB={10}
                       file={eidFrontUI.file}
                       preview={eidFrontUI.preview || undefined}
@@ -3600,7 +3617,7 @@ export function EmployeeForm({
                       label=""
                       description="Back of your Emirates ID"
                       expectedType="INSIDE_PAGES"
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      accept="application/pdf,image/jpeg"
                       maxSizeMB={10}
                       file={eidBackUI.file}
                       preview={eidBackUI.preview || undefined}
@@ -4384,7 +4401,7 @@ export function EmployeeForm({
                   label=""
                   description="Scan or photo of your sponsor's passport (PDF or image)"
                   expectedType="INSIDE_PAGES"
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  accept="application/pdf,image/jpeg"
                   maxSizeMB={10}
                   file={sponsorPassportUI.file}
                   preview={sponsorPassportUI.preview || undefined}
@@ -4453,7 +4470,7 @@ export function EmployeeForm({
                   label=""
                   description="Scan or photo of your sponsor's residence visa (PDF or image)"
                   expectedType="INSIDE_PAGES"
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  accept="application/pdf,image/jpeg"
                   maxSizeMB={10}
                   file={sponsorVisaUI.file}
                   preview={sponsorVisaUI.preview || undefined}
@@ -4518,7 +4535,7 @@ export function EmployeeForm({
                     label=""
                     description="Front of sponsor's Emirates ID"
                     expectedType="INSIDE_PAGES"
-                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    accept="application/pdf,image/jpeg"
                     maxSizeMB={10}
                     file={sponsorEidFrontUI.file}
                     preview={sponsorEidFrontUI.preview || undefined}
@@ -4579,7 +4596,7 @@ export function EmployeeForm({
                     label=""
                     description="Back of sponsor's Emirates ID"
                     expectedType="INSIDE_PAGES"
-                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    accept="application/pdf,image/jpeg"
                     maxSizeMB={10}
                     file={sponsorEidBackUI.file}
                     preview={sponsorEidBackUI.preview || undefined}

@@ -3,35 +3,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, X, Check, RotateCcw } from 'lucide-react';
 import { TME_COLORS } from '@/lib/constants';
+import { useIsMobile } from '@/lib/useIsMobile';
 import PerspT from 'perspective-transform';
-
-/**
- * The drag-corners scanner is only useful on phones (where a camera capture
- * with imperfect framing is the normal flow). On desktop, users upload
- * files directly from disk — already cropped, scanned, or PDF'd — so the
- * scanner UI just adds friction. This hook gates the scanner: when it
- * returns false, both the wrapper (`useScannerIntercept`) and the modal
- * (`DocumentScanner`) bypass and pass the file straight through to the
- * upload handler.
- *
- * Initialised synchronously on the client to avoid a flicker between the
- * default desktop render and the first effect tick.
- */
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState<boolean>(() =>
-    typeof window !== 'undefined' &&
-    'ontouchstart' in window &&
-    window.innerWidth < 768
-  );
-  useEffect(() => {
-    const check = () => {
-      setIsMobile('ontouchstart' in window && window.innerWidth < 768);
-    };
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, []);
-  return isMobile;
-}
 
 const HANDLE_SIZE = 28;
 const MAX_OUTPUT_LONG_SIDE = 2000;

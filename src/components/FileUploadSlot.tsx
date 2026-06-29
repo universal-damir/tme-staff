@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { Upload, FileText, CheckCircle, X, Loader2 } from 'lucide-react';
+import { useIsMobile } from '@/lib/useIsMobile';
 
 interface FileUploadSlotProps {
   label: string;
@@ -28,15 +29,24 @@ export function FileUploadSlot({
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isMobile = useIsMobile();
+  // PDF + JPEG only; on mobile, PDF only — accepting any image type makes the
+  // OS picker offer the camera, and there's no way to hide it while allowing
+  // library images. PDF-only forces a real scan. See useIsMobile.
+  const acceptAttr = isMobile ? 'application/pdf' : 'application/pdf,image/jpeg';
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     // Validate file type
-    const validTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+    const validTypes = isMobile ? ['application/pdf'] : ['application/pdf', 'image/jpeg'];
     if (!validTypes.includes(file.type)) {
-      setError('Please select a JPG, PNG, or PDF file');
+      setError(
+        isMobile
+          ? 'On mobile, please upload a scanned PDF. Camera photos are not accepted — use a scanner app, or upload a PDF/JPEG from a computer.'
+          : 'Please upload a PDF or a JPEG (.jpg / .jpeg).'
+      );
       return;
     }
 
@@ -116,7 +126,7 @@ export function FileUploadSlot({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,application/pdf"
+        accept={acceptAttr}
         onChange={handleFileSelect}
         className="hidden"
       />

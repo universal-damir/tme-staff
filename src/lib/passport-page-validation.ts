@@ -100,6 +100,21 @@ Decision rule: if you can see ANY of {family-name fields, Indian address, old pa
 
 In "reason", briefly describe what you see (e.g., "Address page with father / mother names + Mumbai address visible", or "shows the data page with photo + MRZ — wrong page").`;
 
+// Scan-quality gate appended to every page prompt. We now reject casual phone
+// snapshots even when the page layout is correct: clients were uploading
+// angled, glare-washed, blurry photos with corners cut off. Phrased
+// conservatively so a clearly-readable flat scan is never rejected.
+const SCAN_QUALITY = `
+
+SCAN QUALITY (assess this IN ADDITION to the page layout above — a correct layout is NOT enough on its own):
+- ALL FOUR CORNERS of the open passport must be inside the frame. If any corner or outer edge of the passport is cut off by the edge of the image, set all_corners_visible=false.
+- This MUST be a proper scan (or a clean, perfectly flat, straight-on capture that looks exactly like one) — NOT a casual hand-held phone photo. Set quality_issue (a short description) whenever you see ANY of these phone-photo signs:
+  • the passport is lying on a visible surface — wooden table, desk, lap, jeans/clothing, bed, floor — with the surrounding background showing around the document. A real scan fills the frame edge-to-edge (at most a thin white/black scanner margin); it never shows a table or lap.
+  • the page is angled or skewed so it looks like a trapezoid / parallelogram instead of a straight, square-on rectangle (keystone/perspective distortion)
+  • heavy glare or reflection washing out text, deep shadows, fingers covering the page, or motion-blur / out-of-focus text that cannot be read
+  Examples for quality_issue: "phone photo on a wooden table, not a scan", "angled hand-held photo, page skewed", "passport on a lap with background visible", "heavy glare on data page", "blurry, text not readable", "top-right corner cut off".
+- Be reasonable: a clean, flat, straight-on scan where the passport fills the frame and the text is sharp is FINE even if it has wear, stamps, or stickers — set all_corners_visible=true and leave quality_issue empty. Only flag clear, obvious problems; do not invent issues.`;
+
 /**
  * Validate passport page using tool_use (prevents model refusals)
  */
@@ -125,12 +140,13 @@ export async function validatePassportPage(
   else if (imageBase64.includes('data:image/gif')) mediaType = 'image/gif';
   else if (imageBase64.includes('data:image/webp')) mediaType = 'image/webp';
 
-  const prompt =
+  const basePrompt =
     expectedType === 'INSIDE_PAGES'
       ? INSIDE_PROMPT
       : expectedType === 'ADDITIONAL_PAGE'
         ? ADDITIONAL_PAGE_PROMPT
         : COVER_PROMPT;
+  const prompt = basePrompt + SCAN_QUALITY;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fileContent: any = isPdf
@@ -145,7 +161,7 @@ export async function validatePassportPage(
         tools: [
           {
             name: 'validate_passport_page',
-            description: 'Report whether the passport page layout is valid (spread open with both pages visible)',
+            description: 'Report whether the passport page layout is valid (spread open with both pages visible) AND whether the scan/photo quality is acceptable',
             input_schema: {
               type: 'object' as const,
               properties: {
@@ -157,8 +173,16 @@ export async function validatePassportPage(
                   type: 'string',
                   description: 'Brief explanation of what is visible in the image',
                 },
+                all_corners_visible: {
+                  type: 'boolean',
+                  description: 'true if all four corners / outer edges of the open passport are inside the frame (not cut off)',
+                },
+                quality_issue: {
+                  type: 'string',
+                  description: 'Short description of a CLEAR scan/photo quality problem (glare, skew, blur, fingers, etc.), or an empty string if the image is a usable flat scan',
+                },
               },
-              required: ['valid', 'reason'],
+              required: ['valid', 'reason', 'all_corners_visible', 'quality_issue'],
             },
           },
         ],
@@ -188,22 +212,41 @@ export async function validatePassportPage(
       throw new Error('No tool_use response');
     }
 
-    const result = toolUseBlock.input as { valid: boolean; reason: string };
+    const result = toolUseBlock.input as {
+      valid: boolean;
+      reason: string;
+      all_corners_visible?: boolean;
+      quality_issue?: string;
+    };
     console.log('[Passport Validation] Result:', result);
 
-    if (result.valid) {
+    const qualityIssue = (result.quality_issue || '').trim();
+    const hasQualityIssue =
+      result.all_corners_visible === false ||
+      (qualityIssue !== '' && qualityIssue.toLowerCase() !== 'none');
+
+    if (result.valid && !hasQualityIssue) {
       return {
         page_type: expectedType || 'COVER',
         confidence: 90,
         details: result.reason || 'Valid passport page',
       };
-    } else {
-      return {
-        page_type: 'INVALID',
-        confidence: 90,
-        details: result.reason || 'Not a valid spread passport - need both pages visible',
-      };
     }
+
+    // Layout fine but the scan/photo quality fails (corner cut off, glare,
+    // skew, blur) — surface that specific reason so the user knows what to fix.
+    const details = result.valid
+      ? qualityIssue ||
+        (result.all_corners_visible === false
+          ? 'Not all four corners of the passport are visible in the frame.'
+          : 'Image quality too low — please upload a clearer scan.')
+      : result.reason || 'Not a valid spread passport - need both pages visible';
+
+    return {
+      page_type: 'INVALID',
+      confidence: 90,
+      details,
+    };
   } catch (error) {
     console.error('Passport page validation error:', error);
     return {

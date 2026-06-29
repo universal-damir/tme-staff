@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
             : `Please upload the additional page showing your address and family details (Father / Mother / Spouse names, address, file number).`;
         } else {
           errorMessage = reason
-            ? `We couldn't verify this passport spread: ${reason} Please retake with the passport laid fully open and flat, both halves clearly visible.`
-            : `Please upload the passport spread open showing both pages. Single page photos are not accepted.`;
+            ? `We couldn't verify this passport spread: ${reason}. Please upload a flat scan or a clear, straight-on photo with the entire passport spread visible — all four corners in frame, no glare or blur.`
+            : `Please upload the passport spread open showing both pages, with all four corners visible. Single-page or blurry/angled photos are not accepted.`;
         }
       } else {
         errorMessage = `This doesn't appear to be a ${typeLabels[expectedType]}. Please upload the correct page spread.`;

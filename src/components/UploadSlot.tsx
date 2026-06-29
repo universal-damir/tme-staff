@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { Upload, CheckCircle, AlertCircle, Loader2, FileText, RefreshCw } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
+import { useIsMobile } from '@/lib/useIsMobile';
 
 interface UploadSlotProps {
   label: string;
@@ -41,7 +42,7 @@ export function UploadSlot({
   validating,
   error,
   preview,
-  accept = 'image/jpeg,image/png,image/webp',
+  accept = 'application/pdf,image/jpeg',
   maxSizeMB = 5,
   needsReview = false,
 }: UploadSlotProps) {
@@ -49,6 +50,21 @@ export function UploadSlot({
   void _file;
   void _onRemove;
   const inputRef = useRef<HTMLInputElement>(null);
+  const isMobile = useIsMobile();
+  // Identity documents accept PDF + JPEG only. On mobile we narrow to PDF
+  // *only*: any image type in `accept` makes the OS picker offer the camera
+  // ("Take Photo"), and there is no web API to allow library images while
+  // hiding it — so PDF-only is the one reliable way to force a real scan and
+  // block camera snapshots. Desktop keeps JPEG (file picker / drag-drop has no
+  // camera). PNG / WebP / HEIC are dropped — proper scans are PDF or JPEG.
+  const effectiveAccept = useMemo(() => {
+    const requested = accept.split(',').map((t) => t.trim());
+    let allowed = requested.filter((t) => t === 'application/pdf' || t === 'image/jpeg');
+    if (allowed.length === 0) allowed = ['application/pdf', 'image/jpeg'];
+    if (isMobile) allowed = allowed.filter((t) => t === 'application/pdf');
+    if (allowed.length === 0) allowed = ['application/pdf'];
+    return allowed.join(',');
+  }, [accept, isMobile]);
   const [isDragging, setIsDragging] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   // Rendered page-1 image of an uploaded PDF (null while rendering or if it
@@ -131,14 +147,12 @@ export function UploadSlot({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      const acceptedTypes = accept.split(',').map(t => t.trim());
-      const typeOk =
-        acceptedTypes.includes(selectedFile.type) ||
-        (acceptedTypes.some(t => t === 'image/*') && selectedFile.type.startsWith('image/'));
+      const acceptedTypes = effectiveAccept.split(',').map(t => t.trim());
+      const typeOk = acceptedTypes.includes(selectedFile.type);
       if (!typeOk) {
-        const friendly = acceptedTypes.includes('application/pdf')
-          ? 'Please upload a JPEG, PNG, WebP image, or a PDF.'
-          : 'Please upload a JPEG, PNG, or WebP image.';
+        const friendly = isMobile
+          ? 'On mobile, please upload a scanned PDF. Camera photos and image files are not accepted — use a scanner app, or upload a PDF/JPEG from a computer.'
+          : 'Please upload a PDF or a JPEG (.jpg / .jpeg).';
         alert(friendly);
         if (inputRef.current) inputRef.current.value = '';
         return;
@@ -159,8 +173,8 @@ export function UploadSlot({
     e.preventDefault();
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files[0];
-    const acceptedTypes = accept.split(',').map(t => t.trim());
-    if (droppedFile && (droppedFile.type.startsWith('image/') || acceptedTypes.includes(droppedFile.type))) {
+    const acceptedTypes = effectiveAccept.split(',').map(t => t.trim());
+    if (droppedFile && acceptedTypes.includes(droppedFile.type)) {
       if (droppedFile.size > MAX_FILE_SIZE) {
         alert(`File too large. Maximum size is ${maxSizeMB}MB.`);
         return;
@@ -215,7 +229,7 @@ export function UploadSlot({
         <input
           ref={inputRef}
           type="file"
-          accept={accept}
+          accept={effectiveAccept}
           onChange={handleFileChange}
           className="hidden"
         />
@@ -330,6 +344,9 @@ export function UploadSlot({
           >
             <Upload className="w-8 h-8 text-gray-400" />
             <span className="text-xs text-gray-500 text-center">{description}</span>
+            <span className="text-[11px] text-gray-400 text-center">
+              {isMobile ? 'Scanned PDF only · camera disabled' : 'PDF or JPEG'}
+            </span>
           </button>
         )}
       </div>

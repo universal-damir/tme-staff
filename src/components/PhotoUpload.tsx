@@ -7,6 +7,7 @@ import { compressImageForAI } from '@/lib/utils';
 import { getDocumentUrl } from '@/lib/supabase';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
+import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 
 interface PhotoUploadProps {
   /** Onboarding submission id; passed to the server-side AI guard. */
@@ -32,9 +33,13 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      setUploadError('Please select an image file');
+    // Validate file type — a JPEG photo or a PDF scan only. (PNG / HEIC /
+    // WebP were dropped: HEIC in particular is the native iPhone camera
+    // format, exactly the casual-snapshot path we want to discourage.)
+    const isJpeg = file.type === 'image/jpeg';
+    const isPdf = file.type === 'application/pdf';
+    if (!isJpeg && !isPdf) {
+      setUploadError('Please upload a JPEG photo (.jpg / .jpeg) or a PDF.');
       return;
     }
 
@@ -47,13 +52,23 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     setUploadError(null);
     setValidationErrors([]);
 
-    // Create preview ONCE; reuse the base64 for AI validation below.
-    const previewDataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target?.result as string);
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
+    // Read the file once. For a PDF, render page 1 to a JPEG so it previews
+    // via <img> and is validated by the vision model exactly like a photo —
+    // the original file is still what gets uploaded below. Reuse the result
+    // for the AI validation call.
+    let previewDataUrl: string;
+    try {
+      const rawDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+      previewDataUrl = isPdf ? await renderPdfFirstPage(rawDataUrl) : rawDataUrl;
+    } catch {
+      setUploadError('Could not read that file. Please upload a JPEG photo or a different PDF.');
+      return;
+    }
     setPreview(previewDataUrl);
 
     // Run upload + AI validation in PARALLEL — they don't depend on each
@@ -130,8 +145,24 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
   };
 
   const isValidated = value?.validated ?? false;
-  // Build the image source: prefer local preview, fall back to Supabase storage URL
-  const imageSrc = preview || (value?.path ? getDocumentUrl(value.path) : null);
+  // Build the image source: prefer local preview, fall back to Supabase storage
+  // URL. A stored PDF can't render in <img>, so render its first page to a thumb
+  // (mirrors the fresh-upload PDF path above).
+  const storedUrl = value?.path ? getDocumentUrl(value.path) : null;
+  const storedIsPdf = !!value?.filename && value.filename.toLowerCase().endsWith('.pdf');
+  const [storedPdfThumb, setStoredPdfThumb] = useState<string | null>(null);
+  useEffect(() => {
+    if (!storedIsPdf || !storedUrl || preview) {
+      setStoredPdfThumb(null);
+      return;
+    }
+    let cancelled = false;
+    renderPdfFirstPage(storedUrl)
+      .then((t) => { if (!cancelled) setStoredPdfThumb(t); })
+      .catch(() => { if (!cancelled) setStoredPdfThumb(null); });
+    return () => { cancelled = true; };
+  }, [storedIsPdf, storedUrl, preview]);
+  const imageSrc = preview || (storedIsPdf ? storedPdfThumb : storedUrl);
 
   // Track whether the (often network-fetched) image has actually painted, so we
   // can show a spinner instead of an empty grey box while it loads. The storage
@@ -165,11 +196,11 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
             <Upload className="w-8 h-8 text-gray-400" />
           </div>
           <p className="text-gray-600 mb-2">Upload your studio passport photo</p>
-          <p className="text-sm text-gray-400">JPG, PNG, HEIC up to 5MB. Studio-quality only — self-taken photos from the front camera on the phone will be rejected.</p>
+          <p className="text-sm text-gray-400">JPEG (.jpg / .jpeg) or PDF, up to 5MB. Studio-quality only — self-taken phone photos will be rejected.</p>
           <input
             ref={inputRef}
             type="file"
-            accept=".jpg,.jpeg,.png,.heic,.webp"
+            accept=".jpg,.jpeg,application/pdf"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -273,7 +304,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
           <input
             ref={inputRef}
             type="file"
-            accept=".jpg,.jpeg,.png,.heic,.webp"
+            accept=".jpg,.jpeg,application/pdf"
             onChange={handleFileSelect}
             className="hidden"
           />
