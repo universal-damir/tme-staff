@@ -22,6 +22,7 @@
 
 import { NextRequest } from 'next/server';
 import { verifyOnboardingAccess } from './onboarding-token';
+import { countPdfPagesServer } from './pdf-page-count-server';
 
 export const MAX_AI_IMAGE_BYTES = 12 * 1024 * 1024;
 
@@ -110,6 +111,28 @@ export async function guardAiRoute(req: NextRequest): Promise<AiGuardResult> {
   const image = body.image;
   if (typeof image === 'string' && image.length > MAX_AI_IMAGE_BYTES) {
     return { ok: false, status: 413, error: 'Image too large' };
+  }
+
+  // Identity documents must be a SINGLE page — one passport / ID page per file.
+  // A multi-page PDF is how a wrong page slips past the vision model: it passes
+  // a file as long as ONE page looks right, so an extra page (e.g. the address
+  // page bundled behind the data page) rides along unchecked. Reject multi-page
+  // PDFs before any model call. Best-effort + fail-open (see countPdfPagesServer):
+  // the client-side check in single-page-pdf.ts is the strict gate; this backs
+  // it up for direct API calls that skip the browser.
+  if (
+    typeof image === 'string' &&
+    (image.startsWith('data:application/pdf') || image.includes('application/pdf'))
+  ) {
+    const base64 = image.replace(/^data:[^;]+;base64,/, '');
+    const pages = countPdfPagesServer(base64);
+    if (pages !== null && pages > 1) {
+      return {
+        ok: false,
+        status: 422,
+        error: `This file has ${pages} pages. Please upload only a single page — one page per file.`,
+      };
+    }
   }
 
   const access = await verifyOnboardingAccess(submissionId, token, {

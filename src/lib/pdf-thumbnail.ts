@@ -75,3 +75,34 @@ export async function renderPdfFirstPage(
     pdf.destroy();
   }
 }
+
+/**
+ * Count the pages in a PDF file.
+ *
+ * Used to enforce the single-page identity-document rule (one passport / ID
+ * page per file) before any AI validation, upload, or page-1 flatten — see
+ * single-page-pdf.ts. Reads the bytes straight from the File (no base64
+ * round-trip) and only reads `numPages`, so it never rasterizes a page.
+ *
+ * Client-only, same as renderPdfFirstPage: pdfjs is dynamically imported so it
+ * never runs during SSR, and the worker is loaded same-origin to satisfy CSP.
+ */
+export async function getPdfPageCount(file: File): Promise<number> {
+  const pdfjs = await import('pdfjs-dist');
+
+  if (!workerConfigured) {
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url
+    ).toString();
+    workerConfigured = true;
+  }
+
+  const data = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  try {
+    return pdf.numPages;
+  } finally {
+    pdf.destroy();
+  }
+}

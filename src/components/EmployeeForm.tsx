@@ -50,6 +50,7 @@ import {
 import { buildNocText } from '@/lib/noc-letter';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
 import { calculateFullName, compressImageForAI, normalizePersonName } from '@/lib/utils';
+import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { useIsMobile } from '@/lib/useIsMobile';
 import { nationalityToCountryCode, resolveExtractedNationality } from '@/lib/country-utils';
 import { SampleImageToggle } from '@/components/SampleImageToggle';
@@ -1314,8 +1315,18 @@ export function EmployeeForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: compressedImage, expectedType, submissionId: submission.id, token: aiToken }),
       });
-      if (!response.ok) throw new Error('Validation failed');
       const result = await response.json();
+      if (!response.ok) {
+        // Surface a specific reason (e.g. the single-page rule enforced by the
+        // AI route guard) instead of a generic failure.
+        return {
+          valid: false,
+          error:
+            (result?.error as string) ||
+            (result?.errorMessage as string) ||
+            'Unable to validate page. Please try again.',
+        };
+      }
       return { valid: result.matches as boolean, error: result.errorMessage as string | undefined };
     } catch {
       return { valid: false, error: 'Unable to validate page. Please try again.' };
@@ -1385,6 +1396,11 @@ export function EmployeeForm({
 
   // Cover upload handler
   const handleCoverUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'passport cover spread');
+    if (pageErr) {
+      setCoverUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const isImage = file.type.startsWith('image/');
     let preview: string;
     try {
@@ -1447,6 +1463,11 @@ export function EmployeeForm({
 
   // Inside pages upload handler
   const handleInsideUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'passport data-page spread');
+    if (pageErr) {
+      setInsideUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const isImage = file.type.startsWith('image/');
     let preview: string;
     try {
@@ -1695,6 +1716,11 @@ export function EmployeeForm({
 
   // Indian passport additional page handlers
   const handleAdditionalPageUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'passport additional page');
+    if (pageErr) {
+      setAdditionalPageUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -1795,6 +1821,11 @@ export function EmployeeForm({
   // Named upload handlers extracted from inline JSX so they can be wrapped
   // by useScannerIntercept (image → scanner → handler, PDF → handler direct).
   const handlePreviousVisaUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'visa document page');
+    if (pageErr) {
+      setPreviousVisaUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -1845,6 +1876,11 @@ export function EmployeeForm({
   };
 
   const handleEidFrontUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'Emirates ID (front)');
+    if (pageErr) {
+      setEidFrontUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
@@ -1923,6 +1959,11 @@ export function EmployeeForm({
   };
 
   const handleEidBackUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'Emirates ID (back)');
+    if (pageErr) {
+      setEidBackUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
@@ -1988,6 +2029,11 @@ export function EmployeeForm({
   // affordance (see handleSponsor*ManualReview below).
 
   const handleSponsorPassportUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, "sponsor's passport page");
+    if (pageErr) {
+      setSponsorPassportUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -2104,6 +2150,11 @@ export function EmployeeForm({
   };
 
   const handleSponsorVisaUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, "sponsor's visa document page");
+    if (pageErr) {
+      setSponsorVisaUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -2159,6 +2210,11 @@ export function EmployeeForm({
   };
 
   const handleSponsorEidFrontUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, "sponsor's Emirates ID (front)");
+    if (pageErr) {
+      setSponsorEidFrontUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -2215,6 +2271,11 @@ export function EmployeeForm({
   };
 
   const handleSponsorEidBackUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, "sponsor's Emirates ID (back)");
+    if (pageErr) {
+      setSponsorEidBackUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
       reader.onload = (e) => resolve(e.target?.result as string);
@@ -2352,6 +2413,11 @@ export function EmployeeForm({
   };
 
   const handlePakistanIdFrontUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'ID card (front)');
+    if (pageErr) {
+      setPakistanIdFrontUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {
@@ -2412,6 +2478,11 @@ export function EmployeeForm({
   };
 
   const handlePakistanIdBackUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'ID card (back)');
+    if (pageErr) {
+      setPakistanIdBackUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
     const isImage = file.type.startsWith('image/');
     const reader = new FileReader();
     const preview = await new Promise<string>((resolve) => {

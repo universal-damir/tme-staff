@@ -8,6 +8,7 @@ import { getDocumentUrl } from '@/lib/supabase';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
+import { singlePagePdfError } from '@/lib/single-page-pdf';
 
 interface PhotoUploadProps {
   /** Onboarding submission id; passed to the server-side AI guard. */
@@ -46,6 +47,14 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     // Validate file size (max 5MB - Claude API limit)
     if (file.size > 5 * 1024 * 1024) {
       setUploadError('File size must be less than 5MB');
+      return;
+    }
+
+    // Single-page rule: a PDF photo must be exactly one page. Catches a
+    // multi-page PDF here, before we flatten to page 1 and silently accept it.
+    const pageErr = await singlePagePdfError(file, 'photo');
+    if (pageErr) {
+      setUploadError(pageErr);
       return;
     }
 
