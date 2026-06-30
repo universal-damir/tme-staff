@@ -86,15 +86,14 @@ function Header({ companyName }: { companyName?: string | null }) {
 // content is TME's estimate from vendor docs (see ACCOUNTING_SOFTWARE_GUIDANCE);
 // kept reassuring so a "no" never reads as a dead end.
 function XmlGuidance({ software, guidance }: { software: string; guidance: SoftwareGuidance }) {
+  // Deliberately no "green / good news" box for software that CAN export XML:
+  // telling a client their system is capable reads as "you're already ready /
+  // compliant", which they aren't — the pre-assessment still has to run. Only
+  // the softer "usually can" / "we'll help" guidance is shown.
+  if (guidance.xml === 'yes') return null;
+
   const tone =
-    guidance.xml === 'yes'
-      ? {
-          bg: 'rgba(34,197,94,0.08)',
-          color: TME_COLORS.success,
-          Icon: CheckCircle,
-          headline: `Good news — ${software} can export invoices as XML`,
-        }
-      : guidance.xml === 'maybe'
+    guidance.xml === 'maybe'
       ? {
           bg: 'rgba(36,63,123,0.06)',
           color: TME_COLORS.primary,
