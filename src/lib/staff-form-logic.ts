@@ -257,3 +257,45 @@ export function relationshipOptionsForSponsor(
       return ['husband', 'wife', 'father', 'mother', 'son', 'daughter'];
   }
 }
+
+/**
+ * Initial "is the applicant in the UAE?" state for the employee form.
+ *
+ * Priority: renewals are always inside (the toggle is hidden and locked);
+ * then the employee's own saved answer; then any saved UAE address fields
+ * (legacy drafts predating uae_presence); then the employer's
+ * "applicant currently in the UAE" answer; else outside.
+ *
+ * IMPORTANT: the form's registered `uae_presence` value must be initialized
+ * from this same result. It previously defaulted to 'inside' while the
+ * checkbox defaulted from the employer's answer — an applicant abroad who
+ * never touched the unchecked checkbox submitted 'inside' with no UAE
+ * address (BPR 10344 / Hansaconsult 12129 reports, 2026-07).
+ */
+export function initialIsInUae(
+  submission: {
+    employee_data?: {
+      uae_presence?: 'inside' | 'outside';
+      uae_street_address?: string;
+      uae_flat_villa?: string;
+      uae_building_name?: string;
+      uae_street_name?: string;
+    } | null;
+    employer_data?: { applicant_in_uae?: boolean } | null;
+  },
+  isRenewal: boolean
+): boolean {
+  if (isRenewal) return true;
+  const saved = submission.employee_data?.uae_presence;
+  if (saved === 'inside') return true;
+  if (saved === 'outside') return false;
+  if (
+    submission.employee_data?.uae_street_address ||
+    submission.employee_data?.uae_flat_villa ||
+    submission.employee_data?.uae_building_name ||
+    submission.employee_data?.uae_street_name
+  ) {
+    return true;
+  }
+  return submission.employer_data?.applicant_in_uae === true;
+}

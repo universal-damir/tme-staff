@@ -16,6 +16,7 @@ import {
   employeeVisaMandatoryOverride,
   sponsorshipTypeFromSponsor,
   relationshipOptionsForSponsor,
+  initialIsInUae,
 } from './staff-form-logic';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -448,5 +449,54 @@ describe('relationshipOptionsForSponsor', () => {
     expect(relationshipOptionsForSponsor('weird')).toEqual(all);
     expect(relationshipOptionsForSponsor(undefined)).toEqual(all);
     expect(relationshipOptionsForSponsor(null)).toEqual(all);
+  });
+});
+
+describe('initialIsInUae', () => {
+  // Regression: employer answered "No", employee never touched the checkbox.
+  // The form used to submit uae_presence 'inside' anyway (stale form default)
+  // — BPR 10344 / Hansaconsult 12129 reports, 2026-07.
+  it('is outside when the employer said the applicant is NOT in the UAE', () => {
+    expect(
+      initialIsInUae({ employee_data: null, employer_data: { applicant_in_uae: false } }, false)
+    ).toBe(false);
+  });
+
+  it('is outside when there is no signal at all', () => {
+    expect(initialIsInUae({}, false)).toBe(false);
+    expect(initialIsInUae({ employee_data: null, employer_data: null }, false)).toBe(false);
+  });
+
+  it('is inside when the employer said the applicant IS in the UAE', () => {
+    expect(initialIsInUae({ employer_data: { applicant_in_uae: true } }, false)).toBe(true);
+  });
+
+  it("prefers the employee's saved answer over the employer's", () => {
+    expect(
+      initialIsInUae(
+        { employee_data: { uae_presence: 'outside' }, employer_data: { applicant_in_uae: true } },
+        false
+      )
+    ).toBe(false);
+    expect(
+      initialIsInUae(
+        { employee_data: { uae_presence: 'inside' }, employer_data: { applicant_in_uae: false } },
+        false
+      )
+    ).toBe(true);
+  });
+
+  it('treats saved UAE address fields as inside (legacy drafts without uae_presence)', () => {
+    expect(initialIsInUae({ employee_data: { uae_street_address: 'JLT Cluster F' } }, false)).toBe(true);
+    expect(initialIsInUae({ employee_data: { uae_building_name: 'Marina Tower' } }, false)).toBe(true);
+  });
+
+  it('is always inside on renewals regardless of other data', () => {
+    expect(
+      initialIsInUae(
+        { employee_data: { uae_presence: 'outside' }, employer_data: { applicant_in_uae: false } },
+        true
+      )
+    ).toBe(true);
   });
 });

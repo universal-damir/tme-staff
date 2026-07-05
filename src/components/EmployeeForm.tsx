@@ -46,6 +46,7 @@ import {
   employeeVisaMandatoryOverride,
   sponsorshipTypeFromSponsor,
   relationshipOptionsForSponsor,
+  initialIsInUae,
 } from '@/lib/staff-form-logic';
 import { buildNocText } from '@/lib/noc-letter';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
@@ -939,21 +940,20 @@ export function EmployeeForm({
   // For new-hires: prefer the employee's saved answer; fall back to the
   // employer's "applicant in the UAE" answer so the box arrives pre-checked
   // (the employee can still uncheck it).
-  const [isInUAE, setIsInUAE] = useState(() => {
-    if (isRenewal) return true;
-    const saved = submission.employee_data?.uae_presence;
-    if (saved === 'inside') return true;
-    if (saved === 'outside') return false;
-    if (
-      submission.employee_data?.uae_street_address ||
-      submission.employee_data?.uae_flat_villa ||
-      submission.employee_data?.uae_building_name ||
-      submission.employee_data?.uae_street_name
-    ) {
-      return true;
+  const [isInUAE, setIsInUAE] = useState(() => initialIsInUae(submission, isRenewal));
+
+  // Sync the submitted `uae_presence` value to the checkbox's initial state.
+  // The form default is 'inside', so without this an applicant abroad who
+  // never touched the (unchecked) checkbox submitted 'inside' with no UAE
+  // address — the checkbox onChange is the only other place that sets it.
+  // The isInUAE initializer above already respects any saved answer, and
+  // renewals are forced to 'inside' by the earlier mount effect.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => {
+    if (!isRenewal) {
+      setValue('uae_presence', isInUAE ? 'inside' : 'outside');
     }
-    return submission.employer_data?.applicant_in_uae === true;
-  });
+  }, []);
 
   // Track whether passport data has been extracted/pre-filled
   const [passportDataReady, setPassportDataReady] = useState(
@@ -3892,6 +3892,10 @@ export function EmployeeForm({
                         setValue('uae_city', '');
                         setValue('uae_postal_code', '');
                         setValue('uae_emirate', '');
+                        // The "no UAE mobile yet" flag only exists inside the
+                        // UAE — clear it so an outside submission doesn't
+                        // carry a contradictory leftover.
+                        setValue('mobile_uae_unavailable', false);
                       }
                     }}
                     className="w-4 h-4 rounded border-gray-300"
@@ -4278,7 +4282,18 @@ export function EmployeeForm({
                     type="radio"
                     name="bank_status"
                     checked={hasUAEBank === false}
-                    onChange={() => setValue('has_uae_bank', false)}
+                    onChange={() => {
+                      setValue('has_uae_bank', false);
+                      // Clear any details entered while "Yes" was selected —
+                      // otherwise a stale IBAN/bank/account name is submitted
+                      // alongside has_uae_bank=false (same pattern as the
+                      // previous-EID and UAE-address toggles).
+                      setValue('bank_iban', '');
+                      setValue('bank_name', '');
+                      setValue('bank_swift', '');
+                      setValue('bank_routing_code', '');
+                      setValue('bank_account_name', '');
+                    }}
                     className="accent-[#243F7B]"
                   />
                   <span className="text-sm text-gray-700">I do not have a UAE bank account</span>
