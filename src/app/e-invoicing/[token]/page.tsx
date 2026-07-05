@@ -344,8 +344,9 @@ export default function EInvoicingIntakePage() {
 
       <p className="text-gray-600 mb-8 text-sm leading-relaxed">
         The UAE is introducing mandatory e-invoicing. To pre-assess how ready your business is, we
-        need just two things from you: the accounting system you use and a few sample invoices. Your
-        files are used only for this pre-assessment and are never shared.
+        need just two things from you: the accounting system you use and a range of sample invoices.
+        The more invoice types you share, the more precisely we can pinpoint your gap. Your files are
+        used only for this pre-assessment and are never shared.
       </p>
 
       {/* Accounting software */}
@@ -378,7 +379,9 @@ export default function EInvoicingIntakePage() {
           Sample invoices (XML file preferred)
         </label>
         <p className="text-xs text-gray-500 mb-3">
-          Upload 1–10 recent sales invoices. XML (e-invoice) files give the most accurate result, but
+          Upload 1–10 recent invoices. To help us determine your gap more precisely, please include a
+          variety where you have them — standard tax invoices, credit notes, commercial invoices, and
+          advance / cost-recharge invoices. XML (e-invoice) files give the most accurate result, but
           PDF is fine too, although results may vary.
         </p>
 
