@@ -3359,7 +3359,7 @@ export function EmployeeForm({
                       required
                     />
                     <p className="text-xs text-gray-500">
-                      This is the date you entered the UAE on your arrival visa. It will be included in the onboarding confirmation.
+                      This is the date you entered the UAE on your arrival visa. It will be included in the confirmation document.
                     </p>
                   </div>
                 )}

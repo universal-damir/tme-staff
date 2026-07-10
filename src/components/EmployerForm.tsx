@@ -727,7 +727,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
                 <p className="mt-1 text-xs">
                   {tmeJobOfferLetter
                     ? 'TME has attached the renewed Job Offer Letter below. Please review it.'
-                    : 'Please upload the signed and stamped copy. This document will be included in the onboarding confirmation.'}
+                    : 'Please upload the signed and stamped copy. This document will be included in the confirmation document.'}
                 </p>
               </div>
             </div>
