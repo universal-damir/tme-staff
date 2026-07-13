@@ -379,7 +379,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       result = null;
     }
     if (!result) {
-      setSlot(key, { preview, validating: false, error: 'Upload failed. Please check your connection and try again.', file });
+      setSlot(key, { preview, validating: false, error: 'Upload failed. If the file is larger than 4MB (common with PDFs), please compress it or upload a JPEG/PNG — otherwise check your connection and try again.', file });
       return false;
     }
 
@@ -404,7 +404,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       result = null;
     }
     if (!result) {
-      setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: 'Upload failed. If the file is larger than 4MB (common with PDFs), please compress it or upload a JPEG/PNG — otherwise check your connection and try again.' });
       setReviewSubmitting((prev) => ({ ...prev, [key]: false }));
       return;
     }
@@ -457,7 +457,11 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
           cfg.side === 'front'
             ? !extractResult.success || !extractResult.data?.emirates_id_number
             : !extractResult.success;
-        if (invalid) {
+        // infra=true means the check could not RUN (API/model error) — never
+        // a rejection. Fall through to the upload like the catch path below;
+        // counting infra failures as strikes locked users out for weeks when
+        // the extraction model was retired upstream.
+        if (invalid && !extractResult.infra) {
           bumpRejection(key);
           setSlot(key, { preview, validating: false, error: cfg.rejectCopy, file });
           // Clear any previously-validated doc so a stale green "Valid" badge
@@ -465,7 +469,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
           await setFlatDoc(key, undefined);
           return false;
         }
-        if (cfg.side === 'front' && extractResult.data) {
+        if (cfg.side === 'front' && extractResult.success && extractResult.data) {
           extractedData = extractResult.data as Record<string, unknown>;
         }
       }
@@ -477,7 +481,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
 
     const result = await uploadDocument(submission.id, key, file);
     if (!result) {
-      setSlot(key, { preview, validating: false, error: 'Failed to upload', file });
+      setSlot(key, { preview, validating: false, error: 'Upload failed. If the file is larger than 4MB (common with PDFs), please compress it or upload a JPEG/PNG instead.', file });
       return false;
     }
 
@@ -503,7 +507,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       result = null;
     }
     if (!result) {
-      setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+      setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: 'Upload failed. If the file is larger than 4MB (common with PDFs), please compress it or upload a JPEG/PNG — otherwise check your connection and try again.' });
       setReviewSubmitting((prev) => ({ ...prev, [key]: false }));
       return;
     }

@@ -2030,7 +2030,7 @@ export function EmployeeForm({
         });
         if (response.ok) {
           const extractResult = await response.json();
-          if (!extractResult.success) {
+          if (!extractResult.success && !extractResult.infra) {
             setEidBackUI({ preview, validating: false, error: 'This does not appear to be the back of an Emirates ID card. Please upload a clear photo of the back.', file });
             // Clear any previously-validated doc so a stale green "Valid" badge
             // can't sit next to this red error border (mirrors sponsor handlers).
@@ -2283,7 +2283,7 @@ export function EmployeeForm({
       });
       if (response.ok) {
         const extractResult = await response.json();
-        if (!extractResult.success || !extractResult.data?.emirates_id_number) {
+        if (extractResult.infra !== true && (!extractResult.success || !extractResult.data?.emirates_id_number)) {
           setSponsorEidFrontRejectionCount((c) => c + 1);
           setSponsorEidFrontUI({
             preview,
@@ -2343,7 +2343,7 @@ export function EmployeeForm({
       });
       if (response.ok) {
         const extractResult = await response.json();
-        if (!extractResult.success) {
+        if (!extractResult.success && !extractResult.infra) {
           setSponsorEidBackRejectionCount((c) => c + 1);
           setSponsorEidBackUI({
             preview,
@@ -2484,7 +2484,7 @@ export function EmployeeForm({
         });
         if (response.ok) {
           const extractResult = await response.json();
-          if (!extractResult.success) {
+          if (!extractResult.success && !extractResult.infra) {
             setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
             // Clear any previously-validated doc so a stale green "Valid" badge
             // can't sit next to this red error border (mirrors sponsor handlers).
@@ -2549,7 +2549,7 @@ export function EmployeeForm({
         });
         if (response.ok) {
           const extractResult = await response.json();
-          if (!extractResult.success) {
+          if (!extractResult.success && !extractResult.infra) {
             setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
             // Clear any previously-validated doc so a stale green "Valid" badge
             // can't sit next to this red error border (mirrors sponsor handlers).

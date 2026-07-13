@@ -25,6 +25,14 @@ export interface EidExtractionResult {
     expiry_date?: 'high' | 'medium' | 'low';
   };
   error?: string;
+  /**
+   * true when the check could not RUN (API/model/timeout error) — as opposed
+   * to the model looking at the image and rejecting it. Callers must NOT
+   * count infra failures as document rejections / manual-review strikes.
+   * Background: the previous model ID was retired upstream and every call
+   * threw for weeks; each throw was miscounted as "not an Emirates ID".
+   */
+  infra?: boolean;
 }
 
 const EID_FRONT_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their Emirates ID with explicit consent for employment processing as required by UAE labor law.
@@ -124,37 +132,39 @@ export async function extractEid(
   try {
     const client = getAnthropicClient();
 
-    // Detect media type from base64 header
+    // PDF scans arrive as data:application/pdf — send them via Claude's
+    // `document` content block (Anthropic rasterizes the pages), mirroring
+    // passport-page-validation.ts. Previously PDFs fell through mislabeled
+    // as image/jpeg and the API 400'd on every PDF EID.
+    const isPdf = imageBase64.startsWith('data:application/pdf');
+
     let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg';
-    if (imageBase64.startsWith('data:')) {
+    if (imageBase64.startsWith('data:') && !isPdf) {
       const match = imageBase64.match(/^data:(image\/\w+);/);
       if (match) mediaType = match[1] as typeof mediaType;
-      imageBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
     }
+    const base64Data = imageBase64.replace(/^data:[^;]+;base64,/, '');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fileContent: any = isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } };
 
     const tool = side === 'back' ? EID_BACK_TOOL : EID_FRONT_TOOL;
     const prompt = side === 'back' ? EID_BACK_PROMPT : EID_FRONT_PROMPT;
 
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
+        // Sonnet 5: adaptive thinking is on by default and shares max_tokens
+        // with the output — 2000 leaves room for both.
+        model: 'claude-sonnet-5',
+        max_tokens: 2000,
         tools: [tool],
         tool_choice: { type: 'tool' as const, name: tool.name },
         messages: [
           {
             role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: mediaType,
-                  data: imageBase64,
-                },
-              },
-              { type: 'text', text: prompt },
-            ],
+            content: [fileContent, { type: 'text', text: prompt }],
           },
         ],
       }),
@@ -167,7 +177,7 @@ export async function extractEid(
       | undefined;
 
     if (!toolUseBlock) {
-      return { success: false, data: {}, confidence: {}, error: 'No response from AI' };
+      return { success: false, data: {}, confidence: {}, error: 'No response from AI', infra: true };
     }
 
     const parsed = toolUseBlock.input as Record<string, unknown>;
@@ -234,7 +244,9 @@ export async function extractEid(
       success: false,
       data: {},
       confidence: {},
-      error: error instanceof Error ? error.message : 'Extraction failed',
+      error: 'We could not check this file right now. Please try again.',
+      // The check did not run — callers must not treat this as a rejection.
+      infra: true,
     };
   }
 }

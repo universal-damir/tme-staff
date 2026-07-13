@@ -25,6 +25,8 @@ export interface PakistanIdExtractionResult {
     expiry_date?: 'high' | 'medium' | 'low';
   };
   error?: string;
+  /** true when the check could not run (API/model error) — not a rejection. */
+  infra?: boolean;
 }
 
 const PAKISTAN_ID_EXTRACTION_PROMPT = `You are part of an authorized employee onboarding system. The document owner has uploaded their national ID with explicit consent for employment processing as required by UAE labor law.
@@ -118,8 +120,10 @@ export async function extractPakistanId(
 
     const response = await withTimeout(
       client.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
+        // Sonnet 5 (the previous model ID was retired upstream 2026-06-15 and
+        // every call 404'd). Adaptive thinking shares max_tokens.
+        model: 'claude-sonnet-5',
+        max_tokens: 2000,
         tools: [PAKISTAN_ID_TOOL],
         tool_choice: { type: 'tool' as const, name: PAKISTAN_ID_TOOL.name },
         messages: [
@@ -195,7 +199,8 @@ export async function extractPakistanId(
       success: false,
       data: {},
       confidence: {},
-      error: error instanceof Error ? error.message : 'Extraction failed',
+      error: 'We could not check this file right now. Please try again.',
+      infra: true,
     };
   }
 }

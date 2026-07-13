@@ -48,6 +48,54 @@ export async function autoSaveEmployeeData(
 // UPLOAD DOCUMENT (via server route — service-role + magic-byte validated)
 // ===================================================================
 
+/**
+ * Netlify hard-caps request bodies around ~6MB, killing large uploads at the
+ * edge before our route runs (the client just sees a failed fetch). Images
+ * above this budget are transparently downscaled to a JPEG that fits — a
+ * 2400px identity-document scan is more than TME review needs. PDFs can't be
+ * shrunk client-side and fail the upload; callers surface the size hint.
+ */
+const UPLOAD_BYTE_BUDGET = 4 * 1024 * 1024;
+
+async function shrinkImageToBudget(file: File): Promise<File> {
+  if (!file.type.startsWith('image/') || file.size <= UPLOAD_BYTE_BUDGET) return file;
+  try {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = () => reject(new Error('read failed'));
+      reader.readAsDataURL(file);
+    });
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('decode failed'));
+      el.src = dataUrl;
+    });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    const maxDim = 2400;
+    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    for (const quality of [0.85, 0.75, 0.6]) {
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, 'image/jpeg', quality)
+      );
+      if (blob && blob.size <= UPLOAD_BYTE_BUDGET) {
+        const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+        return new File([blob], name, { type: 'image/jpeg' });
+      }
+    }
+    return file;
+  } catch {
+    // Shrink is best-effort — fall back to the original file.
+    return file;
+  }
+}
+
 export async function uploadDocument(
   submissionId: string,
   type: 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional' | 'job_offer_letter' | 'visa_document' | 'previous_visa_document' | 'eid_front' | 'eid_back' | 'pakistan_id_front' | 'pakistan_id_back' | 'sponsor_passport' | 'sponsor_visa' | 'sponsor_eid_front' | 'sponsor_eid_back',
@@ -56,7 +104,7 @@ export async function uploadDocument(
   const fd = new FormData();
   fd.append('submissionId', submissionId);
   fd.append('type', type);
-  fd.append('file', file);
+  fd.append('file', await shrinkImageToBudget(file));
 
   const res = await fetch('/api/storage/upload', { method: 'POST', body: fd });
   if (!res.ok) {
@@ -83,7 +131,7 @@ export async function uploadPassportPage(
   fd.append('submissionId', submissionId);
   fd.append('type', 'passport');
   fd.append('passportPage', pageKey);
-  fd.append('file', file);
+  fd.append('file', await shrinkImageToBudget(file));
 
   const res = await fetch('/api/storage/upload', { method: 'POST', body: fd });
   if (!res.ok) {
