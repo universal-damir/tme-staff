@@ -11,6 +11,7 @@ import { signWebhookBody } from '@/lib/webhook-signature';
 import {
   assertSubmittable,
   getSignerIp,
+  missingRequiredDocuments,
   sanitizeFreeText,
 } from '@/lib/submit-validation';
 import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
@@ -36,9 +37,10 @@ export async function POST(req: NextRequest) {
     const supabase = getSupabaseAdmin();
 
     // P2-4: refuse to overwrite a row that's already complete or cancelled.
+    // The extra columns feed the required-documents gate below.
     const { data: existing, error: lookupError } = await supabase
       .from('staff_onboarding_submissions')
-      .select('status')
+      .select('status, onboarding_type, sponsorship_type, employer_data, documents, existing_documents, sponsor_noc_signature_data')
       .eq('id', id)
       .maybeSingle();
 
@@ -50,6 +52,27 @@ export async function POST(req: NextRequest) {
     const guard = assertSubmittable(existing);
     if (!guard.ok) {
       return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
+    // Required-documents gate: the client form enforces this too, but only in
+    // browser JavaScript — the server is the authority. Without this, a
+    // submission with a missing passport cover or an unvalidated photo would
+    // reach status='complete' and fire the confirmation emails (seen live).
+    const missingDocs = missingRequiredDocuments(
+      existing!,
+      employeeData && typeof employeeData === 'object'
+        ? (employeeData as Record<string, unknown>).sponsor_noc_signature
+        : undefined,
+    );
+    if (missingDocs.length > 0) {
+      console.warn(`[submit-employee] Blocked incomplete submission ${id}: missing ${missingDocs.join(', ')}`);
+      return NextResponse.json(
+        {
+          error: `Cannot submit yet — missing: ${missingDocs.join(', ')}. Please complete the highlighted steps and try again.`,
+          missing: missingDocs,
+        },
+        { status: 422 }
+      );
     }
 
     // P2-3: derive signer IP from request headers, never from body.

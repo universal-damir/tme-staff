@@ -18,6 +18,8 @@
  */
 
 import { NextRequest } from 'next/server';
+import type { StaffDocumentReferences } from '@/types';
+import { sponsorshipTypeFromSponsor, sponsorDocsRequired } from '@/lib/staff-form-logic';
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
 const IPV6 = /^([0-9a-fA-F:]+)$/;
@@ -72,6 +74,78 @@ export function assertSubmittable(row: { status: string | null } | null): Submit
   if (row.status === 'complete') return { ok: false, status: 410, error: 'Onboarding already complete' };
   if (row.status === 'cancelled') return { ok: false, status: 410, error: 'Onboarding cancelled' };
   return { ok: true };
+}
+
+/**
+ * Server-side required-documents gate for `/api/submit-employee`.
+ *
+ * Until 2026-07 the ONLY completeness check lived in client-side JavaScript
+ * (EmployeeForm.handleFormSubmit), so a renewal could reach status='complete'
+ * — and trigger the Staff Renewal Confirmation — with no passport cover page
+ * anywhere and an unvalidated photo (seen live: 10920/LLC062). This mirrors
+ * the client gate on the server, where it can't be bypassed by stale client
+ * state or a hand-crafted POST.
+ *
+ * Returns humanized names of missing requirements; empty array = submittable.
+ *
+ * Rules (deliberately the MINIMUM the client gate also enforces — the portal
+ * sync additionally soft-flags anything unusual for human review):
+ *  - Photo present AND (AI-validated OR explicitly submitted for manual
+ *    review via the 2-strike fallback).
+ *  - Passport cover + inside pages uploaded, UNLESS this is a renewal and
+ *    BOTH pages are already on file from the previous application (the
+ *    "passport unchanged" skip). The persisted `passport_unchanged` flag is
+ *    the explicit attestation, but the skip is accepted whenever both pages
+ *    exist on file so in-flight sessions from before this deploy don't
+ *    strand; a skip with only ONE page on file is never legitimate.
+ *  - Family sponsorship: all four sponsor documents + the sponsor NOC
+ *    signature (either already on the row or arriving with this request).
+ */
+export function missingRequiredDocuments(row: {
+  onboarding_type?: string | null;
+  sponsorship_type?: string | null;
+  employer_data?: Record<string, unknown> | null;
+  documents?: StaffDocumentReferences | null;
+  existing_documents?: Record<string, { path?: string }> | null;
+  sponsor_noc_signature_data?: string | null;
+}, incomingSponsorNoc?: unknown): string[] {
+  const missing: string[] = [];
+  const docs = row.documents ?? {};
+
+  const photo = docs.photo;
+  if (!photo?.path) {
+    missing.push('ID photo');
+  } else if (!photo.validated && !photo.needsReview) {
+    missing.push('ID photo (must pass validation or be submitted for manual review)');
+  }
+
+  const pages = docs.passportPages ?? {};
+  const pagesUploaded = !!(pages.cover?.path && pages.insidePages?.path);
+  const existingCover = row.existing_documents?.passport_cover?.path;
+  const existingInside = row.existing_documents?.passport_inside?.path;
+  const renewalSkipAllowed =
+    row.onboarding_type === 'renewal' && !!existingCover && !!existingInside;
+  if (!pagesUploaded && !renewalSkipAllowed) {
+    if (!pages.cover?.path) missing.push('Passport cover page');
+    if (!pages.insidePages?.path) missing.push('Passport data page');
+  }
+
+  const effectiveSponsor = row.employer_data?.sponsor as string | undefined;
+  const sponsorshipType = effectiveSponsor
+    ? sponsorshipTypeFromSponsor(effectiveSponsor)
+    : ((row.sponsorship_type as 'company' | 'family' | 'self_gcc' | undefined) ?? 'company');
+  if (sponsorDocsRequired(sponsorshipType)) {
+    if (!docs.sponsor_passport?.path) missing.push('Sponsor passport');
+    if (!docs.sponsor_visa?.path) missing.push('Sponsor visa');
+    if (!docs.sponsor_eid_front?.path) missing.push('Sponsor Emirates ID (front)');
+    if (!docs.sponsor_eid_back?.path) missing.push('Sponsor Emirates ID (back)');
+    const hasNoc =
+      (typeof incomingSponsorNoc === 'string' && incomingSponsorNoc.length > 0) ||
+      (typeof row.sponsor_noc_signature_data === 'string' && row.sponsor_noc_signature_data.length > 0);
+    if (!hasNoc) missing.push('Sponsor NOC signature');
+  }
+
+  return missing;
 }
 
 const MAX_STRING_LENGTH = 2000;

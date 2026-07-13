@@ -416,7 +416,14 @@ export function EmployeeForm({
     : (submission.sponsorship_type ?? 'company');
   const isFamilySponsored = sponsorDocsRequired(sponsorshipType);
   const existingDocs = submission.existing_documents;
-  const hasExistingPassport = !!(existingDocs?.passport_cover || existingDocs?.passport_inside);
+  // The "passport unchanged" skip is only legitimate when BOTH pages are
+  // actually on file — with only one of them, confirming "same as shown"
+  // would attest a page TME never had (this let a renewal complete with no
+  // cover page anywhere). Entries need a displayable URL; the metadata-only
+  // photo entry (sha256, no path) never counts.
+  const hasExistingPassport = !!(
+    existingDocs?.passport_cover?.path && existingDocs?.passport_inside?.path
+  );
   const [passportConfirmed, setPassportConfirmed] = useState(false);
   const [passportChanged, setPassportChanged] = useState(false);
 
@@ -630,10 +637,24 @@ export function EmployeeForm({
   const [sponsorEidBackRejectionCount, setSponsorEidBackRejectionCount] = useState(0);
   const [sponsorEidBackManualReviewConfirmed, setSponsorEidBackManualReviewConfirmed] = useState(false);
   const [sponsorEidBackManualReviewSubmitting, setSponsorEidBackManualReviewSubmitting] = useState(false);
+  // ID photo gets the same 2-strike manual-review escape hatch. The photo is
+  // already uploaded when validation fails (upload + AI run in parallel), so
+  // the manual-review submit just re-stamps the stored doc ref — validated
+  // (unblocks the form) + needsReview (TME verifies on the portal side).
+  const [photoRejectionCount, setPhotoRejectionCount] = useState(0);
+  const [photoManualReviewConfirmed, setPhotoManualReviewConfirmed] = useState(false);
+  const [photoManualReviewSubmitting, setPhotoManualReviewSubmitting] = useState(false);
 
   // Refs to track latest values (avoids stale closure issues in callbacks)
   const photoDocRef = React.useRef(photoDoc);
   const passportPagesRef = React.useRef(passportPages);
+  // Persisted "passport unchanged" attestation (renewal skip). Lives in a ref
+  // (not just component state) because buildDocRefs merges from the INITIAL
+  // submission.documents — without threading it through every save, a later
+  // saveDocRefs call would silently drop the flag.
+  const passportUnchangedRef = React.useRef<boolean | undefined>(
+    submission.documents?.passport_unchanged
+  );
 
   // Section refs for auto-scrolling
   const passportCoverRef = useRef<HTMLDivElement>(null);
@@ -1205,9 +1226,17 @@ export function EmployeeForm({
   }, []);
 
   const handleFormSubmit = async (data: EmployeeFormData) => {
-    // Validate photo is uploaded
+    // Validate photo is uploaded AND accepted — either AI-validated or
+    // explicitly submitted for manual review. A merely-existing photo that
+    // failed validation must not slip through the final submit.
     if (!photoDoc) {
       setPhotoError('Please upload your photo');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (!photoDoc.validated && !photoDoc.needsReview) {
+      setPhotoError('Your photo has not passed validation. Please upload a compliant photo, or submit it for manual review.');
+      setViewingStep(1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -1278,6 +1307,7 @@ export function EmployeeForm({
     mergeStaffDocRefs(submission.documents, {
       photo: overrides?.photo ?? photoDocRef.current,
       passportPages: overrides?.passportPages ?? passportPagesRef.current,
+      passport_unchanged: passportUnchangedRef.current,
       degree_attested: degreeDocRef.current,
       transcript_of_records: transcriptDocRef.current,
       education_additional: educationAdditionalDocRef.current,
@@ -1304,6 +1334,24 @@ export function EmployeeForm({
       return result;
     }
     return null;
+  };
+
+  // Photo manual-review fallback: after MANUAL_REVIEW_THRESHOLD AI rejections
+  // the user can confirm + submit the already-uploaded photo as-is. Stamps
+  // validated:true (unblocks the form) + needsReview:true (TME verifies it —
+  // the portal records photo_validation_passed=false, needs_review=true).
+  const handlePhotoManualReview = async () => {
+    const current = photoDocRef.current;
+    if (!current) return;
+    setPhotoManualReviewSubmitting(true);
+    const updatedDoc = { ...current, validated: true, needsReview: true };
+    setPhotoDoc(updatedDoc);
+    photoDocRef.current = updatedDoc;
+    setPhotoError(null);
+    await saveDocRefs(buildDocRefs({ photo: updatedDoc }));
+    setPhotoRejectionCount(0);
+    setPhotoManualReviewConfirmed(false);
+    setPhotoManualReviewSubmitting(false);
   };
 
   // Passport validation helper
@@ -2599,24 +2647,65 @@ export function EmployeeForm({
           <PhotoUpload
             submissionId={submission.id}
             value={photoDoc}
+            existingPhotoSha256={existingDocs?.photo?.sha256}
             onUpload={handlePhotoUpload}
-            onValidated={async (validated, validationErrors) => {
+            onValidated={async (validated, validationErrors, aiRejected) => {
               const currentPhotoDoc = photoDocRef.current;
               if (currentPhotoDoc) {
-                const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors };
+                const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors, needsReview: undefined };
                 setPhotoDoc(updatedDoc);
                 photoDocRef.current = updatedDoc;
                 await saveDocRefs(buildDocRefs({ photo: updatedDoc }));
+              }
+              if (validated) {
+                setPhotoRejectionCount(0);
+              } else if (aiRejected) {
+                // Only genuine AI rejections count toward the manual-review
+                // threshold — service failures don't.
+                setPhotoRejectionCount((c) => c + 1);
               }
               if (photoError) setPhotoError(null);
             }}
             onRemove={async () => {
               setPhotoDoc(undefined);
               photoDocRef.current = undefined;
+              // Keep photoRejectionCount across removes (same rationale as
+              // handleCoverRemove) so the manual-review threshold stays
+              // reachable; only reset the confirmation tick.
+              setPhotoManualReviewConfirmed(false);
               await saveDocRefs(buildDocRefs({ photo: undefined }));
             }}
             error={photoError || undefined}
           />
+
+          {shouldOfferManualReview(photoRejectionCount) && photoDoc && !photoDoc.validated && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+              <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this photo meets the requirements, you can submit it for manual review.
+              </p>
+              <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 flex-shrink-0"
+                  checked={photoManualReviewConfirmed}
+                  onChange={(e) => setPhotoManualReviewConfirmed(e.target.checked)}
+                />
+                <span>I confirm this is a recent passport-style photo of myself (plain light background, head and shoulders visible, no glasses). I understand a TME team member will verify it manually.</span>
+              </label>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handlePhotoManualReview}
+                  disabled={!photoManualReviewConfirmed || photoManualReviewSubmitting}
+                  className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: TME_COLORS.primary }}
+                >
+                  {photoManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {isPhotoUploaded && viewingStep === 8 && (
             <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
               <CheckCircle className="w-4 h-4" />
@@ -2705,7 +2794,15 @@ export function EmployeeForm({
           <div className="flex items-center justify-between mt-5">
             <button
               type="button"
-              onClick={() => setPassportChanged(true)}
+              onClick={() => {
+                setPassportChanged(true);
+                // Withdraw any previously-saved attestation — the server-side
+                // submit gate must now see freshly uploaded pages instead.
+                if (passportUnchangedRef.current) {
+                  passportUnchangedRef.current = false;
+                  void saveDocRefs(buildDocRefs());
+                }
+              }}
               className="text-sm text-red-600 hover:text-red-700 font-medium underline"
             >
               My passport has changed — I need to upload new pages
@@ -2714,6 +2811,11 @@ export function EmployeeForm({
               <button
                 type="button"
                 onClick={() => {
+                  // Persist the attestation so the server-side submit gate can
+                  // verify the skip (defense-in-depth; it also checks both
+                  // existing pages are on file).
+                  passportUnchangedRef.current = true;
+                  void saveDocRefs(buildDocRefs());
                   // Skip passport upload steps. Step 4 (Identity & Visa) is empty
                   // on a standard renewal, so jump straight to step 5 then.
                   setViewingStep(isStep4Empty ? 5 : 4);

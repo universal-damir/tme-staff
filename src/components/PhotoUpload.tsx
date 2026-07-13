@@ -13,14 +13,39 @@ import { singlePagePdfError } from '@/lib/single-page-pdf';
 interface PhotoUploadProps {
   /** Onboarding submission id; passed to the server-side AI guard. */
   submissionId: string;
-  value?: { path: string; filename: string; validated: boolean };
+  value?: { path: string; filename: string; validated: boolean; needsReview?: boolean };
   onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
-  onValidated?: (validated: boolean, errors?: string[]) => void;
+  /**
+   * `aiRejected` is true only when the AI validator actually judged the photo
+   * invalid — service failures report validated=false with aiRejected=false so
+   * they don't count toward the manual-review strike counter.
+   */
+  onValidated?: (validated: boolean, errors?: string[], aiRejected?: boolean) => void;
   onRemove?: () => void;
   error?: string;
+  /**
+   * SHA-256 (hex) of the photo already on file for this staff member
+   * (renewals). The old photo itself is never shown; the hash lets us reject
+   * a re-upload of the identical file with a clear message.
+   */
+  existingPhotoSha256?: string;
 }
 
-export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error }: PhotoUploadProps) {
+async function sha256Hex(file: File): Promise<string | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    // Insecure context / very old browser — skip the reuse check rather than
+    // block the upload.
+    return null;
+  }
+}
+
+export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error, existingPhotoSha256 }: PhotoUploadProps) {
   const aiToken = useSearchParams().get('token');
   const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -56,6 +81,19 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     if (pageErr) {
       setUploadError(pageErr);
       return;
+    }
+
+    // Renewal photo-reuse guard: reject the exact file we already have on
+    // record — a renewal requires a recent photo, not the one from the
+    // previous application.
+    if (existingPhotoSha256) {
+      const hash = await sha256Hex(file);
+      if (hash && hash === existingPhotoSha256.toLowerCase()) {
+        setUploadError(
+          'This is the same photo we already have on file from your previous application. Please upload a recent photo (taken within the last 6 months).'
+        );
+        return;
+      }
     }
 
     setUploadError(null);
@@ -124,13 +162,13 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
 
     if (!validation) {
       setValidationErrors(['Unable to validate photo. Please try again.']);
-      onValidated?.(false, ['Validation service unavailable']);
+      onValidated?.(false, ['Validation service unavailable'], false);
       return;
     }
 
     if (validation.valid) {
       setValidationErrors([]);
-      onValidated?.(true, []);
+      onValidated?.(true, [], false);
     } else {
       const errorMessages = (validation.errors as string[]).map(
         (err: string, i: number) => {
@@ -139,7 +177,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
         }
       );
       setValidationErrors(errorMessages);
-      onValidated?.(false, errorMessages);
+      onValidated?.(false, errorMessages, true);
     }
   };
 
@@ -268,10 +306,17 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
               </div>
             )}
 
-            {isValidated && !isValidating && (
+            {isValidated && !isValidating && !value?.needsReview && (
               <div className="flex items-center gap-2 text-sm text-green-600">
                 <CheckCircle className="w-4 h-4 flex-shrink-0" />
                 Photo validated
+              </div>
+            )}
+
+            {isValidated && !isValidating && value?.needsReview && (
+              <div className="flex items-center gap-2 text-sm text-amber-600">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                Submitted for manual review — a TME team member will verify this photo
               </div>
             )}
 
@@ -330,7 +375,15 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
           </li>
           <li className="flex items-center gap-1">
             <Upload className="w-3 h-3" />
+            Head AND shoulders visible — space above your head, no tight cropping
+          </li>
+          <li className="flex items-center gap-1">
+            <Upload className="w-3 h-3" />
             Face 70-80% of photo
+          </li>
+          <li className="flex items-center gap-1">
+            <Upload className="w-3 h-3" />
+            Recent photo (within 6 months) — not a photo of a printed photo
           </li>
           <li className="flex items-center gap-1">
             <Upload className="w-3 h-3" />

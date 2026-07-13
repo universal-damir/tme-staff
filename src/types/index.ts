@@ -209,6 +209,11 @@ export interface StaffDocumentReferences {
     filename: string;
     validated: boolean;
     validation_errors?: string[];
+    // Set when the user submitted via the manual-review fallback after
+    // MANUAL_REVIEW_THRESHOLD consecutive AI rejections. `validated` is
+    // stamped true to unblock the form; a TME team member verifies the
+    // photo on the portal side (needs_review column).
+    needsReview?: boolean;
   };
   // Legacy single passport field (for backwards compatibility)
   passport?: {
@@ -223,6 +228,11 @@ export interface StaffDocumentReferences {
     additionalPage?: PassportPageReference;
     extracted_data?: Record<string, unknown>;
   };
+  // Renewal only: the employee ticked "my passport is the same as shown"
+  // and skipped the passport upload steps. Persisted so the server-side
+  // submit gate can verify the skip was legitimate (both existing pages on
+  // file) instead of trusting client state.
+  passport_unchanged?: boolean;
   eid?: {
     path: string;
     filename: string;
@@ -367,8 +377,15 @@ export interface StaffOnboardingSubmission {
   // Documents
   documents: StaffDocumentReferences | null;
 
-  // Existing documents from portal (for renewals — passport confirmation)
-  existing_documents?: Record<string, { path: string; publicUrl: string; filename: string }> | null;
+  // Existing documents from portal (for renewals — passport confirmation).
+  // Most entries carry a signed URL so the form can display them read-only.
+  // The `photo` entry is metadata-ONLY (sha256 + filename, no path/publicUrl):
+  // the old photo must never be shown to the client, but its hash lets the
+  // upload slot reject a re-upload of the very same file.
+  existing_documents?: Record<
+    string,
+    { path?: string; publicUrl?: string; filename?: string; sha256?: string }
+  > | null;
 
   // Access control
   employee_access_token?: string;

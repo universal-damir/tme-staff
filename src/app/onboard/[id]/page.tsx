@@ -258,7 +258,16 @@ function OnboardingPageInner() {
         if (response.ok) {
           setPageState('success');
         } else {
-          setError('Failed to save form. Please try again.');
+          // Surface the server's reason (e.g. the required-documents gate
+          // listing what's missing) instead of a generic failure.
+          let message = 'Failed to save form. Please try again.';
+          try {
+            const body = await response.json();
+            if (typeof body?.error === 'string' && body.error) message = body.error;
+          } catch {
+            // Non-JSON error body — keep the generic message.
+          }
+          setError(message);
         }
       } catch (err) {
         console.error('Error submitting employee form:', err);
