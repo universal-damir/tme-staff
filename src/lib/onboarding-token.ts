@@ -53,6 +53,7 @@ export interface OnboardingRow {
   staff_email: string | null;
   onboarding_type: string | null;
   sponsorship_type: string | null;
+  requested_documents: string[] | null;
   employee_access_token: string | null;
   created_at: string | null;
 }
@@ -80,6 +81,7 @@ const SAFE_COLUMNS = [
   'staff_email',
   'onboarding_type',
   'sponsorship_type',
+  'requested_documents',
   'employee_access_token',
   'created_at',
 ].join(', ');
@@ -221,6 +223,7 @@ export function scrubOnboardingForBrowser(row: OnboardingRow) {
     staff_email: row.staff_email,
     onboarding_type: row.onboarding_type,
     sponsorship_type: row.sponsorship_type,
+    requested_documents: row.requested_documents,
   };
 }
 

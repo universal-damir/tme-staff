@@ -6,6 +6,7 @@ import { TME_COLORS } from '@/lib/constants';
 import { FormProgress } from '@/components/FormProgress';
 import { EmployerForm } from '@/components/EmployerForm';
 import { EmployeeForm } from '@/components/EmployeeForm';
+import { DocumentRequestForm } from '@/components/DocumentRequestForm';
 import type { StaffOnboardingSubmission, EmployerFormData, EmployeeFormData } from '@/types';
 import { Loader2, CheckCircle, XCircle, AlertTriangle, Lock } from 'lucide-react';
 
@@ -14,6 +15,7 @@ type PageState =
   | 'employer'
   | 'employee'
   | 'combined' // Same-person mode
+  | 'document_request' // Re-upload of specific requested documents only
   | 'success'
   | 'error'
   | 'not_found'
@@ -122,6 +124,12 @@ function OnboardingPageInner() {
           setPageState('cancelled');
         } else if (data.status === 'complete') {
           setPageState('already_complete');
+        } else if (data.onboarding_type === 'document_request') {
+          // Document re-request: the employee re-uploads ONLY the requested
+          // documents — no employer/employee steps, no signature. Token
+          // gating already happened server-side (current_step='employee'
+          // rows require the employee_access_token on the read route).
+          setPageState('document_request');
         } else if (data.is_same_person) {
           if (data.current_step === 'employer') {
             setPageState('combined');
@@ -394,7 +402,9 @@ function OnboardingPageInner() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-4">Thank You!</h1>
           <p className="text-gray-600 mb-6">
-            {submission?.is_same_person
+            {submission?.onboarding_type === 'document_request'
+              ? 'Your documents have been submitted successfully.'
+              : submission?.is_same_person
               ? 'Your form has been submitted successfully.'
               : pageState === 'success' && submission?.current_step === 'employer'
               ? 'The employer section has been completed. An email has been sent to the employee to complete their section.'
@@ -426,6 +436,7 @@ function OnboardingPageInner() {
   if (!submission) return null;
 
   const isRenewal = submission.onboarding_type === 'renewal';
+  const isDocumentRequest = submission.onboarding_type === 'document_request';
   const isShowingEmployer = pageState === 'employer' || (pageState === 'combined' && !showEmployeeSection);
   // Widen the page only for the renewal employer step, where Salary Contract +
   // Payroll render side-by-side. Other steps (employee form, success states)
@@ -441,20 +452,25 @@ function OnboardingPageInner() {
             className="text-2xl md:text-3xl font-bold mb-2"
             style={{ color: TME_COLORS.primary }}
           >
-            {isRenewal ? 'Staff Renewal' : 'Staff Onboarding'}
+            {isDocumentRequest
+              ? `Document Re-Upload${submission.staff_name ? ` for ${submission.staff_name}` : ''}`
+              : isRenewal ? 'Staff Renewal' : 'Staff Onboarding'}
           </h1>
-          {submission.staff_name && (
+          {!isDocumentRequest && submission.staff_name && (
             <p className="text-gray-600">
               <span className="font-medium">{submission.staff_name}</span>
             </p>
           )}
         </div>
 
-        {/* Progress */}
-        <FormProgress
-          currentStep={showEmployeeSection ? 'employee' : submission.current_step}
-          isSamePerson={submission.is_same_person}
-        />
+        {/* Progress — the employer/employee step bar makes no sense for a
+            document re-request (single upload step, no signature). */}
+        {!isDocumentRequest && (
+          <FormProgress
+            currentStep={showEmployeeSection ? 'employee' : submission.current_step}
+            isSamePerson={submission.is_same_person}
+          />
+        )}
 
         {/* Forms */}
         <div className="space-y-8">
@@ -478,6 +494,14 @@ function OnboardingPageInner() {
             />
           )}
 
+          {/* Document Re-Request — only the requested document slots */}
+          {pageState === 'document_request' && (
+            <DocumentRequestForm
+              submission={submission}
+              onSubmitted={() => setPageState('success')}
+            />
+          )}
+
           {/* Error banner — rendered at the bottom of the form area so it
               sits just under the Submit button. A top-of-page banner would
               be off-screen after the user scrolled through the form, leaving
@@ -492,7 +516,7 @@ function OnboardingPageInner() {
 
         {/* Footer */}
         <div className="mt-12 text-center text-sm text-gray-400">
-          <p>TME Services - Staff {isRenewal ? 'Renewal' : 'Onboarding'} Portal</p>
+          <p>TME Services - Staff {isDocumentRequest ? 'Document' : isRenewal ? 'Renewal' : 'Onboarding'} Portal</p>
           <p className="mt-1">
             Need help?{' '}
             <a

@@ -262,12 +262,18 @@ export interface StaffDocumentReferences {
     filename: string;
     validated?: boolean;
     extracted_data?: Record<string, unknown>;
+    // Set when the user submitted via the 2-strike manual-review fallback
+    // (document re-request flow) — TME verifies the upload manually.
+    needsReview?: boolean;
   };
   eid_back?: {
     path: string;
     filename: string;
     validated?: boolean;
     extracted_data?: Record<string, unknown>;
+    // Set when the user submitted via the 2-strike manual-review fallback
+    // (document re-request flow) — TME verifies the upload manually.
+    needsReview?: boolean;
   };
   // Pakistani National ID (front + back, for Pakistani nationals)
   pakistan_id_front?: {
@@ -353,8 +359,15 @@ export interface StaffOnboardingSubmission {
   // Pre-fill data (from TME Portal for renewals)
   prefill_employer_data: Partial<EmployerFormData> | null;
   prefill_employee_data: Partial<EmployeeFormData> | null;
-  onboarding_type: 'new_hire' | 'renewal';
+  onboarding_type: 'new_hire' | 'renewal' | 'document_request';
   sponsorship_type?: SponsorshipType | null;
+
+  // Document re-request flow (onboarding_type === 'document_request'):
+  // type keys the employee must re-upload (v1 allow-list: photo,
+  // passport_cover, passport_inside, passport_additional, eid_front,
+  // eid_back, degree_attested, transcript_of_records). Null/absent for
+  // regular new_hire / renewal onboardings.
+  requested_documents?: string[] | null;
 
   // Sponsor NOC audit trail (family-sponsored only). Set server-side by
   // submit-employee, mirroring the employee_signature_* columns.

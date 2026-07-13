@@ -30,22 +30,24 @@ export function FileUploadSlot({
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
-  // PDF + JPEG only; on mobile, PDF only — accepting any image type makes the
+  // PDF + JPEG + PNG; on mobile, PDF only — accepting any image type makes the
   // OS picker offer the camera, and there's no way to hide it while allowing
   // library images. PDF-only forces a real scan. See useIsMobile.
-  const acceptAttr = isMobile ? 'application/pdf' : 'application/pdf,image/jpeg';
+  const acceptAttr = isMobile ? 'application/pdf' : 'application/pdf,image/jpeg,image/png';
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     // Validate file type
-    const validTypes = isMobile ? ['application/pdf'] : ['application/pdf', 'image/jpeg'];
+    const validTypes = isMobile
+      ? ['application/pdf']
+      : ['application/pdf', 'image/jpeg', 'image/png'];
     if (!validTypes.includes(file.type)) {
       setError(
         isMobile
-          ? 'On mobile, please upload a scanned PDF. Camera photos are not accepted — use a scanner app, or upload a PDF/JPEG from a computer.'
-          : 'Please upload a PDF or a JPEG (.jpg / .jpeg).'
+          ? 'On mobile, please upload a scanned PDF. Camera photos are not accepted — use a scanner app, or upload a PDF/JPEG/PNG from a computer.'
+          : 'Please upload a PDF, JPEG (.jpg / .jpeg), or PNG.'
       );
       return;
     }

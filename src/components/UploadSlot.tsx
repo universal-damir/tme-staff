@@ -42,7 +42,7 @@ export function UploadSlot({
   validating,
   error,
   preview,
-  accept = 'application/pdf,image/jpeg',
+  accept = 'application/pdf,image/jpeg,image/png',
   maxSizeMB = 5,
   needsReview = false,
 }: UploadSlotProps) {
@@ -51,16 +51,19 @@ export function UploadSlot({
   void _onRemove;
   const inputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
-  // Identity documents accept PDF + JPEG only. On mobile we narrow to PDF
+  // Identity documents accept PDF + JPEG + PNG. On mobile we narrow to PDF
   // *only*: any image type in `accept` makes the OS picker offer the camera
   // ("Take Photo"), and there is no web API to allow library images while
   // hiding it — so PDF-only is the one reliable way to force a real scan and
-  // block camera snapshots. Desktop keeps JPEG (file picker / drag-drop has no
-  // camera). PNG / WebP / HEIC are dropped — proper scans are PDF or JPEG.
+  // block camera snapshots. Desktop keeps JPEG/PNG (file picker / drag-drop
+  // has no camera). WebP / HEIC stay out — HEIC is the native iPhone camera
+  // format, exactly the casual-snapshot path we want to discourage.
   const effectiveAccept = useMemo(() => {
     const requested = accept.split(',').map((t) => t.trim());
-    let allowed = requested.filter((t) => t === 'application/pdf' || t === 'image/jpeg');
-    if (allowed.length === 0) allowed = ['application/pdf', 'image/jpeg'];
+    let allowed = requested.filter(
+      (t) => t === 'application/pdf' || t === 'image/jpeg' || t === 'image/png'
+    );
+    if (allowed.length === 0) allowed = ['application/pdf', 'image/jpeg', 'image/png'];
     if (isMobile) allowed = allowed.filter((t) => t === 'application/pdf');
     if (allowed.length === 0) allowed = ['application/pdf'];
     return allowed.join(',');
@@ -151,8 +154,8 @@ export function UploadSlot({
       const typeOk = acceptedTypes.includes(selectedFile.type);
       if (!typeOk) {
         const friendly = isMobile
-          ? 'On mobile, please upload a scanned PDF. Camera photos and image files are not accepted — use a scanner app, or upload a PDF/JPEG from a computer.'
-          : 'Please upload a PDF or a JPEG (.jpg / .jpeg).';
+          ? 'On mobile, please upload a scanned PDF. Camera photos and image files are not accepted — use a scanner app, or upload a PDF/JPEG/PNG from a computer.'
+          : 'Please upload a PDF, JPEG (.jpg / .jpeg), or PNG.';
         alert(friendly);
         if (inputRef.current) inputRef.current.value = '';
         return;
@@ -277,8 +280,18 @@ export function UploadSlot({
               <div className="relative w-full h-64">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
+                  // key forces a fresh element per preview so a reused node
+                  // can't sit on a stale load state.
+                  key={preview}
                   src={preview}
                   alt={label}
+                  // Data-URL previews can finish decoding before React
+                  // attaches onLoad — then the event never fires and the
+                  // spinner overlay sticks forever. The ref callback runs at
+                  // commit and catches the already-complete case.
+                  ref={(el) => {
+                    if (el && el.complete) setImgLoaded(true);
+                  }}
                   onLoad={() => setImgLoaded(true)}
                   onError={() => setImgLoaded(true)}
                   className="w-full h-64 object-contain rounded-lg cursor-zoom-in"

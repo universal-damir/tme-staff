@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { missingRequiredDocuments } from './submit-validation';
+import { missingRequiredDocuments, missingRequestedDocuments } from './submit-validation';
 
 /**
  * Server-side required-documents gate for /api/submit-employee.
@@ -128,5 +128,128 @@ describe('missingRequiredDocuments', () => {
         documents: { photo: validPhoto, passportPages },
       })
     ).toEqual([]);
+  });
+});
+
+/**
+ * Server-side completeness gate for /api/submit-document-request
+ * (onboarding_type === 'document_request'): every requested type key must be
+ * uploaded and, where AI validation exists, validated or explicitly submitted
+ * for manual review. The generic missingRequiredDocuments gate above does NOT
+ * apply to document requests.
+ */
+describe('missingRequestedDocuments', () => {
+  const acceptedRef = { path: 'p/doc.pdf', filename: 'doc.pdf', validated: true };
+  const needsReviewRef = { path: 'p/doc.pdf', filename: 'doc.pdf', validated: true, needsReview: true };
+
+  it('passes when every requested document is present and validated', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: [
+          'photo',
+          'passport_cover',
+          'passport_inside',
+          'passport_additional',
+          'eid_front',
+          'eid_back',
+          'degree_attested',
+          'transcript_of_records',
+        ],
+        documents: {
+          photo: validPhoto,
+          passportPages: {
+            cover: acceptedRef,
+            insidePages: acceptedRef,
+            additionalPage: acceptedRef,
+          },
+          eid_front: acceptedRef,
+          eid_back: acceptedRef,
+          degree_attested: { path: 'p/degree.pdf', filename: 'degree.pdf' },
+          transcript_of_records: { path: 'p/transcript.pdf', filename: 'transcript.pdf' },
+        },
+      })
+    ).toEqual([]);
+  });
+
+  it('flags a photo that is uploaded but neither validated nor needsReview', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['photo'],
+        documents: { photo: failedPhoto },
+      })
+    ).toEqual(['photo']);
+  });
+
+  it('accepts needsReview (manual-review fallback) as validated', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['photo', 'passport_cover', 'eid_front'],
+        documents: {
+          photo: manualReviewPhoto,
+          passportPages: { cover: needsReviewRef },
+          eid_front: { path: 'p/eid.jpg', filename: 'eid.jpg', validated: false, needsReview: true },
+        },
+      })
+    ).toEqual([]);
+  });
+
+  it('checks passport keys under the nested passportPages structure', () => {
+    // Flat refs (or the legacy `passport` key) must NOT satisfy passport keys.
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['passport_cover', 'passport_inside', 'passport_additional'],
+        documents: {
+          passport: { path: 'p/legacy.pdf', filename: 'legacy.pdf' },
+          passportPages: { insidePages: acceptedRef },
+        },
+      })
+    ).toEqual(['passport_cover', 'passport_additional']);
+  });
+
+  it('passport page with path but no validation flags is not accepted', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['passport_inside'],
+        documents: {
+          passportPages: { insidePages: { path: 'p/inside.pdf', filename: 'inside.pdf', validated: false } },
+        },
+      })
+    ).toEqual(['passport_inside']);
+  });
+
+  it('degree and transcript need a path only (no validation exists for them)', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['degree_attested', 'transcript_of_records'],
+        documents: {
+          degree_attested: { path: 'p/degree.pdf', filename: 'degree.pdf' },
+          transcript_of_records: { path: 'p/transcript.pdf', filename: 'transcript.pdf' },
+        },
+      })
+    ).toEqual([]);
+  });
+
+  it('empty or null requested_documents yields no missing keys', () => {
+    expect(missingRequestedDocuments({ requested_documents: [], documents: {} })).toEqual([]);
+    expect(missingRequestedDocuments({ requested_documents: null, documents: null })).toEqual([]);
+    expect(missingRequestedDocuments({})).toEqual([]);
+  });
+
+  it('lists a requested type that is completely absent', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['eid_front', 'eid_back'],
+        documents: { photo: validPhoto },
+      })
+    ).toEqual(['eid_front', 'eid_back']);
+  });
+
+  it('fails closed on unknown requested keys', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['photo', 'not_a_real_type'],
+        documents: { photo: validPhoto },
+      })
+    ).toEqual(['not_a_real_type']);
   });
 });

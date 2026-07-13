@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
-import { compressImageForAI } from '@/lib/utils';
+import { compressImageForAI, topEdgeLooksClipped } from '@/lib/utils';
 import { getDocumentUrl } from '@/lib/supabase';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
@@ -59,13 +59,14 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type — a JPEG photo or a PDF scan only. (PNG / HEIC /
-    // WebP were dropped: HEIC in particular is the native iPhone camera
-    // format, exactly the casual-snapshot path we want to discourage.)
+    // Validate file type — a JPEG/PNG photo or a PDF scan. (HEIC / WebP stay
+    // out: HEIC in particular is the native iPhone camera format, exactly the
+    // casual-snapshot path we want to discourage.)
     const isJpeg = file.type === 'image/jpeg';
+    const isPng = file.type === 'image/png';
     const isPdf = file.type === 'application/pdf';
-    if (!isJpeg && !isPdf) {
-      setUploadError('Please upload a JPEG photo (.jpg / .jpeg) or a PDF.');
+    if (!isJpeg && !isPng && !isPdf) {
+      setUploadError('Please upload a JPEG or PNG photo, or a PDF.');
       return;
     }
 
@@ -113,7 +114,20 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
       });
       previewDataUrl = isPdf ? await renderPdfFirstPage(rawDataUrl) : rawDataUrl;
     } catch {
-      setUploadError('Could not read that file. Please upload a JPEG photo or a different PDF.');
+      setUploadError('Could not read that file. Please upload a JPEG/PNG photo or a different PDF.');
+      return;
+    }
+
+    // Deterministic framing pre-check: dark (hair) pixels on the very top
+    // border mean the head is cut off. Decided in pixels because the vision
+    // model's edge-contact judgment is unstable; counts as a rejection so the
+    // 2-strike manual-review fallback stays reachable.
+    if (await topEdgeLooksClipped(previewDataUrl)) {
+      const msg =
+        'The top of the head appears cut off by the top edge of the photo. Please upload a photo with clear background visible above the hair.';
+      setPreview(previewDataUrl);
+      setValidationErrors([msg]);
+      onValidated?.(false, [msg], true);
       return;
     }
     setPreview(previewDataUrl);
@@ -243,11 +257,11 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
             <Upload className="w-8 h-8 text-gray-400" />
           </div>
           <p className="text-gray-600 mb-2">Upload your studio passport photo</p>
-          <p className="text-sm text-gray-400">JPEG (.jpg / .jpeg) or PDF, up to 5MB. Studio-quality only — self-taken phone photos will be rejected.</p>
+          <p className="text-sm text-gray-400">JPEG (.jpg / .jpeg), PNG, or PDF, up to 5MB. Studio-quality only — self-taken phone photos will be rejected.</p>
           <input
             ref={inputRef}
             type="file"
-            accept=".jpg,.jpeg,application/pdf"
+            accept=".jpg,.jpeg,.png,application/pdf"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -278,10 +292,18 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
             {imageSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
+                // key forces a fresh element per src; the ref callback
+                // catches images that finished decoding before React
+                // attached onLoad (data URLs) — otherwise the spinner
+                // overlay sticks forever.
+                key={imageSrc}
                 src={imageSrc}
                 alt="Photo preview"
                 loading="eager"
                 decoding="async"
+                ref={(el) => {
+                  if (el && el.complete) setImgLoaded(true);
+                }}
                 onLoad={() => setImgLoaded(true)}
                 onError={() => setImgLoaded(true)}
                 className="absolute inset-0 w-full h-full object-contain"
@@ -358,7 +380,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
           <input
             ref={inputRef}
             type="file"
-            accept=".jpg,.jpeg,application/pdf"
+            accept=".jpg,.jpeg,.png,application/pdf"
             onChange={handleFileSelect}
             className="hidden"
           />

@@ -148,6 +148,79 @@ export function missingRequiredDocuments(row: {
   return missing;
 }
 
+/**
+ * Server-side completeness gate for `/api/submit-document-request`.
+ *
+ * A document-request row (onboarding_type === 'document_request') carries a
+ * `requested_documents` array of type keys the employee must re-upload. This
+ * checks each requested key against the row's `documents` jsonb and returns
+ * the keys that are still missing or not accepted; empty array = submittable.
+ *
+ * "Present and accepted" per key:
+ *  - `photo` / `eid_front` / `eid_back` — flat ref with a `path` AND either
+ *    AI-validated or explicitly submitted via the 2-strike manual-review
+ *    fallback (`needsReview`).
+ *  - `passport_cover` / `passport_inside` / `passport_additional` — the
+ *    corresponding NESTED `passportPages.*` ref, same validated-or-needsReview
+ *    rule.
+ *  - `degree_attested` / `transcript_of_records` — `path` only (these have
+ *    no AI validation anywhere in the app).
+ *
+ * Unknown requested keys are reported missing (fail-closed): the portal only
+ * writes allow-listed keys, and a typo must block submission rather than
+ * silently pass.
+ *
+ * NOTE: the generic `missingRequiredDocuments` gate above (photo + passport
+ * for everyone) applies ONLY to `/api/submit-employee` — document requests
+ * must satisfy exactly what was requested, nothing more.
+ */
+export function missingRequestedDocuments(row: {
+  requested_documents?: string[] | null;
+  documents?: StaffDocumentReferences | null;
+}): string[] {
+  const requested = row.requested_documents ?? [];
+  const docs = row.documents ?? {};
+  const pages = docs.passportPages ?? {};
+
+  const accepted = (
+    doc: { path?: string; validated?: boolean; needsReview?: boolean } | undefined
+  ): boolean => !!doc?.path && (doc.validated === true || doc.needsReview === true);
+
+  const missing: string[] = [];
+  for (const key of requested) {
+    switch (key) {
+      case 'photo':
+        if (!accepted(docs.photo)) missing.push(key);
+        break;
+      case 'passport_cover':
+        if (!accepted(pages.cover)) missing.push(key);
+        break;
+      case 'passport_inside':
+        if (!accepted(pages.insidePages)) missing.push(key);
+        break;
+      case 'passport_additional':
+        if (!accepted(pages.additionalPage)) missing.push(key);
+        break;
+      case 'eid_front':
+        if (!accepted(docs.eid_front)) missing.push(key);
+        break;
+      case 'eid_back':
+        if (!accepted(docs.eid_back)) missing.push(key);
+        break;
+      case 'degree_attested':
+        if (!docs.degree_attested?.path) missing.push(key);
+        break;
+      case 'transcript_of_records':
+        if (!docs.transcript_of_records?.path) missing.push(key);
+        break;
+      default:
+        // Fail closed on unknown keys — see docblock.
+        missing.push(key);
+    }
+  }
+  return missing;
+}
+
 const MAX_STRING_LENGTH = 2000;
 const MAX_KEYS = 200;
 
