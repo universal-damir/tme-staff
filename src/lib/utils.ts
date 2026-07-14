@@ -251,13 +251,22 @@ export async function compressImageForAI(base64Image: string): Promise<string> {
 /**
  * Deterministic top-edge clipping check for passport photos.
  *
- * A compliant photo has light background above the head, so the topmost rows
- * of the image are near-white. When hair is cut off by the frame, hair-dark
- * pixels sit directly on the top border. Vision-model judgment on edge
- * contact proved unstable run-to-run, so this is decided in pixels instead:
- * measured 0.00 dark-fraction on compliant photos vs 0.37 on a clipped one —
- * threshold 0.10 splits them with wide margin. Light-blond hair on a white
- * background can evade this; the AI validator still gets its shot after.
+ * When hair is cut off by the frame, hair-dark pixels sit directly on the
+ * top border. Vision-model judgment on edge contact proved unstable
+ * run-to-run, so this is decided in pixels instead — but darkness alone is
+ * not enough: a compliant photo on a dark or mid-grey background would trip
+ * an absolute threshold every time. So the check requires CONTRAST against
+ * the background:
+ *  1. The outer 15% of the top rows on each side is the background
+ *     reference (hair rarely reaches the corners).
+ *  2. If that reference itself is dark (mean luminance < 120), return false
+ *     — the heuristic cannot tell hair from background there; the AI
+ *     validator still gets its shot after.
+ *  3. Otherwise the CENTRAL 60% of the top edge is flagged as clipped only
+ *     when >10% of its pixels are BOTH dark (luminance < 120) AND clearly
+ *     darker than the background reference (reference minus 60).
+ * Light-blond hair on a white background can still evade this; the AI
+ * validator remains the second line.
  *
  * Returns true when the top edge looks clipped. Returns false on any decode
  * problem — this is a pre-filter, never a blocker of its own.
@@ -276,15 +285,48 @@ export async function topEdgeLooksClipped(imageDataUrl: string): Promise<boolean
         canvas.width = img.width;
         canvas.height = Math.min(3, img.height);
         ctx.drawImage(img, 0, 0);
-        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        let dark = 0;
-        const total = data.length / 4;
-        for (let i = 0; i < data.length; i += 4) {
-          // Rec. 601 luminance
-          const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-          if (lum < 120) dark++;
+        const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Rec. 601 luminance of the pixel at (x, y)
+        const lumAt = (x: number, y: number) => {
+          const i = (y * width + x) * 4;
+          return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        };
+
+        // Background reference: outer 15% of the width on each side.
+        const sideWidth = Math.max(1, Math.floor(width * 0.15));
+        let refSum = 0;
+        let refCount = 0;
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < sideWidth; x++) {
+            refSum += lumAt(x, y);
+            refCount++;
+          }
+          for (let x = Math.max(sideWidth, width - sideWidth); x < width; x++) {
+            refSum += lumAt(x, y);
+            refCount++;
+          }
         }
-        resolve(dark / total > 0.1);
+        if (refCount === 0) return resolve(false);
+        const refLum = refSum / refCount;
+
+        // Dark background: hair and background are indistinguishable here —
+        // skip rather than false-reject; the AI validator runs regardless.
+        if (refLum < 120) return resolve(false);
+
+        // Central 60% of the top edge: clipped only when a meaningful
+        // fraction is both dark and clearly darker than the background.
+        const startX = Math.floor(width * 0.2);
+        const endX = Math.max(startX + 1, Math.ceil(width * 0.8));
+        let dark = 0;
+        let total = 0;
+        for (let y = 0; y < height; y++) {
+          for (let x = startX; x < endX && x < width; x++) {
+            const lum = lumAt(x, y);
+            total++;
+            if (lum < 120 && lum < refLum - 60) dark++;
+          }
+        }
+        resolve(total > 0 && dark / total > 0.1);
       } catch {
         resolve(false);
       }

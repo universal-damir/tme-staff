@@ -35,6 +35,10 @@ import { SampleImageToggle } from '@/components/SampleImageToggle';
  * validation, and 2-strike manual-review fallback as the main EmployeeForm —
  * but with no signature and no personal-data steps. Extraction endpoints are
  * deliberately skipped: there is no form to pre-fill here, validation only.
+ *
+ * Keys outside the 8 AI-validated slots but inside GENERIC_REQUESTABLE_LABELS
+ * render a plain FileUploadSlot (no AI validation) and store into
+ * `documents.extra_documents[<key>]` with needsReview: true.
  */
 
 interface DocumentRequestFormProps {
@@ -42,8 +46,8 @@ interface DocumentRequestFormProps {
   onSubmitted: () => void;
 }
 
-// v1 allow-list of requestable type keys. The three passport keys map to the
-// NESTED documents.passportPages.* refs; everything else is flat.
+// Allow-list of AI-VALIDATED requestable type keys. The three passport keys
+// map to the NESTED documents.passportPages.* refs; everything else is flat.
 const PASSPORT_KEYS = ['passport_cover', 'passport_inside', 'passport_additional'] as const;
 type PassportRequestKey = (typeof PASSPORT_KEYS)[number];
 
@@ -53,8 +57,37 @@ type EidRequestKey = (typeof EID_KEYS)[number];
 const PLAIN_KEYS = ['degree_attested', 'transcript_of_records'] as const;
 type PlainRequestKey = (typeof PLAIN_KEYS)[number];
 
-const REQUESTABLE_KEYS = ['photo', ...PASSPORT_KEYS, ...EID_KEYS, ...PLAIN_KEYS] as const;
-type RequestedKey = (typeof REQUESTABLE_KEYS)[number];
+const VALIDATED_KEYS = ['photo', ...PASSPORT_KEYS, ...EID_KEYS, ...PLAIN_KEYS] as const;
+type ValidatedRequestKey = (typeof VALIDATED_KEYS)[number];
+
+// All OTHER requestable portal document_type keys render a single GENERIC
+// upload slot: plain upload (FileUploadSlot), no AI validation, no strike
+// counters. Uploads land in `documents.extra_documents[<key>]` with
+// `needsReview: true` — nothing AI-checked them, so the portal flags them
+// for human review on sync. Must stay in sync with GENERIC_REQUESTED_KEYS
+// in submit-validation.ts and the portal's request-documents allow-list.
+const GENERIC_REQUESTABLE_LABELS = {
+  visa: 'Visa',
+  employment_contract: 'Employment Contract',
+  work_permit: 'Employment ID',
+  health_insurance: 'Insurance — Health',
+  iloe_insurance: 'Insurance — ILOE',
+  driving_license: 'Driving License',
+  job_offer_letter: 'Job Offer Letter',
+  pakistan_id_front: 'Pakistan ID — Front',
+  pakistan_id_back: 'Pakistan ID — Back',
+  education_additional: 'Education — Additional',
+  sponsor_passport: 'Sponsor — Passport',
+  sponsor_visa: 'Sponsor — Visa',
+  sponsor_eid_front: 'Sponsor — Emirates ID (Front)',
+  sponsor_eid_back: 'Sponsor — Emirates ID (Back)',
+} as const;
+type GenericRequestKey = keyof typeof GENERIC_REQUESTABLE_LABELS;
+const GENERIC_KEYS = Object.keys(GENERIC_REQUESTABLE_LABELS) as readonly GenericRequestKey[];
+
+const GENERIC_SLOT_HINT = 'Upload a clear scan or photo (PDF or image).';
+
+type RequestedKey = ValidatedRequestKey | GenericRequestKey;
 
 const PASSPORT_SLOTS: Record<
   PassportRequestKey,
@@ -160,6 +193,7 @@ const KEY_DISPLAY_NAMES: Record<RequestedKey, string> = {
   eid_back: 'Emirates ID (Back)',
   degree_attested: 'Attested Degree Certificate',
   transcript_of_records: 'Transcript of Records',
+  ...GENERIC_REQUESTABLE_LABELS,
 };
 
 interface SlotUI {
@@ -185,8 +219,12 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   // validate/extract routes and the documents write route (P0-3).
   const aiToken = useSearchParams().get('token');
 
-  const requested = (submission.requested_documents ?? []).filter((k): k is RequestedKey =>
-    (REQUESTABLE_KEYS as readonly string[]).includes(k)
+  // Keys that are neither validated slots nor in the generic map are NOT
+  // rendered — the submit gate fails closed on them server-side.
+  const requested = (submission.requested_documents ?? []).filter(
+    (k): k is RequestedKey =>
+      (VALIDATED_KEYS as readonly string[]).includes(k) ||
+      (GENERIC_KEYS as readonly string[]).includes(k)
   );
 
   // Full document-references object, seeded from the row so persisting never
@@ -327,11 +365,17 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
             (result?.error as string) ||
             (result?.errorMessage as string) ||
             'Unable to validate page. Please try again.',
+          infra: result?.infra === true,
         };
       }
-      return { valid: result.matches as boolean, error: result.errorMessage as string | undefined };
+      return {
+        valid: result.matches as boolean,
+        error: result.errorMessage as string | undefined,
+        infra: result?.infra === true,
+      };
     } catch {
-      return { valid: false, error: 'Unable to validate page. Please try again.' };
+      // Network failure: the check could not run — infra, never a strike.
+      return { valid: false, error: 'Unable to validate page. Please try again.', infra: true };
     }
   };
 
@@ -360,6 +404,12 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     try {
       const validation = await validatePassportPageType(preview, cfg.expectedType);
       if (!validation.valid) {
+        // infra=true means the check could not RUN (API/model error) — never
+        // a rejection; don't burn a strike, just ask the user to retry.
+        if (validation.infra) {
+          setSlot(key, { preview, validating: false, error: "We could not check this file right now — please try again in a moment.", file });
+          return false;
+        }
         bumpRejection(key);
         setSlot(key, { preview, validating: false, error: validation.error || cfg.rejectCopy, file });
         // Clear any previously-validated page so a stale green "Valid" badge
@@ -534,6 +584,37 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   };
 
   // ------------------------------------------------------------------
+  // Generic requestable types — plain upload into
+  // documents.extra_documents[<portal document_type>]. No AI validation,
+  // no strike counters; every entry carries needsReview: true so the
+  // portal flags it for human review on sync. Storage goes through the
+  // same /api/storage/upload route (shrinkImageToBudget applies) under
+  // `<submissionId>/<type>/...` like every other slot.
+  // ------------------------------------------------------------------
+
+  const setExtraDoc = (
+    key: GenericRequestKey,
+    ref: { path: string; filename: string; needsReview: true } | undefined
+  ) => {
+    const extras = { ...(docsRef.current.extra_documents ?? {}) };
+    if (ref) extras[key] = ref;
+    else delete extras[key];
+    return persistDocs({ ...docsRef.current, extra_documents: extras });
+  };
+
+  const handleGenericUpload = (key: GenericRequestKey) => async (file: File) => {
+    const result = await uploadDocument(submission.id, key, file);
+    if (result) {
+      await setExtraDoc(key, { path: result.path, filename: result.filename, needsReview: true });
+    }
+    return result;
+  };
+
+  const handleGenericRemove = (key: GenericRequestKey) => async () => {
+    await setExtraDoc(key, undefined);
+  };
+
+  // ------------------------------------------------------------------
   // Submit — every requested slot must be present AND validated-or-
   // needsReview (path-only for degree/transcript). The server enforces
   // the same rule in /api/submit-document-request.
@@ -544,8 +625,14 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   ): boolean => !!doc?.path && (doc.validated === true || doc.needsReview === true);
 
   const isSatisfied = (key: RequestedKey): boolean => {
+    if ((GENERIC_KEYS as readonly string[]).includes(key)) {
+      // Generic slots have no AI validation — a stored upload is enough
+      // (the entry always carries needsReview: true). Mirrors the server
+      // gate in missingRequestedDocuments.
+      return !!docs.extra_documents?.[key]?.path;
+    }
     const pages = docs.passportPages ?? {};
-    switch (key) {
+    switch (key as ValidatedRequestKey) {
       case 'photo':
         return acceptedDoc(docs.photo);
       case 'passport_cover':
@@ -724,6 +811,21 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       );
     }
 
+    if ((GENERIC_KEYS as readonly string[]).includes(key)) {
+      const gKey = key as GenericRequestKey;
+      const extraRef = docs.extra_documents?.[gKey];
+      return (
+        <FileUploadSlot
+          label={GENERIC_REQUESTABLE_LABELS[gKey]}
+          description={GENERIC_SLOT_HINT}
+          onUpload={handleGenericUpload(gKey)}
+          onRemove={handleGenericRemove(gKey)}
+          uploaded={!!extraRef?.path}
+          filename={extraRef?.filename}
+        />
+      );
+    }
+
     const plainKey = key as PlainRequestKey;
     const cfg = PLAIN_SLOTS[plainKey];
     const docRef = docs[plainKey];
@@ -755,7 +857,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       <div className="bg-white rounded-xl p-6 shadow-sm">
         <p className="text-sm text-gray-600">
           TME Services needs you to re-upload the following {requested.length === 1 ? 'document' : 'documents'}.
-          Each upload is checked automatically; once every item shows as accepted, you can submit.
+          Once every item shows as uploaded and accepted, you can submit.
         </p>
         <ul className="mt-3 space-y-1">
           {requested.map((key) => (

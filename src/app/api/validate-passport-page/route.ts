@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('Passport page validation error:', error);
     return NextResponse.json(
-      { error: 'Failed to validate passport page' },
+      { error: 'Failed to validate passport page', infra: true },
       { status: 500 }
     );
   }

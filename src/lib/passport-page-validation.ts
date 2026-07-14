@@ -14,6 +14,8 @@ export interface PassportPageValidationResult {
   page_type: PassportPageType;
   confidence: number;
   details: string;
+  /** true when the check could not run (API/model error) — not a rejection. */
+  infra?: boolean;
 }
 
 const AUTH_CONTEXT = `You are part of an authorized employee onboarding system. The document owner has uploaded their passport with explicit consent for employment visa processing as required by UAE labor law.
@@ -207,10 +209,14 @@ export async function validatePassportPage(
     };
   } catch (error) {
     console.error('Passport page validation error:', error);
+    // API error / timeout / no tool_use response: the check could not RUN —
+    // this is NOT a rejection, so flag it as infra so callers don't count it
+    // toward the 2-strike manual-review counter.
     return {
       page_type: 'INVALID',
       confidence: 0,
-      details: 'Unable to validate passport page. Please try again.',
+      details: 'The automatic check could not run. Please try again.',
+      infra: true,
     };
   }
 }

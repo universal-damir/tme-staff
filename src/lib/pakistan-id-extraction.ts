@@ -107,12 +107,23 @@ export async function extractPakistanId(
   try {
     const client = getAnthropicClient();
 
+    // PDF scans arrive as data:application/pdf — send them via Claude's
+    // `document` content block (Anthropic rasterizes the pages), mirroring
+    // eid-extraction.ts. Previously PDFs fell through mislabeled as
+    // image/jpeg and the API 400'd on every PDF Pakistan ID.
+    const isPdf = imageBase64.startsWith('data:application/pdf');
+
     let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg';
-    if (imageBase64.startsWith('data:')) {
+    if (imageBase64.startsWith('data:') && !isPdf) {
       const match = imageBase64.match(/^data:(image\/\w+);/);
       if (match) mediaType = match[1] as typeof mediaType;
-      imageBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
     }
+    const base64Data = imageBase64.replace(/^data:[^;]+;base64,/, '');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fileContent: any = isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } };
 
     const prompt = side === 'back'
       ? `${PAKISTAN_ID_EXTRACTION_PROMPT}\n\nNote: This is the BACK of the Pakistani National ID card. Extract whatever information is visible, including the address and any MRZ data.`
@@ -129,17 +140,7 @@ export async function extractPakistanId(
         messages: [
           {
             role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: mediaType,
-                  data: imageBase64,
-                },
-              },
-              { type: 'text', text: prompt },
-            ],
+            content: [fileContent, { type: 'text', text: prompt }],
           },
         ],
       }),

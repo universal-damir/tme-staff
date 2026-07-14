@@ -75,18 +75,27 @@ async function shrinkImageToBudget(file: File): Promise<File> {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return file;
-    const maxDim = 2400;
-    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-    canvas.width = Math.round(img.width * scale);
-    canvas.height = Math.round(img.height * scale);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.85, 0.75, 0.6]) {
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, 'image/jpeg', quality)
-      );
-      if (blob && blob.size <= UPLOAD_BYTE_BUDGET) {
-        const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
-        return new File([blob], name, { type: 'image/jpeg' });
+    // Quality alone doesn't always get a huge scan under budget — if the
+    // 2400px attempts all exceed it, retry at smaller max dimensions before
+    // giving up (returning the original would fail the upload at the edge).
+    const attempts: Array<{ maxDim: number; qualities: number[] }> = [
+      { maxDim: 2400, qualities: [0.85, 0.75, 0.6] },
+      { maxDim: 1800, qualities: [0.6] },
+      { maxDim: 1400, qualities: [0.6] },
+    ];
+    for (const { maxDim, qualities } of attempts) {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      for (const quality of qualities) {
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, 'image/jpeg', quality)
+        );
+        if (blob && blob.size <= UPLOAD_BYTE_BUDGET) {
+          const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+          return new File([blob], name, { type: 'image/jpeg' });
+        }
       }
     }
     return file;
@@ -98,7 +107,7 @@ async function shrinkImageToBudget(file: File): Promise<File> {
 
 export async function uploadDocument(
   submissionId: string,
-  type: 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional' | 'job_offer_letter' | 'visa_document' | 'previous_visa_document' | 'eid_front' | 'eid_back' | 'pakistan_id_front' | 'pakistan_id_back' | 'sponsor_passport' | 'sponsor_visa' | 'sponsor_eid_front' | 'sponsor_eid_back',
+  type: 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional' | 'job_offer_letter' | 'visa_document' | 'previous_visa_document' | 'eid_front' | 'eid_back' | 'pakistan_id_front' | 'pakistan_id_back' | 'sponsor_passport' | 'sponsor_visa' | 'sponsor_eid_front' | 'sponsor_eid_back' | 'visa' | 'employment_contract' | 'work_permit' | 'health_insurance' | 'iloe_insurance' | 'driving_license',
   file: File
 ): Promise<{ path: string; filename: string } | null> {
   const fd = new FormData();

@@ -331,6 +331,13 @@ export interface StaffDocumentReferences {
     path: string;
     filename: string;
   };
+  // Document re-request flow: uploads for requestable portal document_type
+  // keys that have no dedicated slot above (visa, employment_contract,
+  // work_permit, insurances, driving license, sponsor docs, ...). Keyed by
+  // the portal document_type. Generic uploads are never AI-checked, so they
+  // always carry needsReview: true — the portal flags them for human review
+  // on sync. Mirrors the portal's StaffDocumentReferences in supabase-client.ts.
+  extra_documents?: Record<string, { path: string; filename: string; needsReview?: boolean }>;
 }
 
 // ===================================================================

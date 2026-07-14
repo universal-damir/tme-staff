@@ -1373,11 +1373,17 @@ export function EmployeeForm({
             (result?.error as string) ||
             (result?.errorMessage as string) ||
             'Unable to validate page. Please try again.',
+          infra: result?.infra === true,
         };
       }
-      return { valid: result.matches as boolean, error: result.errorMessage as string | undefined };
+      return {
+        valid: result.matches as boolean,
+        error: result.errorMessage as string | undefined,
+        infra: result?.infra === true,
+      };
     } catch {
-      return { valid: false, error: 'Unable to validate page. Please try again.' };
+      // Network failure: the check could not run — infra, never a strike.
+      return { valid: false, error: 'Unable to validate page. Please try again.', infra: true };
     }
   };
 
@@ -1470,6 +1476,12 @@ export function EmployeeForm({
     try {
       const validation = await validatePassportPageType(preview, 'COVER');
       if (!validation.valid) {
+        // infra=true means the check could not RUN (API/model error) — never
+        // a rejection; don't burn a strike, just ask the user to retry.
+        if (validation.infra) {
+          setCoverUI({ preview, validating: false, error: "We could not check this file right now — please try again in a moment.", file });
+          return false;
+        }
         setCoverRejectionCount((c) => c + 1);
         setCoverUI({ preview, validating: false, error: validation.error || 'This does not look like a passport cover spread. Please upload a clearer photo.', file });
         // Clear any previously-validated cover page so a stale green "Valid"
@@ -1538,6 +1550,12 @@ export function EmployeeForm({
     try {
       const validation = await validatePassportPageType(preview, 'INSIDE_PAGES');
       if (!validation.valid) {
+        // infra=true means the check could not RUN (API/model error) — never
+        // a rejection; don't burn a strike, just ask the user to retry.
+        if (validation.infra) {
+          setInsideUI({ preview, validating: false, error: "We could not check this file right now — please try again in a moment.", file });
+          return false;
+        }
         setInsideRejectionCount((c) => c + 1);
         setInsideUI({ preview, validating: false, error: validation.error || 'This does not look like a passport inside-pages spread. Please upload a clearer photo.', file });
         // Clear any previously-validated inside page (and its extracted-data
@@ -1784,6 +1802,12 @@ export function EmployeeForm({
     try {
       const validation = await validatePassportPageType(preview, 'ADDITIONAL_PAGE');
       if (!validation.valid) {
+        // infra=true means the check could not RUN (API/model error) — never
+        // a rejection; don't burn a strike, just ask the user to retry.
+        if (validation.infra) {
+          setAdditionalPageUI({ preview, validating: false, error: "We could not check this file right now — please try again in a moment.", file });
+          return false;
+        }
         setAdditionalRejectionCount((c) => c + 1);
         setAdditionalPageUI({ preview, validating: false, error: validation.error || 'This does not look like an Indian passport additional page.', file });
         return false;
@@ -1948,38 +1972,34 @@ export function EmployeeForm({
         });
         if (response.ok) {
           const extractResult = await response.json();
-          if (extractResult.success && extractResult.data) {
-            if (!extractResult.data.emirates_id_number) {
-              setEidFrontUI({ preview, validating: false, error: 'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID.', file });
-              // Clear any previously-validated doc so a stale green "Valid"
-              // badge can't sit next to this red error border (mirrors sponsor handlers).
+          // infra=true means the check could not RUN (API/model error) —
+          // never a rejection. Fall through to the upload without extracted
+          // data (mirrors the sponsor/EID-back handlers).
+          if (extractResult.infra !== true) {
+            if (extractResult.success && extractResult.data) {
+              if (!extractResult.data.emirates_id_number) {
+                setEidFrontUI({ preview, validating: false, error: 'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID.', file });
+                // Clear any previously-validated doc so a stale green "Valid"
+                // badge can't sit next to this red error border (mirrors sponsor handlers).
+                setEidFrontDoc(undefined);
+                eidFrontDocRef.current = undefined;
+                await saveDocRefs(buildDocRefs());
+                return false;
+              }
+              extractedData = extractResult.data;
+            } else {
+              setEidFrontUI({ preview, validating: false, error: 'Could not read this document. Please upload a clear photo of the front of your Emirates ID card.', file });
               setEidFrontDoc(undefined);
               eidFrontDocRef.current = undefined;
               await saveDocRefs(buildDocRefs());
               return false;
             }
-            extractedData = extractResult.data;
-          } else {
-            setEidFrontUI({ preview, validating: false, error: 'Could not read this document. Please upload a clear photo of the front of your Emirates ID card.', file });
-            setEidFrontDoc(undefined);
-            eidFrontDocRef.current = undefined;
-            await saveDocRefs(buildDocRefs());
-            return false;
           }
-        } else {
-          setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
-          setEidFrontDoc(undefined);
-          eidFrontDocRef.current = undefined;
-          await saveDocRefs(buildDocRefs());
-          return false;
         }
       } catch (err) {
+        // Validation-infra error: log + continue — must not hard-block a
+        // genuine upload (mirrors the sponsor EID handlers).
         console.error('EID front validation error:', err);
-        setEidFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
-        setEidFrontDoc(undefined);
-        eidFrontDocRef.current = undefined;
-        await saveDocRefs(buildDocRefs());
-        return false;
       }
     }
 
@@ -2103,7 +2123,9 @@ export function EmployeeForm({
       });
       if (response.ok) {
         const validationResult = await response.json();
-        if (!validationResult.matches) {
+        // infra=true means the check could not RUN (API/model error) — never
+        // a rejection. Fall through to the upload like the catch path below.
+        if (!validationResult.matches && validationResult.infra !== true) {
           setSponsorPassportRejectionCount((c) => c + 1);
           setSponsorPassportUI({
             preview,

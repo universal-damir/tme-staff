@@ -252,4 +252,59 @@ describe('missingRequestedDocuments', () => {
       })
     ).toEqual(['not_a_real_type']);
   });
+
+  it('accepts a generic requested type via extra_documents (path is enough)', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['visa', 'driving_license', 'sponsor_eid_front'],
+        documents: {
+          extra_documents: {
+            visa: { path: 'p/visa/a.pdf', filename: 'visa.pdf', needsReview: true },
+            driving_license: { path: 'p/driving_license/b.jpg', filename: 'dl.jpg', needsReview: true },
+            sponsor_eid_front: { path: 'p/sponsor_eid_front/c.jpg', filename: 'eid.jpg', needsReview: true },
+          },
+        },
+      })
+    ).toEqual([]);
+  });
+
+  it('flags a generic requested type with no extra_documents entry', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['employment_contract', 'health_insurance'],
+        documents: {
+          extra_documents: {
+            employment_contract: { path: 'p/employment_contract/a.pdf', filename: 'c.pdf', needsReview: true },
+          },
+        },
+      })
+    ).toEqual(['health_insurance']);
+  });
+
+  it('generic types are satisfied ONLY by extra_documents — a flat ref does not count', () => {
+    // sponsor_passport / education_additional exist as flat refs written by
+    // the main onboarding flow; a re-request wants a FRESH upload.
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['sponsor_passport', 'education_additional'],
+        documents: {
+          sponsor_passport: { path: 's/p.pdf', filename: 'p.pdf', validated: true },
+          education_additional: { path: 'e/a.pdf', filename: 'a.pdf' },
+        },
+      })
+    ).toEqual(['sponsor_passport', 'education_additional']);
+  });
+
+  it('unknown keys still fail closed alongside generic keys', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['visa', 'not_a_real_type'],
+        documents: {
+          extra_documents: {
+            visa: { path: 'p/visa/a.pdf', filename: 'visa.pdf', needsReview: true },
+          },
+        },
+      })
+    ).toEqual(['not_a_real_type']);
+  });
 });

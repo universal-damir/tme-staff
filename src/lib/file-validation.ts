@@ -77,6 +77,14 @@ const ALLOWED_TYPES = new Set([
   'job_offer_letter',
   'visa_document',
   'previous_visa_document',
+  // Generic document-request types (re-request flow; no dedicated slot).
+  // Portal document_type keys — storage path is `<rowId>/<type>/<uuid>`.
+  'visa',
+  'employment_contract',
+  'work_permit',
+  'health_insurance',
+  'iloe_insurance',
+  'driving_license',
   'sponsor_passport',
   'sponsor_visa',
   'sponsor_eid_front',

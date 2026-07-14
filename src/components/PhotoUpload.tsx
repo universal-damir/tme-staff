@@ -180,6 +180,15 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
       return;
     }
 
+    // infra=true means the check could not RUN (API/model error) — never a
+    // rejection. Take the same soft path as a failed fetch (aiRejected=false)
+    // so it doesn't count toward the manual-review strike counter.
+    if (validation.infra) {
+      setValidationErrors(['We could not check the photo right now — please try again in a moment.']);
+      onValidated?.(false, ['Validation service unavailable'], false);
+      return;
+    }
+
     if (validation.valid) {
       setValidationErrors([]);
       onValidated?.(true, [], false);

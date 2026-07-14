@@ -165,6 +165,10 @@ export function missingRequiredDocuments(row: {
  *    rule.
  *  - `degree_attested` / `transcript_of_records` — `path` only (these have
  *    no AI validation anywhere in the app).
+ *  - Generic requestable types (GENERIC_REQUESTED_KEYS below) — satisfied by
+ *    a `documents.extra_documents[<key>].path`. These slots have no AI
+ *    validation; the form stamps `needsReview: true` on every entry so the
+ *    portal flags them for human review on sync.
  *
  * Unknown requested keys are reported missing (fail-closed): the portal only
  * writes allow-listed keys, and a typo must block submission rather than
@@ -174,6 +178,30 @@ export function missingRequiredDocuments(row: {
  * for everyone) applies ONLY to `/api/submit-employee` — document requests
  * must satisfy exactly what was requested, nothing more.
  */
+/**
+ * Requestable portal `document_type` keys with NO dedicated AI-validated slot.
+ * Uploads land in `documents.extra_documents[<key>]` (always with
+ * `needsReview: true`); presence of a `path` satisfies the gate. Must stay in
+ * sync with GENERIC_REQUESTABLE_LABELS in DocumentRequestForm.tsx and the
+ * portal's request-documents allow-list.
+ */
+export const GENERIC_REQUESTED_KEYS: ReadonlySet<string> = new Set([
+  'visa',
+  'employment_contract',
+  'work_permit',
+  'health_insurance',
+  'iloe_insurance',
+  'driving_license',
+  'job_offer_letter',
+  'pakistan_id_front',
+  'pakistan_id_back',
+  'education_additional',
+  'sponsor_passport',
+  'sponsor_visa',
+  'sponsor_eid_front',
+  'sponsor_eid_back',
+]);
+
 export function missingRequestedDocuments(row: {
   requested_documents?: string[] | null;
   documents?: StaffDocumentReferences | null;
@@ -188,6 +216,13 @@ export function missingRequestedDocuments(row: {
 
   const missing: string[] = [];
   for (const key of requested) {
+    if (GENERIC_REQUESTED_KEYS.has(key)) {
+      // Generic slots: no AI validation exists, so a stored upload is enough.
+      // Only extra_documents counts — a flat ref written by the main
+      // onboarding flow does not satisfy a re-request for a fresh copy.
+      if (!docs.extra_documents?.[key]?.path) missing.push(key);
+      continue;
+    }
     switch (key) {
       case 'photo':
         if (!accepted(docs.photo)) missing.push(key);

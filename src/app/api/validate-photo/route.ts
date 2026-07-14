@@ -59,6 +59,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<PhotoVali
           errors: ['Photo validation service unavailable'],
           suggestions: ['Please try again later'],
           confidence: 0,
+          infra: true,
         },
         { status: 503 }
       );
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<PhotoVali
         errors: ['An error occurred during validation'],
         suggestions: ['Please try again'],
         confidence: 0,
+        infra: true,
       },
       { status: 500 }
     );

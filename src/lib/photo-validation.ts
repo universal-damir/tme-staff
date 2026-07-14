@@ -12,6 +12,8 @@ export interface PhotoValidationResult {
   errors: string[];
   suggestions: string[];
   confidence: number;
+  /** true when the check could not run (API/model error) — not a rejection. */
+  infra?: boolean;
 }
 
 /**
@@ -39,13 +41,13 @@ PRE-CHECK: the image must be a photograph of a single human face in passport-sty
 
 If the pre-check passes, check these UAE passport-photo rules. ALL must hold:
 1. Background: plain and light (white, off-white, light grey). Patterned, dark, or busy backgrounds fail.
-2. Framing: head-and-shoulders composition — the whole head including all hair inside the frame with visible background above it, shoulders/upper chest at the bottom, face roughly centered. CHECK THE TOP EDGE EXPLICITLY: trace along the very top border of the image — if hair occupies the topmost pixels anywhere (no background between the hair's highest point and the border), the head is cut off and this rule FAILS. It also fails when the face+head fill nearly the whole frame (grossly over-cropped). Generous margins are fine — do NOT fail a photo for having extra background space.
+2. Framing: head-and-shoulders composition — shoulders/upper chest at the bottom, face roughly centered. It fails when the face+head fill nearly the whole frame (grossly over-cropped). Generous margins are fine — do NOT fail a photo for having extra background space. NOTE: head/hair cropping at the image edges is checked deterministically in pixels BEFORE this validation runs — do NOT reject or report a violation for hair/head proximity to or contact with the image edges.
 3. Eyes: both open, clearly visible, looking at the camera, not covered by hair.
 4. Glasses: none of any kind.
 5. Lighting/quality: even lighting, no harsh shadows, no flash reflection or red-eye, no heavy filters/beautification.
 6. Original digital photo: not a photograph of a printed photo or a screen (print edges, paper texture, moiré/pixel grid, glare bands, a frame within the frame).
 
-Evidence rule: fail a rule ONLY when you can point at the concrete visible violation in the image (e.g. "hair touches the top edge", "wearing black-rimmed glasses") — never from an estimate, a hunch, or a measurement you cannot actually see. Describe what you see first; verdict comes last and must match your description. If every rule visibly holds, valid=true — do not invent a violation to be safe.
+Evidence rule: fail a rule ONLY when you can point at the concrete visible violation in the image (e.g. "sunglasses on the face", "dark patterned background behind the subject") — never from an estimate, a hunch, or a measurement you cannot actually see. Describe what you see first; verdict comes last and must match your description. If every rule visibly holds, valid=true — do not invent a violation to be safe.
 
 Call the validate_photo tool with your assessment.`;
 
@@ -60,7 +62,7 @@ const PHOTO_VALIDATION_TOOL = {
     properties: {
       observation: {
         type: 'string',
-        description: 'What you see: subject, framing (where the hair sits relative to the top edge), background, eyes, glasses, lighting. 2-3 sentences.',
+        description: 'What you see: subject, framing, background, eyes, glasses, lighting. 2-3 sentences.',
       },
       errors: { type: 'array', items: { type: 'string' }, description: 'Rules that visibly failed, with the concrete violation. Empty if none.' },
       suggestions: { type: 'array', items: { type: 'string' }, description: 'How to fix each failed rule' },
@@ -151,12 +153,15 @@ export async function validatePhoto(imageBase64: string): Promise<PhotoValidatio
   } catch (error) {
     console.error('Photo validation error:', error);
 
-    // Return a safe error response
+    // API error / timeout / no tool_use response: the check could not RUN —
+    // this is NOT a rejection, so flag it as infra so callers don't count it
+    // toward the 2-strike manual-review counter.
     return {
       valid: false,
-      errors: ['Unable to validate photo. Please try again.'],
-      suggestions: ['Ensure the image is clear and try uploading again.'],
+      errors: ['The automatic check could not run. Please try again.'],
+      suggestions: ['Please try uploading again in a moment.'],
       confidence: 0,
+      infra: true,
     };
   }
 }
