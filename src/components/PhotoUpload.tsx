@@ -19,16 +19,26 @@ interface PhotoUploadProps {
    * `aiRejected` is true only when the AI validator actually judged the photo
    * invalid — service failures report validated=false with aiRejected=false so
    * they don't count toward the manual-review strike counter.
+   * `flags.samePhoto` is true when the vision comparison judged the upload to
+   * be the same capture as the photo on file — callers persist it so the
+   * portal can flag a manual-review submit of a suspected reused photo.
    */
-  onValidated?: (validated: boolean, errors?: string[], aiRejected?: boolean) => void;
+  onValidated?: (
+    validated: boolean,
+    errors?: string[],
+    aiRejected?: boolean,
+    flags?: { samePhoto?: boolean }
+  ) => void;
   onRemove?: () => void;
   error?: string;
   /**
-   * SHA-256 (hex) of the photo already on file for this staff member
-   * (renewals). The old photo itself is never shown; the hash lets us reject
-   * a re-upload of the identical file with a clear message.
+   * The photo already on file for this staff member (renewals / photo
+   * re-requests). `sha256` powers the instant byte-identical rejection;
+   * `publicUrl` (when the portal supplied a storage path) shows the client
+   * which photo NOT to re-submit and enables the server-side vision
+   * comparison against re-exports/screenshots/scans of the same photo.
    */
-  existingPhotoSha256?: string;
+  existingPhoto?: { publicUrl?: string; filename?: string; sha256?: string };
 }
 
 async function sha256Hex(file: File): Promise<string | null> {
@@ -45,7 +55,7 @@ async function sha256Hex(file: File): Promise<string | null> {
   }
 }
 
-export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error, existingPhotoSha256 }: PhotoUploadProps) {
+export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error, existingPhoto }: PhotoUploadProps) {
   const aiToken = useSearchParams().get('token');
   const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -84,12 +94,13 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
       return;
     }
 
-    // Renewal photo-reuse guard: reject the exact file we already have on
-    // record — a renewal requires a recent photo, not the one from the
-    // previous application.
-    if (existingPhotoSha256) {
+    // Renewal photo-reuse guard, fast path: reject the exact file we already
+    // have on record — a renewal requires a recent photo, not the one from
+    // the previous application. Re-exports/screenshots of the same photo have
+    // a different hash; those are caught by the vision comparison below.
+    if (existingPhoto?.sha256) {
       const hash = await sha256Hex(file);
-      if (hash && hash === existingPhotoSha256.toLowerCase()) {
+      if (hash && hash === existingPhoto.sha256.toLowerCase()) {
         setUploadError(
           'This is the same photo we already have on file from your previous application. Please upload a recent photo (taken within the last 6 months).'
         );
@@ -146,9 +157,13 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
       }
     })();
 
+    // Compress once, share between validation and the same-photo comparison.
+    const compressedPromise = compressImageForAI(previewDataUrl).catch(() => null);
+
     const validatePromise = (async () => {
       try {
-        const compressedImage = await compressImageForAI(previewDataUrl);
+        const compressedImage = await compressedPromise;
+        if (!compressedImage) return null;
         const response = await fetch('/api/validate-photo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -161,9 +176,32 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
       }
     })();
 
-    const [uploadResult, validation] = await Promise.all([
+    // Renewal photo-reuse guard, vision path: the server compares the upload
+    // against the photo on file (fetched server-side from storage) and judges
+    // whether it's the same capture — catches re-exports, screenshots, crops,
+    // and scans that defeat the SHA-256 fast path. Skipped when there's no
+    // photo on file; failures degrade to "no verdict" (never a strike).
+    const comparePromise = (async () => {
+      if (!existingPhoto) return null;
+      try {
+        const compressedImage = await compressedPromise;
+        if (!compressedImage) return null;
+        const response = await fetch('/api/compare-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: compressedImage, submissionId, token: aiToken }),
+        });
+        return await response.json();
+      } catch (err) {
+        console.error('Photo compare API error:', err);
+        return null;
+      }
+    })();
+
+    const [uploadResult, validation, comparison] = await Promise.all([
       uploadPromise,
       validatePromise,
+      comparePromise,
     ]);
 
     setIsUploading(false);
@@ -171,6 +209,31 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
 
     if (!uploadResult) {
       setUploadError('Failed to upload file');
+      return;
+    }
+
+    // Same-photo verdict wins over everything else: even a technically
+    // compliant photo is useless if it's the one the authority already has.
+    // A compare infra/skip result (or failed fetch) is NOT a verdict — fall
+    // through to normal validation; the SHA-256 fast path and the portal's
+    // sync-time backstop still stand.
+    const samePhoto = !!comparison?.samePhoto && !comparison?.infra;
+    if (samePhoto) {
+      const messages = [
+        'This appears to be the same photo we already have on file from your previous application. UAE authorities require a newly taken photo (within the last 6 months) — please upload a new one.',
+      ];
+      // If the fresh upload ALSO failed quality validation, surface those
+      // errors too so the client fixes everything in one go.
+      if (validation && !validation.infra && validation.valid === false) {
+        messages.push(
+          ...(validation.errors as string[]).map((err: string, i: number) => {
+            const suggestion = validation.suggestions?.[i];
+            return suggestion ? `${err} - ${suggestion}` : err;
+          })
+        );
+      }
+      setValidationErrors(messages);
+      onValidated?.(false, messages, true, { samePhoto: true });
       return;
     }
 
@@ -191,7 +254,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
 
     if (validation.valid) {
       setValidationErrors([]);
-      onValidated?.(true, [], false);
+      onValidated?.(true, [], false, { samePhoto: false });
     } else {
       const errorMessages = (validation.errors as string[]).map(
         (err: string, i: number) => {
@@ -200,7 +263,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
         }
       );
       setValidationErrors(errorMessages);
-      onValidated?.(false, errorMessages, true);
+      onValidated?.(false, errorMessages, true, { samePhoto: false });
     }
   };
 
@@ -213,6 +276,26 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     }
     onRemove?.();
   };
+
+  // "Your current photo on file" panel (renewals / photo re-requests). The
+  // portal supplies a signed URL, re-signed on every form load. A PDF on file
+  // can't render in <img>, so flatten page 1 to a thumbnail.
+  const existingUrl = existingPhoto?.publicUrl || null;
+  const existingIsPdf = !!existingPhoto?.filename && existingPhoto.filename.toLowerCase().endsWith('.pdf');
+  const [existingThumb, setExistingThumb] = useState<string | null>(null);
+  const [existingLightboxOpen, setExistingLightboxOpen] = useState(false);
+  useEffect(() => {
+    if (!existingIsPdf || !existingUrl) {
+      setExistingThumb(null);
+      return;
+    }
+    let cancelled = false;
+    renderPdfFirstPage(existingUrl)
+      .then((t) => { if (!cancelled) setExistingThumb(t); })
+      .catch(() => { if (!cancelled) setExistingThumb(null); });
+    return () => { cancelled = true; };
+  }, [existingIsPdf, existingUrl]);
+  const existingImageSrc = existingIsPdf ? existingThumb : existingUrl;
 
   const isValidated = value?.validated ?? false;
   // Build the image source: prefer local preview, fall back to Supabase storage
@@ -252,6 +335,35 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
         ID Photo
         <span className="text-red-500 ml-1">*</span>
       </label>
+
+      {existingImageSrc && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-4">
+            <button
+              type="button"
+              onClick={() => setExistingLightboxOpen(true)}
+              className="relative w-20 h-24 rounded-md overflow-hidden bg-white border border-amber-200 flex-shrink-0 cursor-zoom-in"
+              aria-label="View current photo on file"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={existingImageSrc}
+                alt="Current photo on file"
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            </button>
+            <div className="text-sm">
+              <p className="font-medium mb-1" style={{ color: TME_COLORS.primary }}>
+                This is your current photo on file
+              </p>
+              <p className="text-gray-700">
+                UAE authorities require a <strong>newly taken</strong> photo (within the
+                last 6 months). Do not upload this photo again — it will be rejected.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!preview && !value ? (
         // Upload area
@@ -437,6 +549,15 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
           alt="ID photo"
           open={lightboxOpen}
           onClose={() => setLightboxOpen(false)}
+        />
+      )}
+
+      {existingImageSrc && (
+        <ImageLightbox
+          src={existingImageSrc}
+          alt="Current photo on file"
+          open={existingLightboxOpen}
+          onClose={() => setExistingLightboxOpen(false)}
         />
       )}
     </div>

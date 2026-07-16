@@ -295,11 +295,18 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     return null;
   };
 
+  // Whether the vision comparison judged the CURRENT photo upload to be the
+  // same capture as the photo on file. Consumed by the manual-review submit
+  // to stamp samePhotoSuspected (portal folds it into needs_review labels).
+  const photoSamePhotoRef = useRef(false);
+
   const handlePhotoValidated = async (
     validated: boolean,
     validationErrors?: string[],
-    aiRejected?: boolean
+    aiRejected?: boolean,
+    flags?: { samePhoto?: boolean }
   ) => {
+    photoSamePhotoRef.current = flags?.samePhoto === true;
     const current = docsRef.current.photo;
     if (current) {
       await setFlatDoc('photo', {
@@ -307,6 +314,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
         validated,
         validation_errors: validationErrors,
         needsReview: undefined,
+        samePhotoSuspected: undefined,
       });
     }
     if (validated) {
@@ -322,7 +330,14 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     const current = docsRef.current.photo;
     if (!current) return;
     setReviewSubmitting((prev) => ({ ...prev, photo: true }));
-    await setFlatDoc('photo', { ...current, validated: true, needsReview: true });
+    await setFlatDoc('photo', {
+      ...current,
+      validated: true,
+      needsReview: true,
+      // Carry the same-photo verdict of THIS upload so the portal can label
+      // the review as a suspected reuse of the photo on file.
+      samePhotoSuspected: photoSamePhotoRef.current || undefined,
+    });
     resetRejection('photo');
     setReviewSubmitting((prev) => ({ ...prev, photo: false }));
   };
@@ -740,7 +755,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
           <PhotoUpload
             submissionId={submission.id}
             value={photoDoc}
-            existingPhotoSha256={submission.existing_documents?.photo?.sha256}
+            existingPhoto={submission.existing_documents?.photo}
             onUpload={handlePhotoUpload}
             onValidated={handlePhotoValidated}
             onRemove={handlePhotoRemove}

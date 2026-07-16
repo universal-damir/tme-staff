@@ -21,7 +21,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { verifyOnboardingAccess } from './onboarding-token';
+import { verifyOnboardingAccess, type OnboardingRow } from './onboarding-token';
 import { countPdfPagesServer } from './pdf-page-count-server';
 
 export const MAX_AI_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -66,6 +66,12 @@ export interface AiGuardSuccess {
   ok: true;
   body: Record<string, unknown>;
   submissionId: string;
+  /**
+   * The submission row verifyOnboardingAccess already fetched — exposed so
+   * routes that need row data (e.g. compare-photo reads
+   * existing_documents.photo.path) don't re-query Supabase.
+   */
+  row: OnboardingRow;
 }
 
 export interface AiGuardFailure {
@@ -150,5 +156,5 @@ export async function guardAiRoute(req: NextRequest): Promise<AiGuardResult> {
     return { ok: false, status: 404, error: 'Submission not found' };
   }
 
-  return { ok: true, body, submissionId };
+  return { ok: true, body, submissionId, row: access.row! };
 }

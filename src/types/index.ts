@@ -214,6 +214,11 @@ export interface StaffDocumentReferences {
     // stamped true to unblock the form; a TME team member verifies the
     // photo on the portal side (needs_review column).
     needsReview?: boolean;
+    // Set when the manual-review submit happened after the vision comparison
+    // judged THIS upload to be the same capture as the photo on file
+    // (renewals / photo re-requests). The portal folds it into needs_review
+    // with a "same photo already on record" review label.
+    samePhotoSuspected?: boolean;
   };
   // Legacy single passport field (for backwards compatibility)
   passport?: {
@@ -399,9 +404,11 @@ export interface StaffOnboardingSubmission {
 
   // Existing documents from portal (for renewals — passport confirmation).
   // Most entries carry a signed URL so the form can display them read-only.
-  // The `photo` entry is metadata-ONLY (sha256 + filename, no path/publicUrl):
-  // the old photo must never be shown to the client, but its hash lets the
-  // upload slot reject a re-upload of the very same file.
+  // The `photo` entry carries sha256 (instant byte-identical rejection) and —
+  // since the same-photo comparison feature — also path/publicUrl so the
+  // upload slot can SHOW the client which photo not to re-submit and the
+  // compare-photo route can fetch it server-side for the vision check.
+  // Legacy rows have sha256+filename only; everything degrades gracefully.
   existing_documents?: Record<
     string,
     { path?: string; publicUrl?: string; filename?: string; sha256?: string }

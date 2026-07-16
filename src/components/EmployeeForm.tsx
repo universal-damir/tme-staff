@@ -647,6 +647,10 @@ export function EmployeeForm({
 
   // Refs to track latest values (avoids stale closure issues in callbacks)
   const photoDocRef = React.useRef(photoDoc);
+  // Whether the vision comparison judged the CURRENT photo upload to be the
+  // same capture as the photo on file (renewals). Consumed by the
+  // manual-review submit to stamp samePhotoSuspected on the stored doc ref.
+  const photoSamePhotoRef = React.useRef(false);
   const passportPagesRef = React.useRef(passportPages);
   // Persisted "passport unchanged" attestation (renewal skip). Lives in a ref
   // (not just component state) because buildDocRefs merges from the INITIAL
@@ -1344,7 +1348,14 @@ export function EmployeeForm({
     const current = photoDocRef.current;
     if (!current) return;
     setPhotoManualReviewSubmitting(true);
-    const updatedDoc = { ...current, validated: true, needsReview: true };
+    const updatedDoc = {
+      ...current,
+      validated: true,
+      needsReview: true,
+      // Carry the same-photo verdict of THIS upload (not earlier strikes on
+      // other files) so the portal can label the review accordingly.
+      samePhotoSuspected: photoSamePhotoRef.current || undefined,
+    };
     setPhotoDoc(updatedDoc);
     photoDocRef.current = updatedDoc;
     setPhotoError(null);
@@ -2669,12 +2680,16 @@ export function EmployeeForm({
           <PhotoUpload
             submissionId={submission.id}
             value={photoDoc}
-            existingPhotoSha256={existingDocs?.photo?.sha256}
+            existingPhoto={existingDocs?.photo}
             onUpload={handlePhotoUpload}
-            onValidated={async (validated, validationErrors, aiRejected) => {
+            onValidated={async (validated, validationErrors, aiRejected, flags) => {
+              // Remember whether the CURRENT upload was judged a reuse of the
+              // photo on file — a later manual-review submit stamps it so the
+              // portal flags the suspected reuse for human verification.
+              photoSamePhotoRef.current = flags?.samePhoto === true;
               const currentPhotoDoc = photoDocRef.current;
               if (currentPhotoDoc) {
-                const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors, needsReview: undefined };
+                const updatedDoc = { ...currentPhotoDoc, validated, validation_errors: validationErrors, needsReview: undefined, samePhotoSuspected: undefined };
                 setPhotoDoc(updatedDoc);
                 photoDocRef.current = updatedDoc;
                 await saveDocRefs(buildDocRefs({ photo: updatedDoc }));
