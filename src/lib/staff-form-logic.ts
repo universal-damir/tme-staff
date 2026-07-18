@@ -28,6 +28,32 @@ export function isPakistaniNationality(nationality: string | null | undefined): 
 }
 
 /**
+ * Passport "additional page" requirement by nationality.
+ *
+ * Indian passports carry a last/address page (parents' names, spouse,
+ * address, file number) that TME needs for visa processing. Syrian passports
+ * carry an issue-details page (date/place of issue, expiry, national number)
+ * opposite the data page. Both must be uploaded during onboarding; the
+ * variant also drives page-specific copy, sample image, and AI validation.
+ * (Jordanian passports are expected to join this list once TME has collected
+ * reference samples — validated internally for now.)
+ *
+ * Accepts demonym or country name, case-insensitive. Returns null when no
+ * additional page is required.
+ */
+export type PassportAdditionalPageVariant = 'india' | 'syria';
+
+export function passportAdditionalPageVariant(
+  nationality: string | null | undefined
+): PassportAdditionalPageVariant | null {
+  if (!nationality) return null;
+  const n = nationality.trim().toLowerCase();
+  if (n === 'indian' || n === 'india' || n === 'republic of india') return 'india';
+  if (n === 'syrian' || n === 'syria' || n === 'syrian arab republic') return 'syria';
+  return null;
+}
+
+/**
  * Detect whether the registered authority (from the portal's prefill data) is
  * DMCC. The portal may pass either short-form "DMCC" or the full name
  * "DMCC Free Zone Authority", so we match on substring, case-insensitive.

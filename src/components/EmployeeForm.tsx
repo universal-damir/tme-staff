@@ -37,6 +37,7 @@ import type { EmployeeFormData, EmployeeFormProps, PassportPageReference, VisaCa
 import {
   mergeStaffDocRefs,
   isPakistaniNationality as checkPakistaniNationality,
+  passportAdditionalPageVariant as getPassportAdditionalPageVariant,
   isDetAuthority,
   visaDocumentRequirement,
   requiresArrivalDate,
@@ -992,9 +993,36 @@ export function EmployeeForm({
   const isCoverUploaded = !!(passportPages.cover?.validated);
   const isInsidePagesUploaded = !!(passportPages.insidePages?.validated);
   const isAdditionalPageUploaded = !!(passportPages.additionalPage?.validated);
-  const isIndianNationality = nationality === 'Indian' || nationality === 'India';
+  // 'india' | 'syria' | null — which additional-page flavour this passport
+  // needs (copy, sample image, AI prompt, and extraction all key off it).
+  const additionalPageVariant = getPassportAdditionalPageVariant(nationality);
   const isPakistaniNationality = checkPakistaniNationality(nationality);
-  const requiresAdditionalPage = isIndianNationality && isInsidePagesUploaded && passportDataReady;
+  const requiresAdditionalPage = !!additionalPageVariant && isInsidePagesUploaded && passportDataReady;
+  // Variant-specific copy for the additional-page section. India: last page
+  // with family details + address (auto-extracted into the form). Syria: the
+  // issue-details page next to the photo page (date/place of issue, national
+  // number) — no extraction, parents' names are on the Syrian data page.
+  const additionalPageCopy = additionalPageVariant === 'syria'
+    ? {
+        title: 'Syrian Passport — Additional Page',
+        heading: 'Upload the additional page of your Syrian passport',
+        sub: 'This is the page next to your photo page showing the date and place of issue, expiry date, and national number. The issue and expiry dates will be automatically extracted.',
+        sampleSrc: '/samples/passport-additional-syria-example.png',
+        sampleAlt: 'Example Syrian passport additional page',
+        slotDescription: 'Page with date/place of issue and national number',
+        successNote: 'Additional page uploaded. Passport issue and expiry dates will be pre-filled.',
+        manualNoun: 'Syrian passport additional page (issue details / national number)',
+      }
+    : {
+        title: 'Indian Passport — Additional Page',
+        heading: 'Upload the last page of your Indian passport',
+        sub: 'This page contains your parents’ names, spouse name, and address. These details will be automatically extracted.',
+        sampleSrc: '/samples/passport-additional-example.png',
+        sampleAlt: 'Example Indian passport additional page',
+        slotDescription: 'Last page with parents’ names and address',
+        successNote: 'Additional page uploaded. Family details and address will be pre-filled.',
+        manualNoun: 'Indian passport additional page (address / family details)',
+      };
   const isPersonalComplete = !!(firstName && lastName && nationality);
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
   // UAE mobile is mandatory when the applicant is in the UAE (always true for
@@ -1372,7 +1400,10 @@ export function EmployeeForm({
       const response = await fetch('/api/validate-passport-page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, expectedType, submissionId: submission.id, token: aiToken }),
+        // nationality selects the additional-page prompt variant (Indian
+        // family-details page vs Syrian issue-details page); ignored for
+        // cover/inside checks.
+        body: JSON.stringify({ image: compressedImage, expectedType, nationality, submissionId: submission.id, token: aiToken }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -1764,7 +1795,9 @@ export function EmployeeForm({
       const response = await fetch('/api/extract-passport-additional', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: payload, submissionId: submission.id, token: aiToken }),
+        // nationality picks the extraction variant (Indian family-details
+        // page vs Syrian issue-details page).
+        body: JSON.stringify({ image: payload, nationality, submissionId: submission.id, token: aiToken }),
       });
       if (!response.ok) return null;
       const result = await response.json();
@@ -1777,7 +1810,13 @@ export function EmployeeForm({
 
   // Apply extracted additional-page fields to the form. Used by both the
   // regular upload path and the manual-review path so behaviour is identical.
+  // Indian pages fill family details + address; Syrian issue-details pages
+  // fill the passport issue/expiry dates (which the Syrian DATA page lacks —
+  // without this the date fields above the additional-page section stay
+  // empty and the employee has to type them by hand).
   const applyAdditionalPageData = (d: Record<string, unknown>) => {
+    if (d.passport_issue_date) setValue('passport_issue_date', d.passport_issue_date as string);
+    if (d.passport_expiry_date) setValue('passport_expiry', d.passport_expiry_date as string);
     if (d.father_name) setValue('father_full_name', d.father_name as string);
     if (d.mother_name) setValue('mother_full_name', d.mother_name as string);
     if (d.spouse_name) {
@@ -1791,7 +1830,7 @@ export function EmployeeForm({
     setTimeout(() => autoSave(getValues()), 100);
   };
 
-  // Indian passport additional page handlers
+  // Passport additional page handlers (Indian / Syrian)
   const handleAdditionalPageUpload = async (file: File): Promise<boolean> => {
     const pageErr = await singlePagePdfError(file, 'passport additional page');
     if (pageErr) {
@@ -1820,7 +1859,7 @@ export function EmployeeForm({
           return false;
         }
         setAdditionalRejectionCount((c) => c + 1);
-        setAdditionalPageUI({ preview, validating: false, error: validation.error || 'This does not look like an Indian passport additional page.', file });
+        setAdditionalPageUI({ preview, validating: false, error: validation.error || 'This does not look like your passport’s additional page.', file });
         return false;
       }
     } catch {
@@ -3255,10 +3294,10 @@ export function EmployeeForm({
             </div>
           </FormSection>
           )}
-          {/* Indian Passport Additional Page */}
+          {/* Passport Additional Page (Indian / Syrian) */}
           {requiresAdditionalPage && (
             <FormSection
-              title="Indian Passport — Additional Page"
+              title={additionalPageCopy.title}
               icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
             >
               <div className="space-y-4">
@@ -3268,17 +3307,17 @@ export function EmployeeForm({
                 >
                   <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
                   <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                    <p className="font-medium">Upload the last page of your Indian passport</p>
+                    <p className="font-medium">{additionalPageCopy.heading}</p>
                     <p className="mt-1 text-xs text-gray-600">
-                      This page contains your parents&apos; names, spouse name, and address. These details will be automatically extracted.
+                      {additionalPageCopy.sub}
                     </p>
-                    <SampleImageToggle imageSrc="/samples/passport-additional-example.png" altText="Example Indian passport additional page" label="See example photo" />
+                    <SampleImageToggle imageSrc={additionalPageCopy.sampleSrc} altText={additionalPageCopy.sampleAlt} label="See example photo" />
                   </div>
                 </div>
 
                 <UploadSlot
                   label=""
-                  description="Last page with parents' names and address"
+                  description={additionalPageCopy.slotDescription}
                   expectedType="INSIDE_PAGES"
                   accept="application/pdf,image/jpeg,image/png"
                   file={additionalPageUI.file}
@@ -3295,7 +3334,7 @@ export function EmployeeForm({
                 {isAdditionalPageUploaded && !passportPages.additionalPage?.needsReview && (
                   <div className="flex items-center gap-2 text-green-600 text-sm">
                     <CheckCircle className="w-4 h-4" />
-                    Additional page uploaded. Family details and address will be pre-filled.
+                    {additionalPageCopy.successNote}
                   </div>
                 )}
 
@@ -3306,7 +3345,7 @@ export function EmployeeForm({
                 {shouldOfferManualReview(additionalRejectionCount) && additionalPageUI.file && !passportPages.additionalPage?.validated && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
                     <p className="text-sm" style={{ color: TME_COLORS.primary }}>
-                      <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your Indian passport additional page, you can submit it for manual review.
+                      <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your passport&apos;s additional page, you can submit it for manual review.
                     </p>
                     <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
                       <input
@@ -3315,7 +3354,7 @@ export function EmployeeForm({
                         checked={additionalManualReviewConfirmed}
                         onChange={(e) => setAdditionalManualReviewConfirmed(e.target.checked)}
                       />
-                      <span>I confirm this is my Indian passport additional page (address / family details). I understand a TME team member will verify it manually.</span>
+                      <span>I confirm this is my {additionalPageCopy.manualNoun}. I understand a TME team member will verify it manually.</span>
                     </label>
                     <div className="flex justify-end">
                       <button

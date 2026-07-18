@@ -15,6 +15,7 @@ import {
   mergeStaffDocRefs,
   shouldOfferManualReview,
   buildManualReviewPageRef,
+  passportAdditionalPageVariant,
 } from '@/lib/staff-form-logic';
 import {
   uploadDocument,
@@ -227,6 +228,24 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       (GENERIC_KEYS as readonly string[]).includes(k)
   );
 
+  // The passport_additional slot copy/sample/prompt depends on the holder's
+  // nationality (Indian address page vs Syrian issue-details page). The
+  // static PASSPORT_SLOTS entry carries the Indian defaults; override here.
+  const nationality = submission.employee_data?.nationality;
+  const additionalVariant = passportAdditionalPageVariant(nationality);
+  const passportSlotConfig = (key: PassportRequestKey) => {
+    const cfg = PASSPORT_SLOTS[key];
+    if (key !== 'passport_additional' || additionalVariant !== 'syria') return cfg;
+    return {
+      ...cfg,
+      description: 'Page with date/place of issue and national number',
+      confirmCopy:
+        'I confirm this is my Syrian passport additional page (issue details / national number). I understand a TME team member will verify it manually.',
+      sampleSrc: '/samples/passport-additional-syria-example.png',
+      sampleAlt: 'Example Syrian passport additional page',
+    };
+  };
+
   // Full document-references object, seeded from the row so persisting never
   // clobbers keys other flows wrote (mergeStaffDocRefs is belt-and-braces on
   // top of that). Ref mirror so sequential async handlers see fresh state.
@@ -366,6 +385,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
         body: JSON.stringify({
           image: compressedImage,
           expectedType,
+          // Selects the additional-page prompt variant server-side; ignored
+          // for cover/inside checks.
+          nationality,
           submissionId: submission.id,
           token: aiToken,
         }),
@@ -395,7 +417,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   };
 
   const handlePassportUpload = (key: PassportRequestKey) => async (file: File): Promise<boolean> => {
-    const cfg = PASSPORT_SLOTS[key];
+    const cfg = passportSlotConfig(key);
     const pageErr = await singlePagePdfError(file, cfg.pageNoun);
     if (pageErr) {
       setSlot(key, (prev) => ({ ...prev, validating: false, error: pageErr }));
@@ -455,7 +477,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   };
 
   const handlePassportManualReview = (key: PassportRequestKey) => async () => {
-    const cfg = PASSPORT_SLOTS[key];
+    const cfg = passportSlotConfig(key);
     const ui = slotUI[key];
     if (!ui?.file || !ui.preview) return;
     // Keep validating:false — the manual-review path bypasses AI, so the
@@ -773,7 +795,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
 
     if ((PASSPORT_KEYS as readonly string[]).includes(key)) {
       const pKey = key as PassportRequestKey;
-      const cfg = PASSPORT_SLOTS[pKey];
+      const cfg = passportSlotConfig(pKey);
       const pageRef = (docs.passportPages ?? {})[cfg.pageKey] as PassportPageReference | undefined;
       const ui = slotUI[pKey] ?? EMPTY_UI;
       return (

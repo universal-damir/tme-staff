@@ -177,6 +177,15 @@ const NATIONALITY_ALIAS_TO_CANONICAL: Record<string, string> = {
   'french republic': 'France',
   'italian republic': 'Italy',
   'kingdom of saudi arabia': 'Saudi Arabia',
+  'syrian arab republic': 'Syria',
+  'the syrian arab republic': 'Syria',
+  'arab republic of syria': 'Syria',
+  'hashemite kingdom of jordan': 'Jordan',
+  'the hashemite kingdom of jordan': 'Jordan',
+  'arab republic of egypt': 'Egypt',
+  'republic of iraq': 'Iraq',
+  'lebanese republic': 'Lebanon',
+  'republic of lebanon': 'Lebanon',
 };
 
 /**

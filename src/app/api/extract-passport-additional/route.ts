@@ -1,13 +1,14 @@
 /**
- * Indian Passport Additional Page Extraction API Route
+ * Passport Additional Page Extraction API Route (Indian / Syrian)
  *
  * POST /api/extract-passport-additional
- * Body: { image: string, submissionId: string, token: string }
+ * Body: { image: string, nationality?: string, submissionId: string, token: string }
  * Returns: AdditionalPageExtractionResult
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { extractAdditionalPage, type AdditionalPageExtractionResult } from '@/lib/passport-additional-extraction';
+import { passportAdditionalPageVariant } from '@/lib/staff-form-logic';
 import { guardAiRoute } from '@/lib/ai-route-guard';
 
 export async function POST(request: NextRequest): Promise<NextResponse<AdditionalPageExtractionResult>> {
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<Additiona
   }
 
   try {
-    const { image } = guard.body as { image?: unknown };
+    const { image, nationality } = guard.body as { image?: unknown; nationality?: unknown };
 
     if (!image || typeof image !== 'string') {
       return NextResponse.json(
@@ -37,7 +38,12 @@ export async function POST(request: NextRequest): Promise<NextResponse<Additiona
       );
     }
 
-    const result = await extractAdditionalPage(image);
+    // Nationality picks the page-layout variant; unknown/absent falls back
+    // to the Indian prompt (the pre-variant default).
+    const variant =
+      passportAdditionalPageVariant(typeof nationality === 'string' ? nationality : undefined) ??
+      'india';
+    const result = await extractAdditionalPage(image, variant);
     return NextResponse.json(result);
   } catch (error) {
     console.error('Additional page extraction API error:', error);

@@ -59,7 +59,7 @@ NAMES — read from MRZ (line 1). Output the plain ASCII form exactly as the MRZ
 - family_name: surname from MRZ line 1, Title Case. Do NOT derive this by splitting the given names string.
 
 OTHER FIELDS — read from the visible labeled zone (more complete than MRZ):
-- passport_no: exactly as printed in the visual zone, preserving any letter prefix (e.g. \`AB5981404\`, \`X12345678\`)
+- passport_no: the DOCUMENT number, preserving any letter prefix (e.g. \`AB5981404\`, \`X12345678\`). CROSS-CHECK against MRZ line 2: its first 9 characters (before the check digit) encode the passport number — the visual-zone value you pick must match it. Some passports print OTHER numbers near the data fields that are NOT the passport number (e.g. a Syrian \`Issue no.\` like \`104-23-L002882\`, national/file numbers); when the labeled field you found disagrees with the MRZ document number, use the MRZ one.
 - passport_issue_date: DD.MM.YYYY with dots (visual zone — has full year)
 - passport_expiry_date: DD.MM.YYYY with dots (visual zone — has full year)
 - date_of_birth: DD.MM.YYYY with dots (visual zone — has full year)

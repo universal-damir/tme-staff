@@ -19,7 +19,7 @@
 
 import { NextRequest } from 'next/server';
 import type { StaffDocumentReferences } from '@/types';
-import { sponsorshipTypeFromSponsor, sponsorDocsRequired } from '@/lib/staff-form-logic';
+import { sponsorshipTypeFromSponsor, sponsorDocsRequired, passportAdditionalPageVariant } from '@/lib/staff-form-logic';
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
 const IPV6 = /^([0-9a-fA-F:]+)$/;
@@ -98,6 +98,10 @@ export function assertSubmittable(row: { status: string | null } | null): Submit
  *    the explicit attestation, but the skip is accepted whenever both pages
  *    exist on file so in-flight sessions from before this deploy don't
  *    strand; a skip with only ONE page on file is never legitimate.
+ *  - Passport additional page for Indian/Syrian passports, but ONLY when a
+ *    fresh data page was uploaded this session (mirrors the client gate,
+ *    which reveals the additional-page step off the uploaded data page).
+ *    The renewal "passport unchanged" skip therefore skips this too.
  *  - Family sponsorship: all four sponsor documents + the sponsor NOC
  *    signature (either already on the row or arriving with this request).
  */
@@ -108,7 +112,7 @@ export function missingRequiredDocuments(row: {
   documents?: StaffDocumentReferences | null;
   existing_documents?: Record<string, { path?: string }> | null;
   sponsor_noc_signature_data?: string | null;
-}, incomingSponsorNoc?: unknown): string[] {
+}, incomingSponsorNoc?: unknown, nationality?: string | null): string[] {
   const missing: string[] = [];
   const docs = row.documents ?? {};
 
@@ -128,6 +132,18 @@ export function missingRequiredDocuments(row: {
   if (!pagesUploaded && !renewalSkipAllowed) {
     if (!pages.cover?.path) missing.push('Passport cover page');
     if (!pages.insidePages?.path) missing.push('Passport data page');
+  }
+
+  // Additional page (Indian address page / Syrian issue-details page).
+  // Keyed off a freshly uploaded data page — exactly the client condition
+  // (requiresAdditionalPage) — so the renewal "passport unchanged" skip,
+  // where no pages are uploaded, skips this too.
+  if (
+    passportAdditionalPageVariant(nationality) &&
+    pages.insidePages?.path &&
+    !pages.additionalPage?.path
+  ) {
+    missing.push('Passport additional page');
   }
 
   const effectiveSponsor = row.employer_data?.sponsor as string | undefined;

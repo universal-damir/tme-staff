@@ -69,12 +69,37 @@ const ADDITIONAL_PAGE_PROMPT = `${AUTH_CONTEXT}Check this image: it must be a sc
 Wrong page: the cover (emblem + "REPUBLIC OF INDIA / PASSPORT"), the data page (holder photo + MRZ), or not a passport at all. When genuinely unsure whether it is the additional page, prefer valid=true — a TME reviewer checks it later.
 ${QUALITY_RULES}${OUTPUT_RULES}`;
 
+// Syrian passport "issue details page" — the page opposite/next to the data
+// page listing Date of issue, Place of issue, Expiry date, National number,
+// Occupation, and the holder's Signature (English/French labels + Arabic).
+// Often carries a barcode strip at the top and sometimes a "Renewal /
+// Renouvellement" panel below. Same permissive stance as the Indian prompt —
+// reject only obvious mismatches.
+const SYRIA_ADDITIONAL_PAGE_PROMPT = `${AUTH_CONTEXT}Check this image: it must be a scan of a Syrian passport's ADDITIONAL / issue-details page — the page listing "Date of issue", "Place of issue", "Expiry date", "National number", "Occupation" and a signature field (labels printed in English/French plus Arabic). It often has a barcode strip at the top and may include a "Renewal / Renouvellement" panel or watermark artwork on the lower half. A two-page spread that includes this page on either half counts; faded or photocopy-quality is fine.
+
+Wrong page: the cover (emblem + "SYRIAN ARAB REPUBLIC / PASSPORT"), the data page (holder photo + MRZ), a visa/stamps-only page, or not a passport at all. When genuinely unsure whether it is the issue-details page, prefer valid=true — a TME reviewer checks it later.
+${QUALITY_RULES}${OUTPUT_RULES}`;
+
+/**
+ * Nationality → additional-page prompt. Defaults to the Indian prompt when
+ * nationality is absent (pre-existing callers) — the Indian wording predates
+ * the variant system and remains the fallback.
+ */
+function additionalPagePrompt(nationality?: string): string {
+  const n = (nationality || '').trim().toLowerCase();
+  if (n === 'syrian' || n === 'syria' || n === 'syrian arab republic') {
+    return SYRIA_ADDITIONAL_PAGE_PROMPT;
+  }
+  return ADDITIONAL_PAGE_PROMPT;
+}
+
 /**
  * Validate passport page using tool_use (prevents model refusals)
  */
 export async function validatePassportPage(
   imageBase64: string,
-  expectedType?: PassportPageType
+  expectedType?: PassportPageType,
+  nationality?: string
 ): Promise<PassportPageValidationResult> {
   const client = getAnthropicClient();
 
@@ -98,7 +123,7 @@ export async function validatePassportPage(
     expectedType === 'INSIDE_PAGES'
       ? INSIDE_PROMPT
       : expectedType === 'ADDITIONAL_PAGE'
-        ? ADDITIONAL_PAGE_PROMPT
+        ? additionalPagePrompt(nationality)
         : COVER_PROMPT;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

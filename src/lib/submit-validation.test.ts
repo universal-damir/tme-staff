@@ -88,6 +88,63 @@ describe('missingRequiredDocuments', () => {
     expect(missing).toContain('Passport cover page');
   });
 
+  it('requires the additional page for Indian and Syrian passports when pages are freshly uploaded', () => {
+    for (const nationality of ['Indian', 'India', 'Syrian', 'Syria', 'SYRIAN ARAB REPUBLIC']) {
+      const missing = missingRequiredDocuments(
+        { documents: { photo: validPhoto, passportPages } },
+        undefined,
+        nationality
+      );
+      expect(missing).toEqual(['Passport additional page']);
+    }
+  });
+
+  it('accepts an uploaded additional page for Indian/Syrian passports', () => {
+    const withAdditional = {
+      ...passportPages,
+      additionalPage: { path: 'p/additional.pdf', filename: 'additional.pdf', validated: true },
+    };
+    expect(
+      missingRequiredDocuments(
+        { documents: { photo: validPhoto, passportPages: withAdditional } },
+        undefined,
+        'Syrian'
+      )
+    ).toEqual([]);
+  });
+
+  it('does not require the additional page for other nationalities', () => {
+    expect(
+      missingRequiredDocuments({ documents: { photo: validPhoto, passportPages } }, undefined, 'German')
+    ).toEqual([]);
+  });
+
+  it('renewal "passport unchanged" skip also skips the additional page (no fresh data page)', () => {
+    const renewalUnchanged = {
+      onboarding_type: 'renewal',
+      documents: { photo: validPhoto, passport_unchanged: true },
+      existing_documents: {
+        passport_cover: { path: 'e/cover.pdf' },
+        passport_inside: { path: 'e/inside.pdf' },
+      },
+    };
+    expect(missingRequiredDocuments(renewalUnchanged, undefined, 'Syrian')).toEqual([]);
+  });
+
+  it('renewal with freshly re-uploaded pages requires the additional page again', () => {
+    const renewalReuploaded = {
+      onboarding_type: 'renewal',
+      documents: { photo: validPhoto, passportPages },
+      existing_documents: {
+        passport_cover: { path: 'e/cover.pdf' },
+        passport_inside: { path: 'e/inside.pdf' },
+      },
+    };
+    expect(missingRequiredDocuments(renewalReuploaded, undefined, 'Indian')).toEqual([
+      'Passport additional page',
+    ]);
+  });
+
   it('requires sponsor docs + NOC for family sponsorship (employer_data.sponsor wins)', () => {
     const missing = missingRequiredDocuments({
       employer_data: { sponsor: 'Spouse' },

@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     // The extra columns feed the required-documents gate below.
     const { data: existing, error: lookupError } = await supabase
       .from('staff_onboarding_submissions')
-      .select('status, onboarding_type, sponsorship_type, employer_data, documents, existing_documents, sponsor_noc_signature_data')
+      .select('status, onboarding_type, sponsorship_type, employer_data, employee_data, documents, existing_documents, sponsor_noc_signature_data')
       .eq('id', id)
       .maybeSingle();
 
@@ -58,11 +58,27 @@ export async function POST(req: NextRequest) {
     // browser JavaScript — the server is the authority. Without this, a
     // submission with a missing passport cover or an unvalidated photo would
     // reach status='complete' and fire the confirmation emails (seen live).
+    // Nationality drives the additional-page requirement (Indian/Syrian
+    // passports). Prefer the submitted form data; fall back to the saved row
+    // so a hand-crafted POST can't dodge the gate by omitting the field.
+    const submittedNationality =
+      employeeData && typeof employeeData === 'object'
+        ? (employeeData as Record<string, unknown>).nationality
+        : undefined;
+    const savedNationality = (existing!.employee_data as Record<string, unknown> | null)?.nationality;
+    const nationality =
+      typeof submittedNationality === 'string' && submittedNationality
+        ? submittedNationality
+        : typeof savedNationality === 'string'
+          ? savedNationality
+          : undefined;
+
     const missingDocs = missingRequiredDocuments(
       existing!,
       employeeData && typeof employeeData === 'object'
         ? (employeeData as Record<string, unknown>).sponsor_noc_signature
         : undefined,
+      nationality,
     );
     if (missingDocs.length > 0) {
       console.warn(`[submit-employee] Blocked incomplete submission ${id}: missing ${missingDocs.join(', ')}`);
