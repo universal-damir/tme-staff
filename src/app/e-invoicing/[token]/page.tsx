@@ -466,7 +466,7 @@ export default function EInvoicingIntakePage() {
             <strong style={{ color: TME_COLORS.primary }}>
               AED {data.price_aed.toLocaleString('en-US')}
             </strong>{' '}
-            (plus 5% VAT). On submission you will be invoiced for this amount.
+            (plus 5% VAT). The fee will be invoiced together with your pre-assessment report.
           </span>
         </label>
       )}
