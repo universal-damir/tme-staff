@@ -18,6 +18,12 @@ import {
   passportAdditionalPageVariant,
 } from '@/lib/staff-form-logic';
 import {
+  CUSTOM_REQUESTED_KEY_PREFIX,
+  VISA_STATUS_REQUESTED_KEY_PREFIX,
+  isCustomRequestedKey,
+  isVisaStatusRequestedKey,
+} from '@/lib/submit-validation';
+import {
   uploadDocument,
   uploadPassportPage,
   updateDocumentReferences,
@@ -69,6 +75,7 @@ type ValidatedRequestKey = (typeof VALIDATED_KEYS)[number];
 // in submit-validation.ts and the portal's request-documents allow-list.
 const GENERIC_REQUESTABLE_LABELS = {
   visa: 'Visa',
+  visa_document: 'Visa Status Document',
   employment_contract: 'Employment Contract',
   work_permit: 'Employment ID',
   health_insurance: 'Insurance — Health',
@@ -88,7 +95,38 @@ const GENERIC_KEYS = Object.keys(GENERIC_REQUESTABLE_LABELS) as readonly Generic
 
 const GENERIC_SLOT_HINT = 'Upload a clear scan or photo (PDF or image).';
 
-type RequestedKey = ValidatedRequestKey | GenericRequestKey;
+// Custom-named requests travel as `custom:<display name>` keys. They render
+// the same generic FileUploadSlot, upload under the fixed 'custom' storage
+// segment, and store into `documents.extra_documents[<full key>]`.
+type CustomRequestKey = `${typeof CUSTOM_REQUESTED_KEY_PREFIX}${string}`;
+const customKeyLabel = (key: string): string =>
+  key.slice(CUSTOM_REQUESTED_KEY_PREFIX.length).trim();
+
+// Subcategorized visa-status requests (`visa_document:<slug>`) — a generic
+// slot whose label names the exact status paper (upload goes under the
+// 'visa_document' storage segment). Slugs mirror the portal's
+// VISA_STATUS_SUBCATEGORIES; unknown slugs fall back to the generic label.
+type VisaStatusRequestKey = `${typeof VISA_STATUS_REQUESTED_KEY_PREFIX}${string}`;
+const VISA_STATUS_SLUG_LABELS: Record<string, string> = {
+  visa_on_arrival: 'On arrival visa',
+  tourist_visa: 'Tourist visa',
+  employment_visa: 'Employment visa',
+  immigration_cancellation: 'Immigration cancellation',
+  golden_visa: 'Golden visa',
+  dependent_visa: 'Dependent visa',
+  other: 'Other',
+};
+const visaStatusKeyLabel = (key: string): string => {
+  const slug = key.slice(VISA_STATUS_REQUESTED_KEY_PREFIX.length).trim();
+  const subLabel = VISA_STATUS_SLUG_LABELS[slug];
+  return subLabel ? `Visa Status Document — ${subLabel}` : 'Visa Status Document';
+};
+
+type RequestedKey =
+  | ValidatedRequestKey
+  | GenericRequestKey
+  | CustomRequestKey
+  | VisaStatusRequestKey;
 
 const PASSPORT_SLOTS: Record<
   PassportRequestKey,
@@ -185,7 +223,7 @@ const PLAIN_SLOTS: Record<PlainRequestKey, { label: string; description: string 
 };
 
 // Human-readable names for the intro list.
-const KEY_DISPLAY_NAMES: Record<RequestedKey, string> = {
+const KEY_DISPLAY_NAMES: Record<ValidatedRequestKey | GenericRequestKey, string> = {
   photo: 'ID Photo',
   passport_cover: 'Passport Cover (OUTSIDE)',
   passport_inside: 'Passport Data Page (INSIDE)',
@@ -195,6 +233,12 @@ const KEY_DISPLAY_NAMES: Record<RequestedKey, string> = {
   degree_attested: 'Attested Degree Certificate',
   transcript_of_records: 'Transcript of Records',
   ...GENERIC_REQUESTABLE_LABELS,
+};
+
+const keyDisplayName = (key: RequestedKey): string => {
+  if (isCustomRequestedKey(key)) return customKeyLabel(key);
+  if (isVisaStatusRequestedKey(key)) return visaStatusKeyLabel(key);
+  return KEY_DISPLAY_NAMES[key as ValidatedRequestKey | GenericRequestKey];
 };
 
 interface SlotUI {
@@ -225,7 +269,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   const requested = (submission.requested_documents ?? []).filter(
     (k): k is RequestedKey =>
       (VALIDATED_KEYS as readonly string[]).includes(k) ||
-      (GENERIC_KEYS as readonly string[]).includes(k)
+      (GENERIC_KEYS as readonly string[]).includes(k) ||
+      isCustomRequestedKey(k) ||
+      isVisaStatusRequestedKey(k)
   );
 
   // The passport_additional slot copy/sample/prompt depends on the holder's
@@ -630,7 +676,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   // ------------------------------------------------------------------
 
   const setExtraDoc = (
-    key: GenericRequestKey,
+    key: GenericRequestKey | CustomRequestKey | VisaStatusRequestKey,
     ref: { path: string; filename: string; needsReview: true } | undefined
   ) => {
     const extras = { ...(docsRef.current.extra_documents ?? {}) };
@@ -639,17 +685,27 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     return persistDocs({ ...docsRef.current, extra_documents: extras });
   };
 
-  const handleGenericUpload = (key: GenericRequestKey) => async (file: File) => {
-    const result = await uploadDocument(submission.id, key, file);
-    if (result) {
-      await setExtraDoc(key, { path: result.path, filename: result.filename, needsReview: true });
-    }
-    return result;
-  };
+  const handleGenericUpload =
+    (key: GenericRequestKey | CustomRequestKey | VisaStatusRequestKey) => async (file: File) => {
+      // Custom keys carry a free-text name and visa-status keys a slug —
+      // storage paths must stay opaque, so those files upload under their
+      // fixed base segment; the full key lives only in extra_documents.
+      const storageType = isCustomRequestedKey(key)
+        ? 'custom'
+        : isVisaStatusRequestedKey(key)
+          ? 'visa_document'
+          : (key as GenericRequestKey);
+      const result = await uploadDocument(submission.id, storageType, file);
+      if (result) {
+        await setExtraDoc(key, { path: result.path, filename: result.filename, needsReview: true });
+      }
+      return result;
+    };
 
-  const handleGenericRemove = (key: GenericRequestKey) => async () => {
-    await setExtraDoc(key, undefined);
-  };
+  const handleGenericRemove =
+    (key: GenericRequestKey | CustomRequestKey | VisaStatusRequestKey) => async () => {
+      await setExtraDoc(key, undefined);
+    };
 
   // ------------------------------------------------------------------
   // Submit — every requested slot must be present AND validated-or-
@@ -662,7 +718,11 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   ): boolean => !!doc?.path && (doc.validated === true || doc.needsReview === true);
 
   const isSatisfied = (key: RequestedKey): boolean => {
-    if ((GENERIC_KEYS as readonly string[]).includes(key)) {
+    if (
+      (GENERIC_KEYS as readonly string[]).includes(key) ||
+      isCustomRequestedKey(key) ||
+      isVisaStatusRequestedKey(key)
+    ) {
       // Generic slots have no AI validation — a stored upload is enough
       // (the entry always carries needsReview: true). Mirrors the server
       // gate in missingRequestedDocuments.
@@ -848,12 +908,16 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       );
     }
 
-    if ((GENERIC_KEYS as readonly string[]).includes(key)) {
-      const gKey = key as GenericRequestKey;
+    if (
+      (GENERIC_KEYS as readonly string[]).includes(key) ||
+      isCustomRequestedKey(key) ||
+      isVisaStatusRequestedKey(key)
+    ) {
+      const gKey = key as GenericRequestKey | CustomRequestKey | VisaStatusRequestKey;
       const extraRef = docs.extra_documents?.[gKey];
       return (
         <FileUploadSlot
-          label={GENERIC_REQUESTABLE_LABELS[gKey]}
+          label={keyDisplayName(gKey)}
           description={GENERIC_SLOT_HINT}
           onUpload={handleGenericUpload(gKey)}
           onRemove={handleGenericRemove(gKey)}
@@ -902,7 +966,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
               <span
                 className={`w-2 h-2 rounded-full flex-shrink-0 ${isSatisfied(key) ? 'bg-green-500' : 'bg-gray-300'}`}
               />
-              {KEY_DISPLAY_NAMES[key]}
+              {keyDisplayName(key)}
             </li>
           ))}
         </ul>
@@ -914,7 +978,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
           <div className="flex items-center gap-3 mb-4">
             {sectionIcon(key)}
             <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
-              {KEY_DISPLAY_NAMES[key]}
+              {keyDisplayName(key)}
             </h2>
           </div>
           {renderSlot(key)}

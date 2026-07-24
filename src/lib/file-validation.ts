@@ -89,6 +89,10 @@ const ALLOWED_TYPES = new Set([
   'sponsor_visa',
   'sponsor_eid_front',
   'sponsor_eid_back',
+  // Custom-named document requests upload under this fixed segment — the
+  // free-text name lives only in the extra_documents key (`custom:<name>`),
+  // never in the storage path.
+  'custom',
 ]);
 
 export function isAllowedType(t: string): boolean {

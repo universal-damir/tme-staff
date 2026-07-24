@@ -203,6 +203,7 @@ export function missingRequiredDocuments(row: {
  */
 export const GENERIC_REQUESTED_KEYS: ReadonlySet<string> = new Set([
   'visa',
+  'visa_document',
   'employment_contract',
   'work_permit',
   'health_insurance',
@@ -218,6 +219,37 @@ export const GENERIC_REQUESTED_KEYS: ReadonlySet<string> = new Set([
   'sponsor_eid_back',
 ]);
 
+/**
+ * Custom-named document requests travel as `custom:<display name>` keys.
+ * They behave exactly like generic requestable types: a plain upload slot,
+ * satisfied by `documents.extra_documents[<full key>].path`. The name after
+ * the prefix must be non-empty — a bare `custom:` key stays fail-closed.
+ */
+export const CUSTOM_REQUESTED_KEY_PREFIX = 'custom:';
+
+export function isCustomRequestedKey(key: string): boolean {
+  return (
+    key.startsWith(CUSTOM_REQUESTED_KEY_PREFIX) &&
+    key.slice(CUSTOM_REQUESTED_KEY_PREFIX.length).trim().length > 0
+  );
+}
+
+/**
+ * Subcategorized visa-status requests (`visa_document:<slug>`) — same generic
+ * upload behavior as the plain `visa_document` key; the slug only refines the
+ * slot label (and the portal's sync target). The portal validates slugs; here
+ * any non-empty suffix renders/satisfies so a slug added portal-side later
+ * doesn't strand the client.
+ */
+export const VISA_STATUS_REQUESTED_KEY_PREFIX = 'visa_document:';
+
+export function isVisaStatusRequestedKey(key: string): boolean {
+  return (
+    key.startsWith(VISA_STATUS_REQUESTED_KEY_PREFIX) &&
+    key.slice(VISA_STATUS_REQUESTED_KEY_PREFIX.length).trim().length > 0
+  );
+}
+
 export function missingRequestedDocuments(row: {
   requested_documents?: string[] | null;
   documents?: StaffDocumentReferences | null;
@@ -232,7 +264,7 @@ export function missingRequestedDocuments(row: {
 
   const missing: string[] = [];
   for (const key of requested) {
-    if (GENERIC_REQUESTED_KEYS.has(key)) {
+    if (GENERIC_REQUESTED_KEYS.has(key) || isCustomRequestedKey(key) || isVisaStatusRequestedKey(key)) {
       // Generic slots: no AI validation exists, so a stored upload is enough.
       // Only extra_documents counts — a flat ref written by the main
       // onboarding flow does not satisfy a re-request for a fresh copy.
