@@ -186,6 +186,13 @@ export interface EmployeeFormData {
 
   // Other
   other_information?: string;
+
+  // Submission telemetry — stamped at final submit, not user-entered.
+  // Device is the client's touch+viewport heuristic (same signal that gates
+  // the mobile upload policy); the user agent is set server-side from the
+  // request header in /api/submit-employee.
+  submission_device?: 'phone' | 'desktop';
+  submission_user_agent?: string;
 }
 
 // ===================================================================

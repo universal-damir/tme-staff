@@ -125,6 +125,18 @@ export function FileUploadSlot({
         <p className="text-xs text-red-500 mt-2">{error}</p>
       )}
 
+      {/* Upfront accepted-files notice, worded per device — without it,
+          users only discover the policy after their file is rejected (or
+          never, when the picker greys images out) and assume the system is
+          broken. */}
+      {!uploaded && !error && (
+        <p className="text-xs text-amber-700 mt-2">
+          {isMobile
+            ? 'Only PDF scans of official documents are accepted on this device. Camera photos are not — please use a scanner app, or upload from a computer.'
+            : 'Only scans of official documents are accepted (PDF, JPEG, or PNG).'}
+        </p>
+      )}
+
       <input
         ref={inputRef}
         type="file"

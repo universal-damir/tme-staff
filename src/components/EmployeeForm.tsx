@@ -1329,6 +1329,11 @@ export function EmployeeForm({
       ? submission.employer_signature_data
       : signature!;
 
+    // Stamp the device the form was submitted from — the same touch+viewport
+    // heuristic that gates the mobile upload policy, so we can later tell
+    // whether an employee saw the phone or desktop behavior.
+    data.submission_device = isMobile ? 'phone' : 'desktop';
+
     await onSubmit(data, signatureToUse);
   };
 

@@ -111,6 +111,18 @@ export async function POST(req: NextRequest) {
 
     // P2-13: strip control chars / angle brackets / cap string lengths.
     const cleanEmployeeData = sanitizeFreeText(employeeData) as Record<string, unknown>;
+
+    // Submission telemetry: user agent is server-derived (never from body);
+    // submission_device (phone/desktop) is the client's touch heuristic —
+    // keep it only if it's one of the two expected values.
+    cleanEmployeeData.submission_user_agent =
+      (req.headers.get('user-agent') ?? '').slice(0, 255) || undefined;
+    if (
+      cleanEmployeeData.submission_device !== 'phone' &&
+      cleanEmployeeData.submission_device !== 'desktop'
+    ) {
+      delete cleanEmployeeData.submission_device;
+    }
     const cleanEmployerData = isSamePerson && employerData
       ? sanitizeFreeText(employerData) as Record<string, unknown>
       : null;
