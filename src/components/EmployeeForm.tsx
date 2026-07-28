@@ -1025,13 +1025,14 @@ export function EmployeeForm({
       };
   const isPersonalComplete = !!(firstName && lastName && nationality);
   const isFamilyComplete = !!(fatherFullName && motherFullName && religion && maritalStatus);
-  // UAE mobile is mandatory when the applicant is in the UAE (always true for
-  // renewals; user-toggled for new-hires). When outside the UAE we don't ask
-  // for it, since they may not yet have a UAE number. Inside the UAE but
-  // without a number yet, the employee can tick `mobile_uae_unavailable`.
+  // UAE mobile requires an EXPLICIT answer from everyone, inside or outside
+  // the UAE: either a number, or the `mobile_uae_unavailable` tick ("I don't
+  // have an active UAE mobile number yet"). A blank field must never be
+  // ambiguous — the portal's ICP mobile tracker (company number used at EID
+  // typing) depends on knowing whether the applicant truly has no number.
   const isContactComplete = !!(
     homeStreetAddress && homeCity && homeCountry && personalEmail &&
-    (!isInUAE || mobileUae || mobileUaeUnavailable)
+    (mobileUae || mobileUaeUnavailable)
   );
   const educationalQualificationCustom = watch('educational_qualification_custom');
   // DET extended fields are only required when the DET block is actually
@@ -4075,10 +4076,9 @@ export function EmployeeForm({
                         setValue('uae_city', '');
                         setValue('uae_postal_code', '');
                         setValue('uae_emirate', '');
-                        // The "no UAE mobile yet" flag only exists inside the
-                        // UAE — clear it so an outside submission doesn't
-                        // carry a contradictory leftover.
-                        setValue('mobile_uae_unavailable', false);
+                        // The "no UAE mobile yet" flag is valid outside the
+                        // UAE too (the checkbox is always shown), so it is
+                        // deliberately NOT cleared here.
                       }
                     }}
                     className="w-4 h-4 rounded border-gray-300"
@@ -4146,24 +4146,26 @@ export function EmployeeForm({
               value={mobileUae}
               onChange={(value) => setValue('mobile_uae', value || '')}
               country="AE"
-              required={isInUAE && !mobileUaeUnavailable}
+              required={!mobileUaeUnavailable}
               disabled={mobileUaeUnavailable}
             />
-            {isInUAE && (
-              <label className="flex items-center gap-2 mt-3 text-sm text-gray-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={mobileUaeUnavailable}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setValue('mobile_uae_unavailable', checked, { shouldDirty: true });
-                    if (checked) setValue('mobile_uae', '', { shouldDirty: true });
-                  }}
-                  className="rounded"
-                />
-                I don&apos;t have an active UAE mobile number yet
-              </label>
-            )}
+            {/* Always shown (inside AND outside the UAE): everyone must either
+                enter a number or explicitly confirm they don't have one, so a
+                blank field can never be mistaken for "no number". The portal's
+                ICP mobile tracker relies on this being an explicit answer. */}
+            <label className="flex items-center gap-2 mt-3 text-sm text-gray-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={mobileUaeUnavailable}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setValue('mobile_uae_unavailable', checked, { shouldDirty: true });
+                  if (checked) setValue('mobile_uae', '', { shouldDirty: true });
+                }}
+                className="rounded"
+              />
+              I don&apos;t have an active UAE mobile number yet
+            </label>
           </FormSection>
 
           {/* Email */}
