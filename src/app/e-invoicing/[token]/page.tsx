@@ -340,7 +340,7 @@ export default function EInvoicingIntakePage() {
             <p className="text-gray-600 max-w-md">
               You confirmed that your company does not issue any invoices. Please note that every
               entity which holds a UAE license and conducts business must still appoint an
-              Accredited Service Provider (ASP), even if it only receives supplier invoices over
+              ASP (Accredited Service Provider), even if it only receives supplier invoices over
               the network. TME Services is developing UAE-compliant e-invoicing software and is in
               the process of becoming an ASP before the end of 2026. Currently there is nothing to
               be done from your side. We will get back to you as soon as we make progress on the
@@ -405,7 +405,7 @@ export default function EInvoicingIntakePage() {
               </p>
               <p className="text-sm text-gray-600 mt-1 leading-relaxed">
                 Under the UAE e-invoicing framework, every entity which holds a UAE license and
-                conducts business must appoint an Accredited Service Provider (ASP), even if it
+                conducts business must appoint an ASP (Accredited Service Provider), even if it
                 only receives supplier invoices over the network and never issues its own. The
                 deadline to appoint an ASP for businesses with revenue below AED 50 million is
                 31.03.2027, with go-live on 01.07.2027. If you use an accounting or bookkeeping
