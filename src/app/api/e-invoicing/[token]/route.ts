@@ -32,6 +32,7 @@ export async function GET(
     price_aed: row.price_aed,
     accounting_software: row.accounting_software,
     accounting_software_other: row.accounting_software_other,
+    no_invoices_issued: row.no_invoices_issued === true,
     files: (row.invoice_files ?? []).map((f) => ({
       filename: f.filename,
       channel: f.channel,

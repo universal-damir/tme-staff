@@ -29,6 +29,7 @@ export async function POST(
     accounting_software?: unknown;
     accounting_software_other?: unknown;
     price_agreed?: unknown;
+    no_invoices_issued?: unknown;
   };
   try {
     body = await req.json();
@@ -36,8 +37,16 @@ export async function POST(
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
 
+  const noInvoicesIssued = body.no_invoices_issued === true;
+
+  // Receive-only clients (no invoices issued) have no issuance setup to
+  // assess, so naming a system is optional for them; everyone else must pick
+  // one. A provided value is validated either way.
   const software = typeof body.accounting_software === 'string' ? body.accounting_software.trim() : '';
-  if (!software || !isAllowedAccountingSoftware(software)) {
+  if (!software && !noInvoicesIssued) {
+    return NextResponse.json({ error: 'invalid_accounting_software' }, { status: 400 });
+  }
+  if (software && !isAllowedAccountingSoftware(software)) {
     return NextResponse.json({ error: 'invalid_accounting_software' }, { status: 400 });
   }
   const otherRaw =
@@ -48,14 +57,18 @@ export async function POST(
     return NextResponse.json({ error: 'accounting_software_other_required' }, { status: 400 });
   }
 
-  // Require at least one uploaded invoice — that's the whole point of the intake.
-  if (!row.invoice_files || row.invoice_files.length === 0) {
+  // Require at least one uploaded invoice — unless the client declared they
+  // issue no invoices at all (receive-only). The ASP appointment is still
+  // mandatory for them, so the intake must still go through.
+  if (!noInvoicesIssued && (!row.invoice_files || row.invoice_files.length === 0)) {
     return NextResponse.json({ error: 'no_invoices_uploaded' }, { status: 400 });
   }
 
-  // If a pre-assessment fee was quoted, the client must tick "I agree" first.
-  const priceAgreed = body.price_agreed === true;
-  if (row.price_aed != null && !priceAgreed) {
+  // If a pre-assessment fee was quoted, the client must tick "I agree" first —
+  // except receive-only clients: no pre-assessment happens, so no fee applies
+  // and any stale agreement flag is discarded.
+  const priceAgreed = !noInvoicesIssued && body.price_agreed === true;
+  if (!noInvoicesIssued && row.price_aed != null && !priceAgreed) {
     return NextResponse.json({ error: 'price_not_agreed' }, { status: 400 });
   }
 
@@ -63,8 +76,9 @@ export async function POST(
   const { error } = await supabase
     .from('gap_intake_submissions')
     .update({
-      accounting_software: software,
+      accounting_software: software || null,
       accounting_software_other: software === 'Other' ? otherRaw : null,
+      no_invoices_issued: noInvoicesIssued,
       status: 'submitted',
       synced_to_tme: false,
       submitted_at: new Date().toISOString(),

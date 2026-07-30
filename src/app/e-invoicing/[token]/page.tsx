@@ -43,6 +43,7 @@ interface IntakeData {
   price_aed: number | null;
   accounting_software: string | null;
   accounting_software_other: string | null;
+  no_invoices_issued?: boolean;
   files: UploadedFile[];
   software_options: string[];
   software_guidance?: Record<string, SoftwareGuidance>;
@@ -130,6 +131,7 @@ export default function EInvoicingIntakePage() {
   const [software, setSoftware] = useState('');
   const [softwareOther, setSoftwareOther] = useState('');
   const [priceAgreed, setPriceAgreed] = useState(false);
+  const [noInvoices, setNoInvoices] = useState(false);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
@@ -151,6 +153,7 @@ export default function EInvoicingIntakePage() {
         setFiles(json.files ?? []);
         setSoftware(json.accounting_software ?? '');
         setSoftwareOther(json.accounting_software_other ?? '');
+        setNoInvoices(json.no_invoices_issued === true);
         if (json.status === 'submitted' || json.status === 'synced') {
           setState('already_submitted');
         } else {
@@ -228,12 +231,17 @@ export default function EInvoicingIntakePage() {
     [token]
   );
 
-  // When a fee was quoted, the client must tick "I agree to the price".
-  const priceRequired = data?.price_aed != null;
+  // When a fee was quoted, the client must tick "I agree to the price" —
+  // except receive-only clients: they get no pre-assessment, so no fee.
+  const priceRequired = data?.price_aed != null && !noInvoices;
   const canSubmit =
-    !!software &&
-    (software !== 'Other' || softwareOther.trim().length > 0) &&
-    files.length > 0 &&
+    // Receive-only clients don't need to name a system (there is no issuance
+    // setup to assess) — but a half-filled "Other" still needs its free text.
+    (noInvoices ? !software || software !== 'Other' || softwareOther.trim().length > 0
+                : !!software && (software !== 'Other' || softwareOther.trim().length > 0)) &&
+    // Receive-only clients (no invoices issued) may submit without uploads —
+    // they still need an ASP appointment, so the intake must go through.
+    (noInvoices || files.length > 0) &&
     (!priceRequired || priceAgreed) &&
     !uploading &&
     deletingIndex === null &&
@@ -251,6 +259,7 @@ export default function EInvoicingIntakePage() {
           accounting_software: software,
           accounting_software_other: software === 'Other' ? softwareOther.trim() : undefined,
           price_agreed: priceAgreed,
+          no_invoices_issued: noInvoices,
         }),
       });
       if (!res.ok) {
@@ -270,7 +279,7 @@ export default function EInvoicingIntakePage() {
       setError('Submission failed — please try again.');
       setSubmitting(false);
     }
-  }, [canSubmit, token, software, softwareOther, priceAgreed]);
+  }, [canSubmit, token, software, softwareOther, priceAgreed, noInvoices]);
 
   if (state === 'loading') {
     return (
@@ -317,6 +326,8 @@ export default function EInvoicingIntakePage() {
   }
 
   if (state === 'success' || state === 'already_submitted') {
+    // noInvoices is set from the GET response for the already-submitted view,
+    // and from the live checkbox state right after a fresh submit.
     return (
       <Shell>
         <Header companyName={data?.company_name} />
@@ -325,10 +336,22 @@ export default function EInvoicingIntakePage() {
           <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
             Thank you — we’ve received your submission
           </h2>
-          <p className="text-gray-600 max-w-md">
-            Our team will review your invoices and accounting setup, and your TME consultant will be
-            in touch with the next steps. No further action is needed from you right now.
-          </p>
+          {noInvoices ? (
+            <p className="text-gray-600 max-w-md">
+              You confirmed that your company does not issue any invoices. Please note that every
+              entity which holds a UAE license and conducts business must still appoint an
+              Accredited Service Provider (ASP), even if it only receives supplier invoices over
+              the network. TME Services is developing UAE-compliant e-invoicing software and is in
+              the process of becoming an ASP before the end of 2026. Currently there is nothing to
+              be done from your side. We will get back to you as soon as we make progress on the
+              ASP registration.
+            </p>
+          ) : (
+            <p className="text-gray-600 max-w-md">
+              Our team will review your invoices and accounting setup, and your TME consultant will
+              be in touch with the next steps. No further action is needed from you right now.
+            </p>
+          )}
         </div>
       </Shell>
     );
@@ -349,10 +372,58 @@ export default function EInvoicingIntakePage() {
         used only for this pre-assessment and are never shared.
       </p>
 
+      {/* Receive-only declaration: waives the upload requirement, never the
+          assessment itself — every licensed business still needs an ASP. */}
+      <div className="mb-8">
+        <label
+          className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
+          style={{ borderColor: TME_COLORS.border }}
+        >
+          <input
+            type="checkbox"
+            checked={noInvoices}
+            onChange={(e) => setNoInvoices(e.target.checked)}
+            disabled={uploading || submitting}
+            className="mt-0.5 w-4 h-4 shrink-0"
+            style={{ accentColor: TME_COLORS.primary }}
+          />
+          <span className="text-sm text-gray-700">
+            We confirm that our company does not issue any invoices to clients or business partners.
+            We only receive supplier invoices.
+          </span>
+        </label>
+
+        {noInvoices && (
+          <div
+            className="mt-3 rounded-xl p-4 flex gap-3"
+            style={{ backgroundColor: 'rgba(36,63,123,0.06)' }}
+          >
+            <Info className="w-5 h-5 shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+            <div>
+              <p className="text-sm font-semibold" style={{ color: TME_COLORS.primary }}>
+                An ASP appointment is still required
+              </p>
+              <p className="text-sm text-gray-600 mt-1 leading-relaxed">
+                Under the UAE e-invoicing framework, every entity which holds a UAE license and
+                conducts business must appoint an Accredited Service Provider (ASP), even if it
+                only receives supplier invoices over the network and never issues its own. The
+                deadline to appoint an ASP for businesses with revenue below AED 50 million is
+                31.03.2027, with go-live on 01.07.2027. If you use an accounting or bookkeeping
+                system, you can optionally tell us below.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Accounting software */}
       <div className="mb-8">
         <CustomDropdown
-          label="Which invoicing system do you use?"
+          label={
+            noInvoices
+              ? 'Which accounting or bookkeeping system do you use? (optional)'
+              : 'Which invoicing system do you use?'
+          }
           value={software}
           onChange={setSoftware}
           options={softwareOptions}
@@ -370,11 +441,16 @@ export default function EInvoicingIntakePage() {
             onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
           />
         )}
-        {guidance && <XmlGuidance software={software} guidance={guidance} />}
+        {!noInvoices && guidance && <XmlGuidance software={software} guidance={guidance} />}
       </div>
 
-      {/* Invoice upload */}
+      {/* Invoice upload — hidden for receive-only clients, except that files
+          uploaded BEFORE ticking the declaration stay listed and deletable
+          (they would otherwise be stuck on the submission, invisible). */}
+      {(!noInvoices || files.length > 0) && (
       <div className="mb-6">
+        {!noInvoices && (
+        <>
         <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
           Sample invoices (XML file preferred)
         </label>
@@ -409,6 +485,15 @@ export default function EInvoicingIntakePage() {
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
+        </>
+        )}
+
+        {noInvoices && files.length > 0 && (
+          <p className="text-xs text-gray-500 mb-1">
+            You uploaded sample invoices before confirming the declaration above. They will not
+            be reviewed. You can remove them below.
+          </p>
+        )}
 
         {files.length > 0 && (
           <ul className="mt-4 space-y-2">
@@ -448,8 +533,9 @@ export default function EInvoicingIntakePage() {
           </ul>
         )}
       </div>
+      )}
 
-      {data?.price_aed != null && (
+      {data?.price_aed != null && !noInvoices && (
         <label
           className="mb-4 flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
           style={{ borderColor: TME_COLORS.border }}

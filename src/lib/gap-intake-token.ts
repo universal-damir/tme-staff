@@ -138,10 +138,13 @@ export interface GapIntakeRow {
   expires_at: string | null;
   // E-invoicing pre-assessment fee the client must agree to before submitting.
   price_aed: number | null;
+  // Client declared they issue no invoices (receive-only) — waives the sample
+  // upload requirement; the ASP appointment is still mandatory.
+  no_invoices_issued: boolean | null;
 }
 
 const SAFE_COLUMNS =
-  'id, link_token, company_name, accounting_software, accounting_software_other, invoice_files, status, expires_at, price_aed';
+  'id, link_token, company_name, accounting_software, accounting_software_other, invoice_files, status, expires_at, price_aed, no_invoices_issued';
 
 export type GapIntakeAccessFailure =
   | 'invalid_token'
