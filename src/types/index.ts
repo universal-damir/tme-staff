@@ -196,6 +196,107 @@ export interface EmployeeFormData {
 }
 
 // ===================================================================
+// DEPENDENT FORM DATA
+// ===================================================================
+
+/** The eight relationship types a sponsor may register a dependent under. */
+export type DependentType =
+  | 'Spouse'
+  | 'Son'
+  | 'Daughter'
+  | 'Father'
+  | 'Mother'
+  | 'Father-in-Law'
+  | 'Mother-in-Law'
+  | 'Maid';
+
+/**
+ * What the TME Portal writes into `prefill_employee_data` when it creates a
+ * dependent row.
+ *
+ * - `dependent` (first registration): only `dependent_type` and the sponsor
+ *   display fields are guaranteed; the name fields are present only when CS
+ *   typed them.
+ * - `dependent_renewal` / `dependent_document_request`: the portal ALSO writes
+ *   the dependent's full current field block, using the SAME key names and
+ *   date-string formats DependentForm emits into `employee_data`. Every field
+ *   stays optional — a missing key just leaves that input blank.
+ *
+ * The `sponsor_*` fields are display/contact metadata only; they never travel
+ * into the submitted payload (they drive the "use my number/email" checkboxes
+ * and the page header).
+ */
+export interface DependentPrefillData extends Partial<DependentFormData> {
+  sponsor_staff_name?: string;
+  sponsor_staff_number?: string;
+  /** Sponsor's UAE mobile — the UAE Mobile "use my number" checkbox copies this. */
+  sponsor_mobile?: string;
+  /** Sponsor's home-country mobile — the Home Country Mobile checkbox copies this. */
+  sponsor_mobile_home?: string;
+  sponsor_email?: string;
+}
+
+/**
+ * Payload the sponsor-facing DependentForm writes into `employee_data` on a
+ * dependent onboarding row. Keys are the shared contract with the portal's
+ * dependent sync branch — do not rename.
+ */
+export interface DependentFormData {
+  // Identity (from the dependent's passport)
+  first_name: string;
+  middle_name?: string;
+  /** May be '' — many passports (e.g. Indian) carry no surname. */
+  last_name: string;
+  full_name?: string; // Auto-calculated
+  nationality: string;
+  date_of_birth?: string;
+  gender?: 'male' | 'female';
+  passport_no?: string;
+  passport_issue_date?: string;
+  passport_expiry?: string;
+
+  /** Read-only, mirrored from prefill_employee_data.dependent_type. */
+  dependent_type?: DependentType;
+
+  // Personal
+  mother_full_name: string;
+  father_full_name: string;
+  religion: string;
+  marital_status: string;
+
+  // UAE visa history
+  previously_held_uae_visa?: boolean;
+
+  // Presence + addresses
+  uae_presence: 'inside' | 'outside';
+  uae_street_address?: string;
+  uae_city?: string;
+  uae_postal_code?: string;
+  uae_emirate?: string;
+  home_street_address: string;
+  home_city: string;
+  home_country: string;
+  home_postal_code?: string;
+
+  // Contacts — each may be copied from the sponsor via a checkbox
+  mobile_uae?: string;
+  mobile_uae_use_sponsor?: boolean;
+  mobile_home_country?: string;
+  mobile_home_use_sponsor?: boolean;
+  email?: string;
+  email_use_sponsor?: boolean;
+
+  /** Mandatory attestation tick on the relationship certificate. */
+  certificate_attestation_confirmed?: boolean;
+
+  other_information?: string;
+
+  // Submission telemetry — stamped at final submit, not user-entered.
+  submission_device?: 'phone' | 'desktop';
+  submission_user_agent?: string;
+}
+
+// ===================================================================
 // DOCUMENT REFERENCES
 // ===================================================================
 
@@ -240,10 +341,11 @@ export interface StaffDocumentReferences {
     additionalPage?: PassportPageReference;
     extracted_data?: Record<string, unknown>;
   };
-  // Renewal only: the employee ticked "my passport is the same as shown"
-  // and skipped the passport upload steps. Persisted so the server-side
-  // submit gate can verify the skip was legitimate (both existing pages on
-  // file) instead of trusting client state.
+  // Renewals only ('renewal' and 'dependent_renewal'): the employee — or, on
+  // a dependent renewal, the sponsor — ticked "the passport is the same as
+  // shown" and skipped the passport upload steps. Persisted so the
+  // server-side submit gate can verify the skip was legitimate (both existing
+  // pages on file) instead of trusting client state.
   passport_unchanged?: boolean;
   eid?: {
     path: string;
@@ -331,6 +433,29 @@ export interface StaffDocumentReferences {
     validated?: boolean;
     needsReview?: boolean;
   };
+  // Dependent onboarding (onboarding_type === 'dependent'). Plain uploads —
+  // no AI validation anywhere in the flow. The certificate is additionally
+  // flagged for human review on the portal side (attestation check).
+  // NOTE: on a 'dependent_document_request' the same four documents are
+  // re-requested through the GENERIC slot machinery instead, so they land in
+  // `extra_documents[<key>]` (with needsReview) rather than in these flat
+  // refs — a re-request always wants a fresh copy, never a stale flat ref.
+  relationship_certificate?: {
+    path: string;
+    filename: string;
+  };
+  previous_visa?: {
+    path: string;
+    filename: string;
+  };
+  previous_eid_front?: {
+    path: string;
+    filename: string;
+  };
+  previous_eid_back?: {
+    path: string;
+    filename: string;
+  };
   degree_attested?: {
     path: string;
     filename: string;
@@ -359,6 +484,30 @@ export interface StaffDocumentReferences {
 export type OnboardingStep = 'employer' | 'employee' | 'complete';
 export type OnboardingStatus = 'pending' | 'employer_completed' | 'complete' | 'cancelled';
 
+/**
+ * What kind of form a submission row renders. Written by the TME Portal when
+ * it creates the row; tme-staff never changes it.
+ *
+ * Staff flows (the employee is the subject and the signer):
+ *   new_hire | renewal   — two-stage employer + employee onboarding
+ *   document_request     — single-stage re-upload of `requested_documents`
+ *
+ * Sponsor flows (an existing staff member fills the form FOR a dependent —
+ * always single-stage: current_step='employee', is_same_person=true, no
+ * employee_access_token; the rotatable link_token is the only secret):
+ *   dependent                    — first registration of a dependent
+ *   dependent_renewal            — visa renewal of a dependent already on file
+ *   dependent_document_request   — re-upload of `requested_documents` for a
+ *                                  dependent already on file
+ */
+export type OnboardingType =
+  | 'new_hire'
+  | 'renewal'
+  | 'document_request'
+  | 'dependent'
+  | 'dependent_renewal'
+  | 'dependent_document_request';
+
 // How the staff member's residence visa is sponsored. Drives the sponsor-step
 // + NOC requirements: 'family' demands sponsor docs + a signed NOC (on both
 // new_hire and renewal); 'company' and 'self_gcc' demand neither.
@@ -378,14 +527,16 @@ export interface StaffOnboardingSubmission {
   // Pre-fill data (from TME Portal for renewals)
   prefill_employer_data: Partial<EmployerFormData> | null;
   prefill_employee_data: Partial<EmployeeFormData> | null;
-  onboarding_type: 'new_hire' | 'renewal' | 'document_request';
+  onboarding_type: OnboardingType;
   sponsorship_type?: SponsorshipType | null;
 
-  // Document re-request flow (onboarding_type === 'document_request'):
-  // type keys the employee must re-upload (v1 allow-list: photo,
-  // passport_cover, passport_inside, passport_additional, eid_front,
-  // eid_back, degree_attested, transcript_of_records). Null/absent for
-  // regular new_hire / renewal onboardings.
+  // Document re-request flow (onboarding_type === 'document_request' or
+  // 'dependent_document_request'): type keys the uploader must (re-)upload.
+  // Staff v1 allow-list: photo, passport_cover, passport_inside,
+  // passport_additional, eid_front, eid_back, degree_attested,
+  // transcript_of_records — plus every generic requestable key (see
+  // GENERIC_REQUESTED_KEYS in submit-validation.ts) and `custom:<name>`.
+  // Null/absent for regular new_hire / renewal / dependent onboardings.
   requested_documents?: string[] | null;
 
   // Sponsor NOC audit trail (family-sponsored only). Set server-side by

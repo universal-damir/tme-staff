@@ -1,13 +1,15 @@
 /**
  * Submit Document Re-Request API
  *
- * POST: finalizes a document re-upload request (onboarding_type ===
- * 'document_request') created by the TME Portal. The employee has already
- * uploaded the requested documents via the same storage/AI-validation routes
- * the main employee form uses; this route only verifies completeness, marks
- * the row complete, and webhooks the portal — no signature, no personal-data
- * payload (mirrors submit-employee, minus everything document requests
- * don't carry).
+ * POST: finalizes a document re-upload request created by the TME Portal —
+ * either the staff flavour (onboarding_type === 'document_request', the
+ * employee uploads their own documents) or the sponsor flavour
+ * ('dependent_document_request', an existing staff member uploads documents
+ * for a dependent already on file). The uploader has already stored the
+ * requested documents via the same storage/AI-validation routes the main
+ * employee form uses; this route only verifies completeness, marks the row
+ * complete, and webhooks the portal — no signature, no personal-data payload
+ * (mirrors submit-employee, minus everything document requests don't carry).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -50,7 +52,14 @@ export async function POST(req: NextRequest) {
 
     // This route finalizes document requests ONLY — regular onboardings must
     // go through submit-employee (signature + full required-documents gate).
-    if (existing && existing.onboarding_type !== 'document_request') {
+    // Both flavours are accepted: the staff re-request and the sponsor-facing
+    // dependent re-request, which differ only in who uploads and which keys
+    // the portal put in requested_documents.
+    if (
+      existing &&
+      existing.onboarding_type !== 'document_request' &&
+      existing.onboarding_type !== 'dependent_document_request'
+    ) {
       return NextResponse.json({ error: 'Not a document request' }, { status: 400 });
     }
 

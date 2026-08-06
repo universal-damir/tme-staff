@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { missingRequiredDocuments, missingRequestedDocuments } from './submit-validation';
+import {
+  missingRequiredDocuments,
+  missingRequestedDocuments,
+  missingDependentRequirements,
+  missingDependentRenewalRequirements,
+} from './submit-validation';
 
 /**
  * Server-side required-documents gate for /api/submit-employee.
@@ -363,5 +368,331 @@ describe('missingRequestedDocuments', () => {
         },
       })
     ).toEqual(['not_a_real_type']);
+  });
+
+  /**
+   * Dependent document requests ('dependent_document_request') reuse this gate
+   * unchanged; they only add four generic keys to the vocabulary.
+   */
+  it('accepts the dependent-only generic keys via extra_documents', () => {
+    const genericRef = (key: string) => ({
+      path: `p/${key}/a.pdf`,
+      filename: 'a.pdf',
+      needsReview: true as const,
+    });
+    expect(
+      missingRequestedDocuments({
+        requested_documents: [
+          'relationship_certificate',
+          'previous_visa',
+          'previous_eid_front',
+          'previous_eid_back',
+          'visa',
+        ],
+        documents: {
+          extra_documents: {
+            relationship_certificate: genericRef('relationship_certificate'),
+            previous_visa: genericRef('previous_visa'),
+            previous_eid_front: genericRef('previous_eid_front'),
+            previous_eid_back: genericRef('previous_eid_back'),
+            visa: genericRef('visa'),
+          },
+        },
+      })
+    ).toEqual([]);
+  });
+
+  it('flags dependent generic keys with no extra_documents entry', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: [
+          'relationship_certificate',
+          'previous_visa',
+          'previous_eid_front',
+          'previous_eid_back',
+        ],
+        documents: {
+          extra_documents: {
+            previous_visa: { path: 'p/previous_visa/a.pdf', filename: 'a.pdf', needsReview: true },
+          },
+        },
+      })
+    ).toEqual(['relationship_certificate', 'previous_eid_front', 'previous_eid_back']);
+  });
+
+  it('a dependent-onboarding flat ref does NOT satisfy a re-request for the same document', () => {
+    // The dependent onboarding flow writes these as flat refs; a re-request
+    // wants a FRESH upload, so only extra_documents counts.
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['relationship_certificate', 'previous_eid_front'],
+        documents: {
+          relationship_certificate: { path: 'd/cert.pdf', filename: 'cert.pdf' },
+          previous_eid_front: { path: 'd/eid.jpg', filename: 'eid.jpg' },
+        },
+      })
+    ).toEqual(['relationship_certificate', 'previous_eid_front']);
+  });
+});
+
+/**
+ * Server-side completeness gates for /api/submit-dependent.
+ *
+ * `missingDependentRequirements`        — first registration ('dependent')
+ * `missingDependentRenewalRequirements` — visa renewal ('dependent_renewal')
+ *
+ * Both are the server-side authority: the sponsor-facing DependentForm gates
+ * every step, but only in browser JavaScript.
+ */
+const completeDependentData = {
+  first_name: 'Aisha',
+  last_name: 'Khan',
+  nationality: 'Pakistani',
+  date_of_birth: '1990-04-11',
+  gender: 'female',
+  passport_no: 'AB1234567',
+  passport_expiry: '2031-04-10',
+  mother_full_name: 'Fatima Khan',
+  father_full_name: 'Ahmed Khan',
+  religion: 'Islam',
+  marital_status: 'Married',
+  home_street_address: '12 Jinnah Road',
+  home_city: 'Lahore',
+  home_country: 'Pakistan',
+  uae_presence: 'outside',
+  mobile_uae: '+971501234567',
+  email: 'aisha@example.com',
+  previously_held_uae_visa: false,
+  certificate_attestation_confirmed: true,
+};
+
+const dependentDocs = {
+  photo: validPhoto,
+  passportPages,
+  relationship_certificate: { path: 'd/cert.pdf', filename: 'cert.pdf' },
+};
+
+const existingPassportOnFile = {
+  passport_cover: { path: 'e/cover.pdf' },
+  passport_inside: { path: 'e/inside.pdf' },
+};
+
+describe('missingDependentRequirements', () => {
+  it('passes a complete first registration', () => {
+    expect(
+      missingDependentRequirements({ documents: dependentDocs }, completeDependentData)
+    ).toEqual([]);
+  });
+
+  it('requires the identity, address and contact fields', () => {
+    const missing = missingDependentRequirements({ documents: dependentDocs }, {
+      ...completeDependentData,
+      first_name: '   ',
+      religion: '',
+      home_city: undefined,
+      mobile_uae: '',
+      email: '',
+    });
+    expect(missing).toContain('First name');
+    expect(missing).toContain('Religion');
+    expect(missing).toContain('Home country city');
+    expect(missing).toContain('UAE mobile number');
+    expect(missing).toContain('Email address');
+  });
+
+  it('requires the UAE address only when the dependent is inside the UAE', () => {
+    const missing = missingDependentRequirements(
+      { documents: dependentDocs },
+      { ...completeDependentData, uae_presence: 'inside' }
+    );
+    expect(missing).toEqual(['UAE street address', 'UAE area', 'Emirate']);
+  });
+
+  it('requires the attestation, the visa-history answer and the certificate', () => {
+    const missing = missingDependentRequirements(
+      { documents: { photo: validPhoto, passportPages } },
+      {
+        ...completeDependentData,
+        previously_held_uae_visa: undefined,
+        certificate_attestation_confirmed: false,
+      }
+    );
+    expect(missing).toEqual([
+      'Whether the dependent previously held a UAE visa',
+      'Confirmation that the certificate is attested',
+      'Relationship certificate',
+    ]);
+  });
+
+  it('requires the previous visa + both Emirates ID sides when one was held', () => {
+    const missing = missingDependentRequirements(
+      { documents: dependentDocs },
+      { ...completeDependentData, previously_held_uae_visa: true }
+    );
+    expect(missing).toEqual([
+      'Previous UAE residence visa',
+      'Previous Emirates ID (front)',
+      'Previous Emirates ID (back)',
+    ]);
+  });
+
+  it('never allows a passport skip on a first registration', () => {
+    const missing = missingDependentRequirements(
+      {
+        documents: {
+          photo: validPhoto,
+          passport_unchanged: true,
+          relationship_certificate: { path: 'd/cert.pdf', filename: 'cert.pdf' },
+        },
+      },
+      completeDependentData
+    );
+    expect(missing).toContain('Passport cover page');
+    expect(missing).toContain('Passport data page');
+  });
+});
+
+describe('missingDependentRenewalRequirements', () => {
+  it('passes a renewal with freshly uploaded passport pages', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        { documents: { photo: validPhoto, passportPages } },
+        completeDependentData
+      )
+    ).toEqual([]);
+  });
+
+  it('does not re-ask the attestation or the visa-history answer', () => {
+    const { certificate_attestation_confirmed, previously_held_uae_visa, ...withoutRenewalSkipped } =
+      completeDependentData;
+    expect(certificate_attestation_confirmed).toBe(true); // fixture sanity
+    expect(previously_held_uae_visa).toBe(false);
+    expect(
+      missingDependentRenewalRequirements(
+        { documents: { photo: validPhoto, passportPages } },
+        withoutRenewalSkipped
+      )
+    ).toEqual([]);
+  });
+
+  it('never requires the relationship certificate or the previous visa/EID set', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        { documents: { photo: validPhoto, passportPages } },
+        { ...completeDependentData, previously_held_uae_visa: true }
+      )
+    ).toEqual([]);
+  });
+
+  it('still requires every identity, address and contact field', () => {
+    const missing = missingDependentRenewalRequirements(
+      { documents: { photo: validPhoto, passportPages } },
+      { ...completeDependentData, passport_no: '', uae_presence: 'inside' }
+    );
+    expect(missing).toEqual([
+      'Passport number',
+      'UAE street address',
+      'UAE area',
+      'Emirate',
+    ]);
+  });
+
+  it('allows the passport skip with BOTH pages on file AND the persisted attestation', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: validPhoto, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        completeDependentData
+      )
+    ).toEqual([]);
+  });
+
+  it('rejects the skip without the persisted attestation (stricter than the staff gate)', () => {
+    const missing = missingDependentRenewalRequirements(
+      { documents: { photo: validPhoto }, existing_documents: existingPassportOnFile },
+      completeDependentData
+    );
+    expect(missing).toEqual(['Passport cover page', 'Passport data page']);
+  });
+
+  it('rejects the skip when only one page is on file (10920/LLC062 rationale)', () => {
+    const missing = missingDependentRenewalRequirements(
+      {
+        documents: { photo: validPhoto, passport_unchanged: true },
+        existing_documents: { passport_inside: { path: 'e/inside.pdf' } },
+      },
+      completeDependentData
+    );
+    expect(missing).toEqual(['Passport cover page', 'Passport data page']);
+  });
+
+  it('rejects the skip when existing_documents is absent entirely', () => {
+    const missing = missingDependentRenewalRequirements(
+      { documents: { photo: validPhoto, passport_unchanged: true } },
+      completeDependentData
+    );
+    expect(missing).toEqual(['Passport cover page', 'Passport data page']);
+  });
+
+  it('the passport skip also skips the Indian/Syrian additional page', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: validPhoto, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        { ...completeDependentData, nationality: 'Indian' }
+      )
+    ).toEqual([]);
+  });
+
+  it('freshly re-uploaded pages require the additional page again', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: validPhoto, passportPages, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        { ...completeDependentData, nationality: 'Syrian' }
+      )
+    ).toEqual(['Passport additional page']);
+  });
+
+  it('always requires the photo — there is no "photo unchanged" escape hatch', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { passport_unchanged: true },
+          existing_documents: { ...existingPassportOnFile, photo: { path: 'e/photo.jpg' } },
+        },
+        completeDependentData
+      )
+    ).toEqual(['ID photo']);
+  });
+
+  it('flags a photo that is uploaded but neither validated nor needsReview', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: failedPhoto, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        completeDependentData
+      )
+    ).toEqual(['ID photo (must pass validation or be submitted for manual review)']);
+  });
+
+  it('accepts a photo submitted via the manual-review fallback', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: manualReviewPhoto, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        completeDependentData
+      )
+    ).toEqual([]);
   });
 });

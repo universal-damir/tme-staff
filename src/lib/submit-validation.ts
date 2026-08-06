@@ -167,8 +167,10 @@ export function missingRequiredDocuments(row: {
 /**
  * Server-side completeness gate for `/api/submit-document-request`.
  *
- * A document-request row (onboarding_type === 'document_request') carries a
- * `requested_documents` array of type keys the employee must re-upload. This
+ * A document-request row (onboarding_type === 'document_request', or
+ * 'dependent_document_request' where the SPONSOR uploads on behalf of a
+ * dependent already on file — same key vocabulary, same slots, same gate)
+ * carries a `requested_documents` array of type keys to re-upload. This
  * checks each requested key against the row's `documents` jsonb and returns
  * the keys that are still missing or not accepted; empty array = submittable.
  *
@@ -217,6 +219,14 @@ export const GENERIC_REQUESTED_KEYS: ReadonlySet<string> = new Set([
   'sponsor_visa',
   'sponsor_eid_front',
   'sponsor_eid_back',
+  // Dependent document requests ('dependent_document_request'). These four
+  // also exist as flat refs written by the dependent onboarding flow, but a
+  // re-request wants a FRESH copy — so, like every other generic key, only
+  // an `extra_documents[<key>]` entry satisfies them.
+  'relationship_certificate',
+  'previous_visa',
+  'previous_eid_front',
+  'previous_eid_back',
 ]);
 
 /**
@@ -301,6 +311,176 @@ export function missingRequestedDocuments(row: {
         missing.push(key);
     }
   }
+  return missing;
+}
+
+/**
+ * Server-side completeness gate for `/api/submit-dependent`.
+ *
+ * A dependent row (onboarding_type === 'dependent') carries the sponsor's
+ * answers for ONE dependent. The client form gates every step, but the server
+ * is the authority — without this, a stale client state or a hand-crafted POST
+ * could reach status='complete' with no certificate, no passport, or an
+ * unticked attestation, and the portal sync would create a half-empty
+ * dependent record plus fire the confirmation emails.
+ *
+ * Returns humanized names of what's missing; empty array = submittable.
+ *
+ * Rules (deliberately the SAME set the client's step gates enforce):
+ *  - Identity + personal fields, the home-country address, and — when the
+ *    dependent is inside the UAE — the UAE address.
+ *  - A UAE mobile and an email (either typed or copied from the sponsor via
+ *    the "use sponsor's" checkboxes, which write the same keys).
+ *  - Photo present AND (AI-validated OR submitted for manual review).
+ *  - Passport cover + data page, plus the additional page for Indian/Syrian
+ *    passports (keyed off an uploaded data page, exactly like the staff gate).
+ *  - Relationship certificate + the mandatory attestation confirmation.
+ *  - Previously held a UAE visa → the previous visa and BOTH Emirates ID sides.
+ */
+export function missingDependentRequirements(
+  row: { documents?: StaffDocumentReferences | null },
+  data: Record<string, unknown>,
+): string[] {
+  return dependentRequirements(row, data, 'onboarding');
+}
+
+/**
+ * Server-side completeness gate for `/api/submit-dependent` when the row is a
+ * dependent RENEWAL (onboarding_type === 'dependent_renewal').
+ *
+ * Same requirements as `missingDependentRequirements`, MINUS the two things a
+ * renewal deliberately does not re-collect:
+ *   - `certificate_attestation_confirmed` + the relationship certificate — the
+ *     attested certificate is already on file from the first registration.
+ *   - `previously_held_uae_visa` and its previous visa / Emirates ID uploads —
+ *     self-evident on a renewal.
+ *
+ * PLUS one relaxation and one hardening:
+ *   - Passport pages may be SKIPPED, but ONLY when `existing_documents` has
+ *     BOTH `passport_cover.path` and `passport_inside.path` AND the sponsor's
+ *     "passport unchanged" attestation was persisted into
+ *     `documents.passport_unchanged`. This is stricter than the staff gate
+ *     (`missingRequiredDocuments`, which accepts the skip whenever both pages
+ *     are on file so in-flight pre-deploy sessions don't strand): dependent
+ *     renewals are new, there are no in-flight sessions, so both signals are
+ *     demanded. The rationale for checking the pages at all is the same —
+ *     a staff renewal once reached status='complete' with no passport
+ *     anywhere (10920/LLC062) because the only gate was client-side JS.
+ *     Fail closed.
+ *   - The ID photo is ALWAYS required (validated or needsReview): the UAE
+ *     authority wants a newly-taken photo for the new visa, so there is no
+ *     "photo unchanged" escape hatch anywhere in this flow.
+ *
+ * Returns humanized names of what's missing; empty array = submittable.
+ */
+export function missingDependentRenewalRequirements(
+  row: {
+    documents?: StaffDocumentReferences | null;
+    existing_documents?: Record<string, { path?: string }> | null;
+  },
+  data: Record<string, unknown>,
+): string[] {
+  return dependentRequirements(row, data, 'renewal');
+}
+
+function dependentRequirements(
+  row: {
+    documents?: StaffDocumentReferences | null;
+    existing_documents?: Record<string, { path?: string }> | null;
+  },
+  data: Record<string, unknown>,
+  mode: 'onboarding' | 'renewal',
+): string[] {
+  const isRenewal = mode === 'renewal';
+  const missing: string[] = [];
+  const docs = row.documents ?? {};
+
+  const str = (key: string): string =>
+    typeof data[key] === 'string' ? (data[key] as string).trim() : '';
+  const requireField = (key: string, label: string) => {
+    if (!str(key)) missing.push(label);
+  };
+
+  requireField('first_name', 'First name');
+  requireField('nationality', 'Nationality');
+  requireField('date_of_birth', 'Date of birth');
+  requireField('gender', 'Gender');
+  requireField('passport_no', 'Passport number');
+  requireField('passport_expiry', 'Passport expiry');
+  requireField('mother_full_name', "Mother's full name");
+  requireField('father_full_name', "Father's full name");
+  requireField('religion', 'Religion');
+  requireField('marital_status', 'Marital status');
+  requireField('home_street_address', 'Home country street address');
+  requireField('home_city', 'Home country city');
+  requireField('home_country', 'Home country');
+
+  // Family name may legitimately be blank (no-surname passports) — never gated.
+
+  const presence = str('uae_presence');
+  if (presence !== 'inside' && presence !== 'outside') {
+    missing.push('Whether the dependent is currently in the UAE');
+  } else if (presence === 'inside') {
+    requireField('uae_street_address', 'UAE street address');
+    requireField('uae_city', 'UAE area');
+    requireField('uae_emirate', 'Emirate');
+  }
+
+  requireField('mobile_uae', 'UAE mobile number');
+  requireField('email', 'Email address');
+
+  // Visa history + certificate attestation are first-registration only.
+  const previouslyHeldVisa = data.previously_held_uae_visa;
+  if (!isRenewal) {
+    if (typeof previouslyHeldVisa !== 'boolean') {
+      missing.push('Whether the dependent previously held a UAE visa');
+    }
+
+    if (data.certificate_attestation_confirmed !== true) {
+      missing.push('Confirmation that the certificate is attested');
+    }
+  }
+
+  // Always required, in both modes — a renewal needs a newly-taken photo.
+  const photo = docs.photo;
+  if (!photo?.path) {
+    missing.push('ID photo');
+  } else if (!photo.validated && !photo.needsReview) {
+    missing.push('ID photo (must pass validation or be submitted for manual review)');
+  }
+
+  // Renewal skip: legitimate ONLY with both pages on file AND the persisted
+  // attestation. Anything less and the pages must be uploaded (fail closed).
+  const existingCover = row.existing_documents?.passport_cover?.path;
+  const existingInside = row.existing_documents?.passport_inside?.path;
+  const renewalSkipAllowed =
+    isRenewal && !!existingCover && !!existingInside && docs.passport_unchanged === true;
+
+  const pages = docs.passportPages ?? {};
+  if (!renewalSkipAllowed) {
+    if (!pages.cover?.path) missing.push('Passport cover page');
+    if (!pages.insidePages?.path) missing.push('Passport data page');
+  }
+  // Keyed off a FRESHLY uploaded data page (exactly the client condition), so
+  // the renewal skip — where no pages are uploaded — skips this too.
+  if (
+    passportAdditionalPageVariant(typeof data.nationality === 'string' ? data.nationality : null) &&
+    pages.insidePages?.path &&
+    !pages.additionalPage?.path
+  ) {
+    missing.push('Passport additional page');
+  }
+
+  if (!isRenewal) {
+    if (!docs.relationship_certificate?.path) missing.push('Relationship certificate');
+
+    if (previouslyHeldVisa === true) {
+      if (!docs.previous_visa?.path) missing.push('Previous UAE residence visa');
+      if (!docs.previous_eid_front?.path) missing.push('Previous Emirates ID (front)');
+      if (!docs.previous_eid_back?.path) missing.push('Previous Emirates ID (back)');
+    }
+  }
+
   return missing;
 }
 

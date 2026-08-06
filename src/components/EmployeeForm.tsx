@@ -3480,7 +3480,11 @@ export function EmployeeForm({
 
           {viewingStep === 3 && (
             <StepNavButtons
-              enabled={isInsidePagesUploaded && passportDataReady && isPersonalComplete && (!requiresAdditionalPage || isAdditionalPageUploaded)}
+              // !extractingPassport: while a fresh read is in flight the
+              // nationality — and with it the India/Syria additional-page
+              // requirement — is still unknown, so don't let a stale
+              // passportDataReady (saved draft / re-upload) unlock Continue.
+              enabled={isInsidePagesUploaded && passportDataReady && !extractingPassport && isPersonalComplete && (!requiresAdditionalPage || isAdditionalPageUploaded)}
               onContinue={() => setViewingStep(isStep4Empty ? 5 : 4)}
               onBack={() => setViewingStep(2)}
             />

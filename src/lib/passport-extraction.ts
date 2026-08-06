@@ -63,7 +63,7 @@ OTHER FIELDS — read from the visible labeled zone (more complete than MRZ):
 - passport_issue_date: DD.MM.YYYY with dots (visual zone — has full year)
 - passport_expiry_date: DD.MM.YYYY with dots (visual zone — has full year)
 - date_of_birth: DD.MM.YYYY with dots (visual zone — has full year)
-- nationality: full country name, not the 3-letter code (e.g. \`PAK\` → Pakistan)
+- nationality: the country's common ENGLISH name — never the 3-letter code, the demonym, or the state's self-designation as printed. Normalise whatever the passport shows: \`PAK\`/\`PAKISTANI\` → Pakistan, \`HELLENIC\` → Greece, \`BRITISH CITIZEN\` → United Kingdom, \`DEUTSCH\` → Germany, \`ESPAÑOLA\` → Spain, \`SUISSE\`/\`HELVETICA\` → Switzerland. Many passports print the nationality in the issuing state's own language and/or as an adjective; always return the plain English country name
 - gender: Male or Female (from Sex field; M → Male, F → Female)
 - place_of_birth: copy from the labeled Place of Birth field (title case if it was all caps; transliterate diacritics to ASCII)
 - title: infer from gender only — Male → Mr, Female → Ms
@@ -167,7 +167,7 @@ export async function extractPassport(imageBase64: string): Promise<PassportExtr
                 passport_no: { type: 'string', description: 'Passport number exactly as printed' },
                 passport_issue_date: { type: 'string', description: 'DD.MM.YYYY' },
                 passport_expiry_date: { type: 'string', description: 'DD.MM.YYYY' },
-                nationality: { type: 'string', description: 'Full country name' },
+                nationality: { type: 'string', description: "Country's common English name (e.g. Greece, not HELLENIC or GRC)" },
                 date_of_birth: { type: 'string', description: 'DD.MM.YYYY' },
                 gender: { type: 'string', description: 'Male or Female' },
                 place_of_birth: { type: 'string', description: 'Place of Birth field, Title Case' },

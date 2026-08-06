@@ -49,6 +49,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to load submission' }, { status: 500 });
     }
 
+    // This route finalizes staff onboardings and staff renewals ONLY — the
+    // mirror image of the gates in submit-dependent and submit-document-request.
+    // Without it a dependent / dependent_renewal / document_request row could
+    // be finalized here against the *staff* gate (photo + passport only),
+    // skipping missingDependentRequirements / missingDependentRenewalRequirements
+    // / missingRequestedDocuments entirely, and the completion webhook would
+    // still fire. A null/absent onboarding_type is legacy staff onboarding and
+    // stays allowed.
+    if (
+      existing?.onboarding_type &&
+      existing.onboarding_type !== 'new_hire' &&
+      existing.onboarding_type !== 'renewal'
+    ) {
+      console.warn(
+        `[submit-employee] Rejected foreign onboarding_type '${existing.onboarding_type}' for ${id}`,
+      );
+      return NextResponse.json(
+        { error: 'Not a staff onboarding' },
+        { status: 400 },
+      );
+    }
+
     const guard = assertSubmittable(existing);
     if (!guard.ok) {
       return NextResponse.json({ error: guard.error }, { status: guard.status });

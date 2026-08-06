@@ -35,10 +35,15 @@ import { AlertTriangle, Camera, CreditCard, FileText, GraduationCap } from 'luci
 import { SampleImageToggle } from '@/components/SampleImageToggle';
 
 /**
- * Lean employee-facing form for the "document re-request" flow
- * (onboarding_type === 'document_request'). The TME Portal lists the type
- * keys the employee must re-upload in `requested_documents`; this form
- * renders ONE slot per requested key, reusing the same upload routes, AI
+ * Lean upload-only form for the "document re-request" flows —
+ * `document_request` (the employee uploads their own documents) and
+ * `dependent_document_request` (an existing staff member, the SPONSOR,
+ * uploads documents for a dependent already on file). Both share every slot,
+ * route, and gate; only the attestation copy differs.
+ *
+ * The TME Portal lists the type keys to upload in
+ * `requested_documents`; this form renders ONE slot per requested key,
+ * reusing the same upload routes, AI
  * validation, and 2-strike manual-review fallback as the main EmployeeForm —
  * but with no signature and no personal-data steps. Extraction endpoints are
  * deliberately skipped: there is no form to pre-fill here, validation only.
@@ -89,6 +94,14 @@ const GENERIC_REQUESTABLE_LABELS = {
   sponsor_visa: 'Sponsor — Visa',
   sponsor_eid_front: 'Sponsor — Emirates ID (Front)',
   sponsor_eid_back: 'Sponsor — Emirates ID (Back)',
+  // Dependent document requests ('dependent_document_request'). These four
+  // have dedicated flat refs in the dependent ONBOARDING flow, but a
+  // re-request always wants a fresh copy, so they take the generic path into
+  // extra_documents like every other re-requested type.
+  relationship_certificate: 'Relationship Certificate (attested)',
+  previous_visa: 'Previous UAE Visa',
+  previous_eid_front: 'Previous Emirates ID (Front)',
+  previous_eid_back: 'Previous Emirates ID (Back)',
 } as const;
 type GenericRequestKey = keyof typeof GENERIC_REQUESTABLE_LABELS;
 const GENERIC_KEYS = Object.keys(GENERIC_REQUESTABLE_LABELS) as readonly GenericRequestKey[];
@@ -137,7 +150,13 @@ const PASSPORT_SLOTS: Record<
     description: string;
     pageNoun: string;
     rejectCopy: string;
+    /**
+     * Manual-review attestation. Staff requests are written from the holder's
+     * perspective ("my passport"); on a dependent request the SPONSOR uploads
+     * someone else's documents, so each slot carries both phrasings.
+     */
     confirmCopy: string;
+    confirmCopyDependent: string;
     /** Example image shown via SampleImageToggle (same assets as EmployeeForm). */
     sampleSrc: string;
     sampleAlt: string;
@@ -152,6 +171,8 @@ const PASSPORT_SLOTS: Record<
     rejectCopy: 'This does not look like a passport cover spread. Please upload a clearer photo.',
     confirmCopy:
       'I confirm this is my passport cover (front + back) photographed spread open. I understand a TME team member will verify it manually.',
+    confirmCopyDependent:
+      "I confirm this is the dependent's passport cover (front + back) photographed spread open. I understand a TME team member will verify it manually.",
     sampleSrc: '/samples/passport-cover-example.png',
     sampleAlt: 'Example passport cover spread',
   },
@@ -164,6 +185,8 @@ const PASSPORT_SLOTS: Record<
     rejectCopy: 'This does not look like a passport inside-pages spread. Please upload a clearer photo.',
     confirmCopy:
       'I confirm this is my passport photo/data page photographed spread open. I understand a TME team member will verify it manually.',
+    confirmCopyDependent:
+      "I confirm this is the dependent's passport photo/data page photographed spread open. I understand a TME team member will verify it manually.",
     sampleSrc: '/samples/passport-inside-example.png',
     sampleAlt: 'Example passport inside pages spread',
   },
@@ -176,6 +199,8 @@ const PASSPORT_SLOTS: Record<
     rejectCopy: 'This does not look like a passport additional page.',
     confirmCopy:
       'I confirm this is my passport additional page. I understand a TME team member will verify it manually.',
+    confirmCopyDependent:
+      "I confirm this is the dependent's passport additional page. I understand a TME team member will verify it manually.",
     sampleSrc: '/samples/passport-additional-example.png',
     sampleAlt: 'Example passport additional page',
   },
@@ -183,7 +208,17 @@ const PASSPORT_SLOTS: Record<
 
 const EID_SLOTS: Record<
   EidRequestKey,
-  { side: 'front' | 'back'; label: string; description: string; pageNoun: string; rejectCopy: string; confirmCopy: string; sampleSrc: string; sampleAlt: string }
+  {
+    side: 'front' | 'back';
+    label: string;
+    description: string;
+    pageNoun: string;
+    rejectCopy: string;
+    confirmCopy: string;
+    confirmCopyDependent: string;
+    sampleSrc: string;
+    sampleAlt: string;
+  }
 > = {
   eid_front: {
     side: 'front',
@@ -194,6 +229,8 @@ const EID_SLOTS: Record<
       'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID, or submit it for manual review.',
     confirmCopy:
       'I confirm this is the front of my Emirates ID. I understand a TME team member will verify it manually.',
+    confirmCopyDependent:
+      "I confirm this is the front of the dependent's Emirates ID. I understand a TME team member will verify it manually.",
     sampleSrc: '/samples/eid-front-example.png',
     sampleAlt: 'Example Emirates ID front',
   },
@@ -206,6 +243,8 @@ const EID_SLOTS: Record<
       'This does not appear to be the back of an Emirates ID card. Please upload a clear photo of the back, or submit it for manual review.',
     confirmCopy:
       'I confirm this is the back of my Emirates ID. I understand a TME team member will verify it manually.',
+    confirmCopyDependent:
+      "I confirm this is the back of the dependent's Emirates ID. I understand a TME team member will verify it manually.",
     sampleSrc: '/samples/eid-back-example.png',
     sampleAlt: 'Example Emirates ID back',
   },
@@ -264,6 +303,14 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   // validate/extract routes and the documents write route (P0-3).
   const aiToken = useSearchParams().get('token');
 
+  // Sponsor-facing flavour: the uploader is NOT the document holder, so every
+  // attestation is phrased about "the dependent" instead of "me". Everything
+  // else (slots, AI validation, strike counters, storage, submit gate) is
+  // identical to the staff re-request.
+  const isDependentRequest = submission.onboarding_type === 'dependent_document_request';
+  const confirmCopyFor = (cfg: { confirmCopy: string; confirmCopyDependent: string }) =>
+    isDependentRequest ? cfg.confirmCopyDependent : cfg.confirmCopy;
+
   // Keys that are neither validated slots nor in the generic map are NOT
   // rendered — the submit gate fails closed on them server-side.
   const requested = (submission.requested_documents ?? []).filter(
@@ -277,7 +324,10 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   // The passport_additional slot copy/sample/prompt depends on the holder's
   // nationality (Indian address page vs Syrian issue-details page). The
   // static PASSPORT_SLOTS entry carries the Indian defaults; override here.
-  const nationality = submission.employee_data?.nationality;
+  // Dependent requests carry no employee_data (the dependent's field block
+  // lives in prefill_employee_data), so fall back to the prefill.
+  const nationality =
+    submission.employee_data?.nationality ?? submission.prefill_employee_data?.nationality;
   const additionalVariant = passportAdditionalPageVariant(nationality);
   const passportSlotConfig = (key: PassportRequestKey) => {
     const cfg = PASSPORT_SLOTS[key];
@@ -287,6 +337,8 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       description: 'Page with date/place of issue and national number',
       confirmCopy:
         'I confirm this is my Syrian passport additional page (issue details / national number). I understand a TME team member will verify it manually.',
+      confirmCopyDependent:
+        "I confirm this is the dependent's Syrian passport additional page (issue details / national number). I understand a TME team member will verify it manually.",
       sampleSrc: '/samples/passport-additional-syria-example.png',
       sampleAlt: 'Example Syrian passport additional page',
     };
@@ -844,7 +896,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
           />
           {renderManualReview(
             'photo',
-            'I confirm this is a recent passport-style photo of myself (plain light background, head and shoulders visible, no glasses). I understand a TME team member will verify it manually.',
+            isDependentRequest
+              ? 'I confirm this is a recent passport-style photo of the dependent (plain light background, head and shoulders visible, no glasses). I understand a TME team member will verify it manually.'
+              : 'I confirm this is a recent passport-style photo of myself (plain light background, head and shoulders visible, no glasses). I understand a TME team member will verify it manually.',
             handlePhotoManualReview,
             !!photoDoc,
             !!photoDoc?.validated
@@ -875,7 +929,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
             onRemove={() => {}}
           />
           <SampleImageToggle imageSrc={cfg.sampleSrc} altText={cfg.sampleAlt} label="See example photo" />
-          {renderManualReview(pKey, cfg.confirmCopy, handlePassportManualReview(pKey), !!ui.file, !!pageRef?.validated)}
+          {renderManualReview(pKey, confirmCopyFor(cfg), handlePassportManualReview(pKey), !!ui.file, !!pageRef?.validated)}
         </>
       );
     }
@@ -903,7 +957,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
             onRemove={() => {}}
           />
           <SampleImageToggle imageSrc={cfg.sampleSrc} altText={cfg.sampleAlt} label="See example photo" />
-          {renderManualReview(eKey, cfg.confirmCopy, handleEidManualReview(eKey), !!ui.file, !!docRef?.validated)}
+          {renderManualReview(eKey, confirmCopyFor(cfg), handleEidManualReview(eKey), !!ui.file, !!docRef?.validated)}
         </>
       );
     }
@@ -957,7 +1011,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       {/* Intro */}
       <div className="bg-white rounded-xl p-6 shadow-sm">
         <p className="text-sm text-gray-600">
-          TME Services needs you to re-upload the following {requested.length === 1 ? 'document' : 'documents'}.
+          {isDependentRequest
+            ? `TME Services needs you to upload the following ${requested.length === 1 ? 'document' : 'documents'} for your dependent.`
+            : `TME Services needs you to re-upload the following ${requested.length === 1 ? 'document' : 'documents'}.`}{' '}
           Once every item shows as uploaded and accepted, you can submit.
         </p>
         <ul className="mt-3 space-y-1">

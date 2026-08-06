@@ -89,6 +89,16 @@ const ALLOWED_TYPES = new Set([
   'sponsor_visa',
   'sponsor_eid_front',
   'sponsor_eid_back',
+  // Dependent slots. Plain uploads: relationship certificate + the
+  // previously-held UAE visa/EID set. Written as flat refs by the dependent
+  // ONBOARDING form ('dependent'), and reused as generic re-request slots on
+  // 'dependent_document_request' (same storage segments, but the ref lands in
+  // extra_documents). A 'dependent_renewal' uses the passport/photo segments
+  // above and needs nothing extra here.
+  'relationship_certificate',
+  'previous_visa',
+  'previous_eid_front',
+  'previous_eid_back',
   // Custom-named document requests upload under this fixed segment — the
   // free-text name lives only in the extra_documents key (`custom:<name>`),
   // never in the storage path.

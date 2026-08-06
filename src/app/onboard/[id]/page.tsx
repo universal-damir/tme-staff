@@ -7,6 +7,7 @@ import { FormProgress } from '@/components/FormProgress';
 import { EmployerForm } from '@/components/EmployerForm';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { DocumentRequestForm } from '@/components/DocumentRequestForm';
+import { DependentForm } from '@/components/DependentForm';
 import type { StaffOnboardingSubmission, EmployerFormData, EmployeeFormData } from '@/types';
 import { Loader2, CheckCircle, XCircle, AlertTriangle, Lock } from 'lucide-react';
 
@@ -16,6 +17,7 @@ type PageState =
   | 'employee'
   | 'combined' // Same-person mode
   | 'document_request' // Re-upload of specific requested documents only
+  | 'dependent' // Sponsor registers a dependent (spouse / child / parent / maid)
   | 'success'
   | 'error'
   | 'not_found'
@@ -124,12 +126,28 @@ function OnboardingPageInner() {
           setPageState('cancelled');
         } else if (data.status === 'complete') {
           setPageState('already_complete');
-        } else if (data.onboarding_type === 'document_request') {
-          // Document re-request: the employee re-uploads ONLY the requested
-          // documents — no employer/employee steps, no signature. Token
-          // gating already happened server-side (current_step='employee'
-          // rows require the employee_access_token on the read route).
+        } else if (
+          data.onboarding_type === 'document_request' ||
+          data.onboarding_type === 'dependent_document_request'
+        ) {
+          // Document re-request: ONLY the requested documents get uploaded —
+          // no employer/employee steps, no signature. The dependent flavour
+          // takes the identical path; the SPONSOR uploads on behalf of a
+          // dependent already on file. Token gating already happened
+          // server-side (current_step='employee' rows require the
+          // employee_access_token on the read route; sponsor rows carry none,
+          // so the rotatable link_token is the secret).
           setPageState('document_request');
+        } else if (
+          data.onboarding_type === 'dependent' ||
+          data.onboarding_type === 'dependent_renewal'
+        ) {
+          // Dependent onboarding / renewal: a single-stage form the SPONSOR
+          // fills in for their dependent — no employer/employee steps.
+          // DependentForm switches itself into renewal mode off
+          // onboarding_type. Gating already happened server-side (link_token
+          // is the secret; dependent rows carry no employee_access_token).
+          setPageState('dependent');
         } else if (data.is_same_person) {
           if (data.current_step === 'employer') {
             setPageState('combined');
@@ -404,6 +422,12 @@ function OnboardingPageInner() {
           <p className="text-gray-600 mb-6">
             {submission?.onboarding_type === 'document_request'
               ? 'Your documents have been submitted successfully.'
+              : submission?.onboarding_type === 'dependent_document_request'
+              ? "The dependent's documents have been submitted successfully."
+              : submission?.onboarding_type === 'dependent_renewal'
+              ? 'The renewal details have been submitted successfully. TME Services will review them and get in touch.'
+              : submission?.onboarding_type === 'dependent'
+              ? 'The dependent details have been submitted successfully. TME Services will review them and get in touch.'
               : submission?.is_same_person
               ? 'Your form has been submitted successfully.'
               : pageState === 'success' && submission?.current_step === 'employer'
@@ -436,12 +460,39 @@ function OnboardingPageInner() {
   if (!submission) return null;
 
   const isRenewal = submission.onboarding_type === 'renewal';
-  const isDocumentRequest = submission.onboarding_type === 'document_request';
+  const isDependentDocumentRequest = submission.onboarding_type === 'dependent_document_request';
+  const isDocumentRequest =
+    submission.onboarding_type === 'document_request' || isDependentDocumentRequest;
+  const isDependentRenewal = submission.onboarding_type === 'dependent_renewal';
+  const isDependent = submission.onboarding_type === 'dependent' || isDependentRenewal;
   const isShowingEmployer = pageState === 'employer' || (pageState === 'combined' && !showEmployeeSection);
   // Widen the page only for the renewal employer step, where Salary Contract +
   // Payroll render side-by-side. Other steps (employee form, success states)
   // stay at the narrower default width.
   const containerWidthClass = isRenewal && isShowingEmployer ? 'max-w-6xl' : 'max-w-3xl';
+
+  // Sponsor flows are ABOUT the dependent but ADDRESSED to the sponsor, so the
+  // header names the dependent and the sub-line names the sponsor. The portal
+  // writes the dependent's name parts + relationship into prefill_employee_data;
+  // when it typed no name (possible on a first registration) fall back to
+  // "Dependent of <sponsor>", then to a generic label. `staff_name` on these
+  // rows is the SPONSOR, never the dependent — don't print it as the subject.
+  const dependentPrefill = (submission.prefill_employee_data ?? {}) as {
+    first_name?: string;
+    middle_name?: string;
+    last_name?: string;
+    dependent_type?: string;
+    sponsor_staff_name?: string;
+  };
+  const sponsorName = dependentPrefill.sponsor_staff_name || submission.staff_name || null;
+  const dependentName =
+    [dependentPrefill.first_name, dependentPrefill.middle_name, dependentPrefill.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim() || (sponsorName ? `Dependent of ${sponsorName}` : 'Your Dependent');
+  const dependentRelationship = dependentPrefill.dependent_type
+    ? dependentPrefill.dependent_type.toLowerCase()
+    : 'dependent';
 
   return (
     <main className="min-h-screen bg-gray-50 py-8 px-4">
@@ -452,20 +503,30 @@ function OnboardingPageInner() {
             className="text-2xl md:text-3xl font-bold mb-2"
             style={{ color: TME_COLORS.primary }}
           >
-            {isDocumentRequest
+            {isDependentDocumentRequest
+              ? `Document Upload for ${dependentName}`
+              : isDocumentRequest
               ? `Document Re-Upload${submission.staff_name ? ` for ${submission.staff_name}` : ''}`
+              : isDependentRenewal ? 'Dependent Visa Renewal'
+              : isDependent ? 'Dependent Registration'
               : isRenewal ? 'Staff Renewal' : 'Staff Onboarding'}
           </h1>
-          {!isDocumentRequest && submission.staff_name && (
+          {isDependentDocumentRequest ? (
+            <p className="text-gray-600">
+              You are uploading these documents for your {dependentRelationship}
+              {sponsorName ? <> as their sponsor (<span className="font-medium">{sponsorName}</span>)</> : null}.
+            </p>
+          ) : !isDocumentRequest && submission.staff_name ? (
             <p className="text-gray-600">
               <span className="font-medium">{submission.staff_name}</span>
             </p>
-          )}
+          ) : null}
         </div>
 
         {/* Progress — the employer/employee step bar makes no sense for a
-            document re-request (single upload step, no signature). */}
-        {!isDocumentRequest && (
+            document re-request (single upload step, no signature) or for a
+            dependent registration (single-stage form with its own step bar). */}
+        {!isDocumentRequest && !isDependent && (
           <FormProgress
             currentStep={showEmployeeSection ? 'employee' : submission.current_step}
             isSamePerson={submission.is_same_person}
@@ -502,6 +563,15 @@ function OnboardingPageInner() {
             />
           )}
 
+          {/* Dependent Registration — sponsor fills in one form for their
+              dependent (own steps + signature, submits itself). */}
+          {pageState === 'dependent' && (
+            <DependentForm
+              submission={submission}
+              onSubmitted={() => setPageState('success')}
+            />
+          )}
+
           {/* Error banner — rendered at the bottom of the form area so it
               sits just under the Submit button. A top-of-page banner would
               be off-screen after the user scrolled through the form, leaving
@@ -516,7 +586,7 @@ function OnboardingPageInner() {
 
         {/* Footer */}
         <div className="mt-12 text-center text-sm text-gray-400">
-          <p>TME Services - Staff {isDocumentRequest ? 'Document' : isRenewal ? 'Renewal' : 'Onboarding'} Portal</p>
+          <p>TME Services - Staff {isDocumentRequest ? 'Document' : isDependent ? 'Dependent' : isRenewal ? 'Renewal' : 'Onboarding'} Portal</p>
           <p className="mt-1">
             Need help?{' '}
             <a
