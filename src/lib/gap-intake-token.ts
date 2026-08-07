@@ -15,12 +15,21 @@ import { getSupabaseAdmin } from './supabase-server';
 export const GAP_INTAKE_UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Accounting / ERP systems offered in the intake dropdown. The named systems are
-// listed alphabetically; the two catch-alls ("None / spreadsheets", then "Other")
-// always sit at the bottom — "Other" must stay last because it reveals the
-// free-text field. The portal stores the picked value in `accounting_software`
-// and the free text in `accounting_software_other`.
+// Accounting / ERP systems offered in the intake dropdown. The three "no real
+// system" answers (Excel, Word, None) come first — they are the most common
+// reality for the clients we invite, and burying them at the bottom pushed
+// people into "Other" to type the same three words by hand. Then the named
+// systems alphabetically, then "Other", which must stay last because it reveals
+// the free-text field. The portal stores the picked value in
+// `accounting_software` and the free text in `accounting_software_other`.
+//
+// MUST STAY IN SYNC with the portal repo (`src/lib/gap-analysis/
+// accounting-software.ts`). The combined 'None / spreadsheets' option was
+// retired in 08.2026 when Excel and Word were split out; do not re-add it.
 export const ACCOUNTING_SOFTWARE_OPTIONS = [
+  'Excel',
+  'Word',
+  'None',
   'Focus',
   'FreshBooks',
   'Microsoft Dynamics 365',
@@ -33,7 +42,6 @@ export const ACCOUNTING_SOFTWARE_OPTIONS = [
   'Wafeq',
   'Xero',
   'Zoho Books',
-  'None / spreadsheets',
   'Other',
 ] as const;
 
@@ -51,7 +59,7 @@ export function isAllowedAccountingSoftware(v: string): boolean {
  * which the consultant confirms during the assessment. The intake page shows the
  * matching entry as soon as a client picks their system, so they immediately see
  * whether their tool can export XML and roughly how. "Other" has no entry (we
- * can't map free text) and "None / spreadsheets" is handled as a reassurance.
+ * can't map free text); Excel / Word / None are handled as a reassurance.
  *
  * `xml`:
  *   'yes'   — the system natively produces structured XML e-invoices
@@ -67,6 +75,18 @@ export interface AccountingSoftwareGuidance {
 }
 
 export const ACCOUNTING_SOFTWARE_GUIDANCE: Record<string, AccountingSoftwareGuidance> = {
+  Excel: {
+    xml: 'no',
+    note: "Excel produces a spreadsheet, not a structured XML e-invoice — and that's completely fine. We'll recommend a simple, right-sized tool so you're ready for the mandate.",
+  },
+  Word: {
+    xml: 'no',
+    note: "Word documents and the PDFs made from them carry no structured invoice data — and that's completely fine. We'll recommend a simple, right-sized tool so you're ready for the mandate.",
+  },
+  None: {
+    xml: 'no',
+    note: "No accounting system means there's no structured XML yet — and that's completely fine. We'll recommend a simple, right-sized tool so you're ready for the mandate.",
+  },
   Focus: {
     xml: 'yes',
     note: 'Focus (Focus Softnet) is built for the region and supports e-invoicing, so it can export invoices as structured XML. Your Focus consultant can switch on the UAE e-invoice format.',
@@ -114,10 +134,6 @@ export const ACCOUNTING_SOFTWARE_GUIDANCE: Record<string, AccountingSoftwareGuid
   'Zoho Books': {
     xml: 'maybe',
     note: 'Zoho Books supports e-invoicing and can export invoice data as XML, depending on your plan and region. Enable e-invoicing in Settings, then export the file or use the API.',
-  },
-  'None / spreadsheets': {
-    xml: 'no',
-    note: "Working from spreadsheets means there's no structured XML yet — and that's completely fine. We'll recommend a simple, right-sized tool so you're ready for the mandate.",
   },
 };
 
