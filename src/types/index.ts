@@ -524,8 +524,12 @@ export interface StaffOnboardingSubmission {
   staff_name?: string;
   staff_email?: string;
 
-  // Pre-fill data (from TME Portal for renewals)
-  prefill_employer_data: Partial<EmployerFormData> | null;
+  // Pre-fill data (from TME Portal for renewals). `visa_track` is a portal-set
+  // marker, not an employer form field: 'partner_investor' flags a DET
+  // Partner/Investor visa (company shareholder) — the employer stage is
+  // skipped entirely (rows arrive with status='employer_completed',
+  // current_step='employee', is_same_person=false).
+  prefill_employer_data: (Partial<EmployerFormData> & { visa_track?: string }) | null;
   prefill_employee_data: Partial<EmployeeFormData> | null;
   onboarding_type: OnboardingType;
   sponsorship_type?: SponsorshipType | null;

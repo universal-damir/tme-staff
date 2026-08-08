@@ -148,6 +148,14 @@ function OnboardingPageInner() {
           // onboarding_type. Gating already happened server-side (link_token
           // is the secret; dependent rows carry no employee_access_token).
           setPageState('dependent');
+        } else if (data.prefill_employer_data?.visa_track === 'partner_investor') {
+          // Partner/Investor track (DET company shareholders): the visa is not
+          // employment-based, so the portal creates these rows with the
+          // employer stage already skipped (status='employer_completed',
+          // current_step='employee', is_same_person=false). Route straight to
+          // the employee form — even if a row somehow arrives on the employer
+          // step, the salary form must never render for this track.
+          setPageState('employee');
         } else if (data.is_same_person) {
           if (data.current_step === 'employer') {
             setPageState('combined');
@@ -305,6 +313,13 @@ function OnboardingPageInner() {
     [submission, id, employerData]
   );
 
+  // Partner/Investor track (DET company shareholders) — employer stage is
+  // skipped by the portal; the form is addressed to the applicant, not an
+  // employee. Derived before the early returns so the success copy below can
+  // use it too.
+  const isPartnerInvestorTrack =
+    submission?.prefill_employer_data?.visa_track === 'partner_investor';
+
   // Loading state
   if (pageState === 'loading') {
     return (
@@ -430,7 +445,7 @@ function OnboardingPageInner() {
               ? 'The dependent details have been submitted successfully. TME Services will review them and get in touch.'
               : submission?.is_same_person
               ? 'Your form has been submitted successfully.'
-              : pageState === 'success' && submission?.current_step === 'employer'
+              : !isPartnerInvestorTrack && pageState === 'success' && submission?.current_step === 'employer'
               ? 'The employer section has been completed. An email has been sent to the employee to complete their section.'
               : 'Your form has been submitted successfully.'}
           </p>
@@ -509,6 +524,8 @@ function OnboardingPageInner() {
               ? `Document Re-Upload${submission.staff_name ? ` for ${submission.staff_name}` : ''}`
               : isDependentRenewal ? 'Dependent Visa Renewal'
               : isDependent ? 'Dependent Registration'
+              : isPartnerInvestorTrack
+              ? (isRenewal ? 'Partner / Investor Visa Renewal' : 'Partner / Investor Visa Application')
               : isRenewal ? 'Staff Renewal' : 'Staff Onboarding'}
           </h1>
           {isDependentDocumentRequest ? (
@@ -524,9 +541,10 @@ function OnboardingPageInner() {
         </div>
 
         {/* Progress — the employer/employee step bar makes no sense for a
-            document re-request (single upload step, no signature) or for a
-            dependent registration (single-stage form with its own step bar). */}
-        {!isDocumentRequest && !isDependent && (
+            document re-request (single upload step, no signature), a
+            dependent registration (single-stage form with its own step bar),
+            or the Partner/Investor track (no employer step ever exists). */}
+        {!isDocumentRequest && !isDependent && !isPartnerInvestorTrack && (
           <FormProgress
             currentStep={showEmployeeSection ? 'employee' : submission.current_step}
             isSamePerson={submission.is_same_person}
@@ -586,7 +604,7 @@ function OnboardingPageInner() {
 
         {/* Footer */}
         <div className="mt-12 text-center text-sm text-gray-400">
-          <p>TME Services - Staff {isDocumentRequest ? 'Document' : isDependent ? 'Dependent' : isRenewal ? 'Renewal' : 'Onboarding'} Portal</p>
+          <p>TME Services - {isPartnerInvestorTrack ? `Visa ${isRenewal ? 'Renewal' : 'Application'}` : `Staff ${isDocumentRequest ? 'Document' : isDependent ? 'Dependent' : isRenewal ? 'Renewal' : 'Onboarding'}`} Portal</p>
           <p className="mt-1">
             Need help?{' '}
             <a

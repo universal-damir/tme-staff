@@ -43,6 +43,7 @@ import {
 import { calculateFullName, compressImageForAI, normalizePersonName } from '@/lib/utils';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { useIsMobile } from '@/lib/useIsMobile';
+import ExistingDocPreview from '@/components/ExistingDocPreview';
 import { nationalityToCountryCode, resolveExtractedNationality } from '@/lib/country-utils';
 import {
   AlertTriangle,
@@ -1691,43 +1692,13 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
             {existingDocs?.passport_cover?.publicUrl && (
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Passport Cover</label>
-                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={existingDocs.passport_cover.publicUrl}
-                    alt="Passport Cover"
-                    className="w-full h-auto max-h-64 object-contain"
-                  />
-                </div>
-              </div>
+              <ExistingDocPreview label="Passport Cover" doc={existingDocs.passport_cover} />
             )}
             {existingDocs?.passport_inside?.publicUrl && (
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Passport Data Page</label>
-                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={existingDocs.passport_inside.publicUrl}
-                    alt="Passport Data Page"
-                    className="w-full h-auto max-h-64 object-contain"
-                  />
-                </div>
-              </div>
+              <ExistingDocPreview label="Passport Data Page" doc={existingDocs.passport_inside} />
             )}
             {existingDocs?.passport_additional?.publicUrl && (
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Additional Page</label>
-                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={existingDocs.passport_additional.publicUrl}
-                    alt="Additional Page"
-                    className="w-full h-auto max-h-64 object-contain"
-                  />
-                </div>
-              </div>
+              <ExistingDocPreview label="Additional Page" doc={existingDocs.passport_additional} />
             )}
           </div>
 

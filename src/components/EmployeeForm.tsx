@@ -56,6 +56,7 @@ import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { useIsMobile } from '@/lib/useIsMobile';
 import { nationalityToCountryCode, resolveExtractedNationality } from '@/lib/country-utils';
 import { SampleImageToggle } from '@/components/SampleImageToggle';
+import ExistingDocPreview from '@/components/ExistingDocPreview';
 import {
   User,
   Users,
@@ -406,6 +407,11 @@ export function EmployeeForm({
 
   // Renewal passport confirmation
   const isRenewal = submission.onboarding_type === 'renewal';
+  // Partner/Investor track (DET company shareholders): the portal skips the
+  // employer stage entirely and marks the row via prefill_employer_data.
+  // Copy-only adjustments here — the applicant is a partner, not an employee.
+  const isPartnerInvestorTrack =
+    submission.prefill_employer_data?.visa_track === 'partner_investor';
   // Family-sponsored variant — drives the sponsor step + NOC + mandatory
   // applicant Visa/EID. Derive the gate from the employer's FINAL sponsor pick
   // (employer_data.sponsor) so the flow reacts to whatever the employer chose;
@@ -887,7 +893,10 @@ export function EmployeeForm({
     educationalQualification &&
     !['Primary School', 'Secondary School / High School', 'Vocational Certificate'].includes(educationalQualification)
   );
-  const showDetExtendedBlock = isDET && isDegreeLevelQualification;
+  // Partner/Investor visas (shareholders) are not employment-based — DET only
+  // requires the extended education details for work-permit applications, so
+  // the block is skipped entirely on the partner/investor track.
+  const showDetExtendedBlock = isDET && isDegreeLevelQualification && !isPartnerInvestorTrack;
 
   // Derive country code from nationality for phone inputs
   const nationalityCountryCode = nationality ? nationalityToCountryCode(nationality) : undefined;
@@ -1047,7 +1056,9 @@ export function EmployeeForm({
     detGraduationYear &&
     detActualYearsOfDegree
   );
-  const isEducationComplete = !!(
+  // Partner/Investor track: the Education & More step is skipped entirely —
+  // education is a work-permit concern and shareholder visas have none.
+  const isEducationComplete = isPartnerInvestorTrack || !!(
     educationalQualification &&
     (educationalQualification !== 'Other' || educationalQualificationCustom) &&
     languagesSpoken.length > 0 &&
@@ -1131,9 +1142,13 @@ export function EmployeeForm({
   // displayedStepNumber derive the "Step X of Y" numbering from this array's
   // positions automatically.
   const isStep4Empty = !showVisaCategoryPicker && isRenewal;
-  const baseStepIndices = isStep4Empty
+  // Partner/Investor track additionally drops step 7 (Education & More):
+  // education/languages serve work-permit applications, which shareholder
+  // visas don't have; Bank Details is already hidden via bank_locked.
+  const baseStepIndices = (isStep4Empty
     ? [1, 2, 3, 5, 6, 7, 8]
-    : [1, 2, 3, 4, 5, 6, 7, 8];
+    : [1, 2, 3, 4, 5, 6, 7, 8]
+  ).filter((s) => !(isPartnerInvestorTrack && s === 7));
   const visibleStepIndices = isFamilySponsored
     ? [...baseStepIndices, 9]
     : baseStepIndices;
@@ -2816,43 +2831,13 @@ export function EmployeeForm({
           {/* Display existing passport images */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
             {existingDocs?.passport_cover && (
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Passport Cover</label>
-                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={existingDocs.passport_cover.publicUrl}
-                    alt="Passport Cover"
-                    className="w-full h-auto max-h-64 object-contain"
-                  />
-                </div>
-              </div>
+              <ExistingDocPreview label="Passport Cover" doc={existingDocs.passport_cover} />
             )}
             {existingDocs?.passport_inside && (
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Passport Data Page</label>
-                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={existingDocs.passport_inside.publicUrl}
-                    alt="Passport Data Page"
-                    className="w-full h-auto max-h-64 object-contain"
-                  />
-                </div>
-              </div>
+              <ExistingDocPreview label="Passport Data Page" doc={existingDocs.passport_inside} />
             )}
             {existingDocs?.passport_additional && (
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Additional Page</label>
-                <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={existingDocs.passport_additional.publicUrl}
-                    alt="Additional Page"
-                    className="w-full h-auto max-h-64 object-contain"
-                  />
-                </div>
-              </div>
+              <ExistingDocPreview label="Additional Page" doc={existingDocs.passport_additional} />
             )}
           </div>
 
@@ -4212,16 +4197,18 @@ export function EmployeeForm({
           {viewingStep === 6 && (
             <StepNavButtons
               enabled={isContactComplete}
-              onContinue={() => setViewingStep(7)}
+              onContinue={() => setViewingStep(isPartnerInvestorTrack ? 8 : 7)}
               onBack={() => setViewingStep(5)}
+              label={isPartnerInvestorTrack ? 'Review & Sign' : undefined}
             />
           )}
         </div>
       </RevealSection>
 
-      {/* Step 7: Education & More */}
+      {/* Step 7: Education & More — skipped entirely on the Partner/Investor
+          track (also excluded from the review pass on step 8) */}
       <RevealSection
-        show={viewingStep === 7 || viewingStep === 8}
+        show={!isPartnerInvestorTrack && (viewingStep === 7 || viewingStep === 8)}
         onReveal={viewingStep !== 8 ? () => scrollToRef(educationRef) : undefined}
       >
         <div ref={educationRef} className="space-y-6">
@@ -5032,7 +5019,11 @@ export function EmployeeForm({
                 loading={isSubmitting}
                 size="lg"
               >
-                {submission.onboarding_type === 'renewal' ? 'Submit Renewal Form' : 'Submit Onboarding Form'}
+                {submission.onboarding_type === 'renewal'
+                  ? 'Submit Renewal Form'
+                  : isPartnerInvestorTrack
+                  ? 'Submit Application Form'
+                  : 'Submit Onboarding Form'}
               </Button>
             </div>
           )}
@@ -5059,7 +5050,7 @@ export function EmployeeForm({
                 <SignaturePad
                   onSignatureChange={setSignature}
                   disabled={isSubmitting}
-                  label="Employee Signature"
+                  label={isPartnerInvestorTrack ? 'Applicant Signature' : 'Employee Signature'}
                   initialValue={signature}
                 />
                 {signatureError && (
@@ -5096,7 +5087,11 @@ export function EmployeeForm({
                 loading={isSubmitting}
                 size="lg"
               >
-                {submission.onboarding_type === 'renewal' ? 'Submit Renewal Form' : 'Submit Onboarding Form'}
+                {submission.onboarding_type === 'renewal'
+                  ? 'Submit Renewal Form'
+                  : isPartnerInvestorTrack
+                  ? 'Submit Application Form'
+                  : 'Submit Onboarding Form'}
               </Button>
             </div>
           )}
