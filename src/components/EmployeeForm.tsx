@@ -421,7 +421,11 @@ export function EmployeeForm({
   const sponsorshipType = effectiveSponsor
     ? sponsorshipTypeFromSponsor(effectiveSponsor)
     : (submission.sponsorship_type ?? 'company');
-  const isFamilySponsored = sponsorDocsRequired(sponsorshipType);
+  // Never on the Partner/Investor track: those visas are company-sponsored by
+  // definition (the portal forces sponsor = Company, this is the backstop for
+  // rows created before that), and the family variant's step navigation
+  // assumes the Education step, which the track removes.
+  const isFamilySponsored = sponsorDocsRequired(sponsorshipType) && !isPartnerInvestorTrack;
   const existingDocs = submission.existing_documents;
   // The "passport unchanged" skip is only legitimate when BOTH pages are
   // actually on file — with only one of them, confirming "same as shown"
