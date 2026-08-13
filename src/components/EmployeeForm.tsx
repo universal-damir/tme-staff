@@ -412,6 +412,15 @@ export function EmployeeForm({
   // Copy-only adjustments here — the applicant is a partner, not an employee.
   const isPartnerInvestorTrack =
     submission.prefill_employer_data?.visa_track === 'partner_investor';
+  // Education step gate: the portal flags renewals whose visa profession is
+  // below "manager and above" (education certificates only matter there) with
+  // education_skipped — those drop step 7 (Education & More) exactly like the
+  // Partner/Investor track does. Bank Details lives inside step 7 too, but is
+  // independently hidden via prefill_employee_data.bank_locked on every
+  // renewal, so nothing inside the dropped step is ever required.
+  const skipEducationStep =
+    isPartnerInvestorTrack ||
+    submission.prefill_employer_data?.education_skipped === true;
   // Family-sponsored variant — drives the sponsor step + NOC + mandatory
   // applicant Visa/EID. Derive the gate from the employer's FINAL sponsor pick
   // (employer_data.sponsor) so the flow reacts to whatever the employer chose;
@@ -899,8 +908,9 @@ export function EmployeeForm({
   );
   // Partner/Investor visas (shareholders) are not employment-based — DET only
   // requires the extended education details for work-permit applications, so
-  // the block is skipped entirely on the partner/investor track.
-  const showDetExtendedBlock = isDET && isDegreeLevelQualification && !isPartnerInvestorTrack;
+  // the block is skipped entirely whenever the education step itself is
+  // dropped (partner/investor track, or education_skipped renewals).
+  const showDetExtendedBlock = isDET && isDegreeLevelQualification && !skipEducationStep;
 
   // Derive country code from nationality for phone inputs
   const nationalityCountryCode = nationality ? nationalityToCountryCode(nationality) : undefined;
@@ -1060,9 +1070,9 @@ export function EmployeeForm({
     detGraduationYear &&
     detActualYearsOfDegree
   );
-  // Partner/Investor track: the Education & More step is skipped entirely —
-  // education is a work-permit concern and shareholder visas have none.
-  const isEducationComplete = isPartnerInvestorTrack || !!(
+  // When the Education & More step is skipped (partner/investor track, or
+  // education_skipped renewals) it is always complete — the step is hidden.
+  const isEducationComplete = skipEducationStep || !!(
     educationalQualification &&
     (educationalQualification !== 'Other' || educationalQualificationCustom) &&
     languagesSpoken.length > 0 &&
@@ -1146,13 +1156,14 @@ export function EmployeeForm({
   // displayedStepNumber derive the "Step X of Y" numbering from this array's
   // positions automatically.
   const isStep4Empty = !showVisaCategoryPicker && isRenewal;
-  // Partner/Investor track additionally drops step 7 (Education & More):
-  // education/languages serve work-permit applications, which shareholder
-  // visas don't have; Bank Details is already hidden via bank_locked.
+  // Step 7 (Education & More) is dropped on the Partner/Investor track and on
+  // education_skipped renewals: education/languages only matter for "manager
+  // and above" work-permit professions; Bank Details is already hidden via
+  // bank_locked.
   const baseStepIndices = (isStep4Empty
     ? [1, 2, 3, 5, 6, 7, 8]
     : [1, 2, 3, 4, 5, 6, 7, 8]
-  ).filter((s) => !(isPartnerInvestorTrack && s === 7));
+  ).filter((s) => !(skipEducationStep && s === 7));
   const visibleStepIndices = isFamilySponsored
     ? [...baseStepIndices, 9]
     : baseStepIndices;
@@ -4201,18 +4212,19 @@ export function EmployeeForm({
           {viewingStep === 6 && (
             <StepNavButtons
               enabled={isContactComplete}
-              onContinue={() => setViewingStep(isPartnerInvestorTrack ? 8 : 7)}
+              onContinue={() => setViewingStep(skipEducationStep ? 8 : 7)}
               onBack={() => setViewingStep(5)}
-              label={isPartnerInvestorTrack ? 'Review & Sign' : undefined}
+              label={skipEducationStep ? 'Review & Sign' : undefined}
             />
           )}
         </div>
       </RevealSection>
 
       {/* Step 7: Education & More — skipped entirely on the Partner/Investor
-          track (also excluded from the review pass on step 8) */}
+          track and on education_skipped renewals (also excluded from the
+          review pass on step 8) */}
       <RevealSection
-        show={!isPartnerInvestorTrack && (viewingStep === 7 || viewingStep === 8)}
+        show={!skipEducationStep && (viewingStep === 7 || viewingStep === 8)}
         onReveal={viewingStep !== 8 ? () => scrollToRef(educationRef) : undefined}
       >
         <div ref={educationRef} className="space-y-6">
@@ -5102,12 +5114,14 @@ export function EmployeeForm({
 
           {/* Family-sponsored: the sponsor signs the NOC AFTER review, so this
               is not the final step. Continue to the Sponsor step (9) once the
-              employee signature is present; Back returns to Education (7). */}
+              employee signature is present; Back returns to Education (7) —
+              or to Address & Contact (6) when the education step is dropped
+              (education_skipped renewals), never onto a hidden step. */}
           {isFamilySponsored && (
             <StepNavButtons
               enabled={!!signature || reuseEmployerSignature}
               onContinue={() => setViewingStep(9)}
-              onBack={() => setViewingStep(7)}
+              onBack={() => setViewingStep(skipEducationStep ? 6 : 7)}
             />
           )}
         </div>

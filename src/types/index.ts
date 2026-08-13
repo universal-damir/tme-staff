@@ -529,7 +529,12 @@ export interface StaffOnboardingSubmission {
   // Partner/Investor visa (company shareholder) — the employer stage is
   // skipped entirely (rows arrive with status='employer_completed',
   // current_step='employee', is_same_person=false).
-  prefill_employer_data: (Partial<EmployerFormData> & { visa_track?: string }) | null;
+  // `education_skipped` is another portal-set marker (renewals only): the
+  // education step is only needed for "manager and above" visa professions,
+  // so the portal flags everyone else and the form drops step 7 entirely.
+  prefill_employer_data:
+    | (Partial<EmployerFormData> & { visa_track?: string; education_skipped?: boolean })
+    | null;
   prefill_employee_data: Partial<EmployeeFormData> | null;
   onboarding_type: OnboardingType;
   sponsorship_type?: SponsorshipType | null;
