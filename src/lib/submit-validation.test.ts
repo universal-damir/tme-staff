@@ -444,10 +444,14 @@ describe('missingRequestedDocuments', () => {
  * Both are the server-side authority: the sponsor-facing DependentForm gates
  * every step, but only in browser JavaScript.
  */
+// Spouse + a nationality with no extra document requirements (no
+// additional passport page, no Pakistan National ID) — the matrix cases add
+// their own overrides. The IBAN deliberately carries spaces: the gate must
+// normalize before validating.
 const completeDependentData = {
   first_name: 'Aisha',
   last_name: 'Khan',
-  nationality: 'Pakistani',
+  nationality: 'Egyptian',
   date_of_birth: '1990-04-11',
   gender: 'female',
   passport_no: 'AB1234567',
@@ -456,14 +460,22 @@ const completeDependentData = {
   father_full_name: 'Ahmed Khan',
   religion: 'Islam',
   marital_status: 'Married',
-  home_street_address: '12 Jinnah Road',
-  home_city: 'Lahore',
-  home_country: 'Pakistan',
+  home_street_address: '12 Corniche Road',
+  home_city: 'Cairo',
+  home_country: 'Egypt',
   uae_presence: 'outside',
   mobile_uae: '+971501234567',
   email: 'aisha@example.com',
   previously_held_uae_visa: false,
   certificate_attestation_confirmed: true,
+  dependent_type: 'Spouse',
+  sponsor_iban: 'AE07 0331 2345 6789 0123 456',
+};
+
+// Renewal payloads additionally carry the mandatory on-file confirmation.
+const completeDependentRenewalData = {
+  ...completeDependentData,
+  details_confirmed_up_to_date: true,
 };
 
 const dependentDocs = {
@@ -520,7 +532,8 @@ describe('missingDependentRequirements', () => {
     expect(missing).toEqual([
       'Whether the dependent previously held a UAE visa',
       'Confirmation that the certificate is attested',
-      'Relationship certificate',
+      // Spouse: the primary slot IS the marriage certificate.
+      'Marriage certificate',
     ]);
   });
 
@@ -550,6 +563,152 @@ describe('missingDependentRequirements', () => {
     expect(missing).toContain('Passport cover page');
     expect(missing).toContain('Passport data page');
   });
+
+  it('requires the sponsor UAE IBAN and rejects a malformed one', () => {
+    expect(
+      missingDependentRequirements(
+        { documents: dependentDocs },
+        { ...completeDependentData, sponsor_iban: '' }
+      )
+    ).toContain("Sponsor's UAE bank IBAN");
+    // Wrong country prefix and wrong length both fail the AE + 21 digits rule.
+    for (const bad of ['DE07033123456789012345', 'AE0703312345678901234', 'AE07X331234567890123456']) {
+      expect(
+        missingDependentRequirements(
+          { documents: dependentDocs },
+          { ...completeDependentData, sponsor_iban: bad }
+        )
+      ).toContain("Sponsor's UAE bank IBAN (must be AE followed by 21 digits)");
+    }
+    // Spaces are tolerated (normalized before validation) — fixture has them.
+    expect(
+      missingDependentRequirements({ documents: dependentDocs }, completeDependentData)
+    ).toEqual([]);
+  });
+
+  it('Son/Daughter: additionally requires the parents\' marriage certificate', () => {
+    const sonData = { ...completeDependentData, dependent_type: 'Son' };
+    expect(missingDependentRequirements({ documents: dependentDocs }, sonData)).toEqual([
+      'Marriage certificate',
+    ]);
+    expect(
+      missingDependentRequirements(
+        {
+          documents: {
+            ...dependentDocs,
+            marriage_certificate: { path: 'd/marriage.pdf', filename: 'marriage.pdf' },
+          },
+        },
+        sonData
+      )
+    ).toEqual([]);
+  });
+
+  it('Father/Mother and in-laws: require the parents\' marital status select', () => {
+    const docsWithMarriage = {
+      ...dependentDocs,
+      marriage_certificate: { path: 'd/marriage.pdf', filename: 'marriage.pdf' },
+    };
+    for (const relationship of ['Father', 'Mother', 'Father-in-Law', 'Mother-in-Law']) {
+      expect(
+        missingDependentRequirements(
+          { documents: docsWithMarriage },
+          { ...completeDependentData, dependent_type: relationship }
+        )
+      ).toEqual(['Marital status of the parents']);
+      expect(
+        missingDependentRequirements(
+          { documents: docsWithMarriage },
+          { ...completeDependentData, dependent_type: relationship, parents_marital_status: 'Married' }
+        )
+      ).toEqual([]);
+    }
+  });
+
+  it('Divorced/Deceased parents add the divorce/death certificate (marriage cert stays required)', () => {
+    const docsWithMarriage = {
+      ...dependentDocs,
+      marriage_certificate: { path: 'd/marriage.pdf', filename: 'marriage.pdf' },
+    };
+    const fatherData = { ...completeDependentData, dependent_type: 'Father' };
+    expect(
+      missingDependentRequirements(
+        { documents: docsWithMarriage },
+        { ...fatherData, parents_marital_status: 'Divorced' }
+      )
+    ).toEqual(['Divorce certificate']);
+    expect(
+      missingDependentRequirements(
+        { documents: docsWithMarriage },
+        { ...fatherData, parents_marital_status: 'Deceased' }
+      )
+    ).toEqual(['Death certificate']);
+    // Marriage certificate is required in ALL three marital-status cases.
+    expect(
+      missingDependentRequirements(
+        { documents: dependentDocs },
+        { ...fatherData, parents_marital_status: 'Deceased' }
+      )
+    ).toEqual(['Marriage certificate', 'Death certificate']);
+    expect(
+      missingDependentRequirements(
+        {
+          documents: {
+            ...docsWithMarriage,
+            death_certificate: { path: 'd/death.pdf', filename: 'death.pdf' },
+          },
+        },
+        { ...fatherData, parents_marital_status: 'Deceased' }
+      )
+    ).toEqual([]);
+  });
+
+  it('an unknown or absent relationship (legacy Maid) falls back to the primary certificate only', () => {
+    for (const relationship of ['Maid', undefined]) {
+      expect(
+        missingDependentRequirements(
+          { documents: dependentDocs },
+          { ...completeDependentData, dependent_type: relationship }
+        )
+      ).toEqual([]);
+    }
+  });
+
+  it('requires the Pakistan National ID (front + back) for a Pakistani dependent', () => {
+    const pakistaniData = {
+      ...completeDependentData,
+      nationality: 'Pakistani',
+      home_country: 'Pakistan',
+    };
+    const missing = missingDependentRequirements({ documents: dependentDocs }, pakistaniData);
+    expect(missing).toEqual(['Pakistan National ID (front)', 'Pakistan National ID (back)']);
+    expect(
+      missingDependentRequirements(
+        {
+          documents: {
+            ...dependentDocs,
+            pakistan_id_front: { path: 'd/pk-front.jpg', filename: 'pk-front.jpg', validated: true },
+            pakistan_id_back: { path: 'd/pk-back.jpg', filename: 'pk-back.jpg', validated: true },
+          },
+        },
+        pakistaniData
+      )
+    ).toEqual([]);
+  });
+
+  it('copies on file never satisfy the Pakistan ID on a FIRST registration', () => {
+    const missing = missingDependentRequirements(
+      {
+        documents: dependentDocs,
+        existing_documents: {
+          pakistan_id_front: { path: 'e/pk-front.jpg' },
+          pakistan_id_back: { path: 'e/pk-back.jpg' },
+        },
+      } as Parameters<typeof missingDependentRequirements>[0],
+      { ...completeDependentData, nationality: 'Pakistani' }
+    );
+    expect(missing).toEqual(['Pakistan National ID (front)', 'Pakistan National ID (back)']);
+  });
 });
 
 describe('missingDependentRenewalRequirements', () => {
@@ -557,14 +716,14 @@ describe('missingDependentRenewalRequirements', () => {
     expect(
       missingDependentRenewalRequirements(
         { documents: { photo: validPhoto, passportPages } },
-        completeDependentData
+        completeDependentRenewalData
       )
     ).toEqual([]);
   });
 
   it('does not re-ask the attestation or the visa-history answer', () => {
     const { certificate_attestation_confirmed, previously_held_uae_visa, ...withoutRenewalSkipped } =
-      completeDependentData;
+      completeDependentRenewalData;
     expect(certificate_attestation_confirmed).toBe(true); // fixture sanity
     expect(previously_held_uae_visa).toBe(false);
     expect(
@@ -579,7 +738,7 @@ describe('missingDependentRenewalRequirements', () => {
     expect(
       missingDependentRenewalRequirements(
         { documents: { photo: validPhoto, passportPages } },
-        { ...completeDependentData, previously_held_uae_visa: true }
+        { ...completeDependentRenewalData, previously_held_uae_visa: true }
       )
     ).toEqual([]);
   });
@@ -587,7 +746,7 @@ describe('missingDependentRenewalRequirements', () => {
   it('still requires every identity, address and contact field', () => {
     const missing = missingDependentRenewalRequirements(
       { documents: { photo: validPhoto, passportPages } },
-      { ...completeDependentData, passport_no: '', uae_presence: 'inside' }
+      { ...completeDependentRenewalData, passport_no: '', uae_presence: 'inside' }
     );
     expect(missing).toEqual([
       'Passport number',
@@ -604,7 +763,7 @@ describe('missingDependentRenewalRequirements', () => {
           documents: { photo: validPhoto, passport_unchanged: true },
           existing_documents: existingPassportOnFile,
         },
-        completeDependentData
+        completeDependentRenewalData
       )
     ).toEqual([]);
   });
@@ -612,7 +771,7 @@ describe('missingDependentRenewalRequirements', () => {
   it('rejects the skip without the persisted attestation (stricter than the staff gate)', () => {
     const missing = missingDependentRenewalRequirements(
       { documents: { photo: validPhoto }, existing_documents: existingPassportOnFile },
-      completeDependentData
+      completeDependentRenewalData
     );
     expect(missing).toEqual(['Passport cover page', 'Passport data page']);
   });
@@ -623,7 +782,7 @@ describe('missingDependentRenewalRequirements', () => {
         documents: { photo: validPhoto, passport_unchanged: true },
         existing_documents: { passport_inside: { path: 'e/inside.pdf' } },
       },
-      completeDependentData
+      completeDependentRenewalData
     );
     expect(missing).toEqual(['Passport cover page', 'Passport data page']);
   });
@@ -631,7 +790,7 @@ describe('missingDependentRenewalRequirements', () => {
   it('rejects the skip when existing_documents is absent entirely', () => {
     const missing = missingDependentRenewalRequirements(
       { documents: { photo: validPhoto, passport_unchanged: true } },
-      completeDependentData
+      completeDependentRenewalData
     );
     expect(missing).toEqual(['Passport cover page', 'Passport data page']);
   });
@@ -643,7 +802,7 @@ describe('missingDependentRenewalRequirements', () => {
           documents: { photo: validPhoto, passport_unchanged: true },
           existing_documents: existingPassportOnFile,
         },
-        { ...completeDependentData, nationality: 'Indian' }
+        { ...completeDependentRenewalData, nationality: 'Indian' }
       )
     ).toEqual([]);
   });
@@ -655,7 +814,7 @@ describe('missingDependentRenewalRequirements', () => {
           documents: { photo: validPhoto, passportPages, passport_unchanged: true },
           existing_documents: existingPassportOnFile,
         },
-        { ...completeDependentData, nationality: 'Syrian' }
+        { ...completeDependentRenewalData, nationality: 'Syrian' }
       )
     ).toEqual(['Passport additional page']);
   });
@@ -667,7 +826,7 @@ describe('missingDependentRenewalRequirements', () => {
           documents: { passport_unchanged: true },
           existing_documents: { ...existingPassportOnFile, photo: { path: 'e/photo.jpg' } },
         },
-        completeDependentData
+        completeDependentRenewalData
       )
     ).toEqual(['ID photo']);
   });
@@ -679,7 +838,7 @@ describe('missingDependentRenewalRequirements', () => {
           documents: { photo: failedPhoto, passport_unchanged: true },
           existing_documents: existingPassportOnFile,
         },
-        completeDependentData
+        completeDependentRenewalData
       )
     ).toEqual(['ID photo (must pass validation or be submitted for manual review)']);
   });
@@ -691,7 +850,94 @@ describe('missingDependentRenewalRequirements', () => {
           documents: { photo: manualReviewPhoto, passport_unchanged: true },
           existing_documents: existingPassportOnFile,
         },
-        completeDependentData
+        completeDependentRenewalData
+      )
+    ).toEqual([]);
+  });
+
+  it('requires the "details on file are still up to date" confirmation', () => {
+    const { details_confirmed_up_to_date, ...withoutConfirmation } = completeDependentRenewalData;
+    expect(details_confirmed_up_to_date).toBe(true); // fixture sanity
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: validPhoto, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        withoutConfirmation
+      )
+    ).toEqual(['Confirmation that the details on file are still up to date']);
+  });
+
+  it('still requires the sponsor IBAN on a renewal', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: validPhoto, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        { ...completeDependentRenewalData, sponsor_iban: undefined }
+      )
+    ).toEqual(["Sponsor's UAE bank IBAN"]);
+  });
+
+  it('Pakistan ID: copies on file satisfy a renewal; absent both, uploads are required', () => {
+    const pakistaniRenewal = {
+      ...completeDependentRenewalData,
+      nationality: 'Pakistani',
+      home_country: 'Pakistan',
+    };
+    // On file from the portal prefill — satisfied.
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: validPhoto, passport_unchanged: true },
+          existing_documents: {
+            ...existingPassportOnFile,
+            pakistan_id_front: { path: 'e/pk-front.jpg' },
+            pakistan_id_back: { path: 'e/pk-back.jpg' },
+          },
+        },
+        pakistaniRenewal
+      )
+    ).toEqual([]);
+    // Nothing on file and nothing uploaded — fail closed, per side.
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: validPhoto, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        pakistaniRenewal
+      )
+    ).toEqual(['Pakistan National ID (front)', 'Pakistan National ID (back)']);
+    // A fresh upload replaces a missing side.
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: {
+            photo: validPhoto,
+            passport_unchanged: true,
+            pakistan_id_front: { path: 'd/pk-front.jpg', filename: 'pk-front.jpg', validated: true },
+          },
+          existing_documents: {
+            ...existingPassportOnFile,
+            pakistan_id_back: { path: 'e/pk-back.jpg' },
+          },
+        },
+        pakistaniRenewal
+      )
+    ).toEqual([]);
+  });
+
+  it('never asks for the certificate matrix on a renewal (parent relationship)', () => {
+    expect(
+      missingDependentRenewalRequirements(
+        {
+          documents: { photo: validPhoto, passport_unchanged: true },
+          existing_documents: existingPassportOnFile,
+        },
+        { ...completeDependentRenewalData, dependent_type: 'Father', parents_marital_status: undefined }
       )
     ).toEqual([]);
   });

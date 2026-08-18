@@ -99,6 +99,17 @@ const ALLOWED_TYPES = new Set([
   'previous_visa',
   'previous_eid_front',
   'previous_eid_back',
+  // Relationship-driven certificate set (dependent visa v2). Plain uploads,
+  // written as flat refs by the dependent onboarding form and reusable as
+  // generic re-request slots on 'dependent_document_request'.
+  'marriage_certificate',
+  'divorce_certificate',
+  'death_certificate',
+  // Non-marriage undertaking for a dependent child 18+. Requestable-only:
+  // never collected in the onboarding form (TME arranges the Arabic document
+  // separately), but the Request Documents flow can ask the sponsor to upload
+  // the signed copy.
+  'noc_unmarried',
   // Custom-named document requests upload under this fixed segment — the
   // free-text name lives only in the extra_documents key (`custom:<name>`),
   // never in the storage path.

@@ -73,6 +73,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
+    // dependent_type is read-only in the form — the portal's prefilled value
+    // is the authority. Injected BEFORE the gate runs so a hand-crafted POST
+    // cannot claim a lighter relationship (e.g. 'Spouse') to dodge the
+    // certificate matrix, and re-asserted on the stored payload below.
+    const prefillDependentType = (existing!.prefill_employee_data as Record<string, unknown> | null)
+      ?.dependent_type;
+    const gateData: Record<string, unknown> = {
+      ...(dependentData as Record<string, unknown>),
+      ...(typeof prefillDependentType === 'string' && prefillDependentType
+        ? { dependent_type: prefillDependentType }
+        : {}),
+    };
+
     // Required fields + documents gate. The client form enforces the same
     // rules, but only in browser JavaScript — the server is the authority.
     // A renewal drops the certificate/visa-history requirements and may skip
@@ -86,11 +99,11 @@ export async function POST(req: NextRequest) {
               { path?: string }
             > | null,
           },
-          dependentData as Record<string, unknown>,
+          gateData,
         )
       : missingDependentRequirements(
           { documents: existing!.documents as StaffDocumentReferences | null },
-          dependentData as Record<string, unknown>,
+          gateData,
         );
     if (missing.length > 0) {
       console.warn(`[submit-dependent] Blocked incomplete submission ${id}: missing ${missing.join(', ')}`);
@@ -108,11 +121,17 @@ export async function POST(req: NextRequest) {
 
     // dependent_type is read-only in the form — take the portal's value so a
     // hand-crafted POST can't register a different relationship than the one
-    // CS approved when sending the link.
-    const prefillDependentType = (existing!.prefill_employee_data as Record<string, unknown> | null)
-      ?.dependent_type;
+    // CS approved when sending the link (same value the gate above ran on).
     if (typeof prefillDependentType === 'string' && prefillDependentType) {
       cleanDependentData.dependent_type = prefillDependentType;
+    }
+
+    // Store the sponsor IBAN canonically: no spaces, uppercase. The gate has
+    // already verified the AE + 21 digits format on this same normalization.
+    if (typeof cleanDependentData.sponsor_iban === 'string') {
+      cleanDependentData.sponsor_iban = cleanDependentData.sponsor_iban
+        .replace(/\s+/g, '')
+        .toUpperCase();
     }
 
     // Submission telemetry: user agent is server-derived (never from body);

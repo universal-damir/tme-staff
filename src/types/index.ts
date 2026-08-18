@@ -234,6 +234,13 @@ export interface DependentPrefillData extends Partial<DependentFormData> {
   /** Sponsor's home-country mobile — the Home Country Mobile checkbox copies this. */
   sponsor_mobile_home?: string;
   sponsor_email?: string;
+  /**
+   * Sponsor's UAE bank IBAN from `client_staff.bank_iban` (when on file).
+   * Seeds the editable `sponsor_iban` field; the submitted value is stored
+   * ONLY on the dependent application, never written back to the payroll
+   * account.
+   */
+  sponsor_bank_iban?: string;
 }
 
 /**
@@ -264,6 +271,15 @@ export interface DependentFormData {
   religion: string;
   marital_status: string;
 
+  /**
+   * Marital status of the relevant PARENTS (sponsor's parents for
+   * Father/Mother; the spouse's parents for the in-law relationships).
+   * Required for those four relationship types; drives the conditional
+   * divorce/death certificate slots. Values are a fixed contract with the
+   * portal (migration 442 `parents_marital_status`).
+   */
+  parents_marital_status?: 'Married' | 'Divorced' | 'Deceased';
+
   // UAE visa history
   previously_held_uae_visa?: boolean;
 
@@ -286,8 +302,22 @@ export interface DependentFormData {
   email?: string;
   email_use_sponsor?: boolean;
 
-  /** Mandatory attestation tick on the relationship certificate. */
+  /** Mandatory attestation tick on the relationship certificate set. */
   certificate_attestation_confirmed?: boolean;
+
+  /**
+   * Sponsor's UAE bank account IBAN (AE + 21 digits, stored without spaces).
+   * Required by the authorities for the dependent visa application. Seeded
+   * from `prefill.sponsor_bank_iban` when on file, editable, stored ONLY on
+   * the dependent application (portal column `sponsor_iban`, migration 442).
+   */
+  sponsor_iban?: string;
+
+  /**
+   * Renewal only: mandatory confirmation that the details and documents on
+   * file are still up to date. Never set on a first registration.
+   */
+  details_confirmed_up_to_date?: boolean;
 
   other_information?: string;
 
@@ -441,6 +471,23 @@ export interface StaffDocumentReferences {
   // `extra_documents[<key>]` (with needsReview) rather than in these flat
   // refs — a re-request always wants a fresh copy, never a stale flat ref.
   relationship_certificate?: {
+    path: string;
+    filename: string;
+  };
+  // Relationship-driven certificate set (dependent onboarding, CS amendments
+  // 13.08). `relationship_certificate` above stays the PRIMARY certificate
+  // (marriage cert for Spouse, birth cert otherwise); these are the
+  // additional slots the relationship matrix demands. divorce/death are
+  // conditional on `parents_marital_status`.
+  marriage_certificate?: {
+    path: string;
+    filename: string;
+  };
+  divorce_certificate?: {
+    path: string;
+    filename: string;
+  };
+  death_certificate?: {
     path: string;
     filename: string;
   };

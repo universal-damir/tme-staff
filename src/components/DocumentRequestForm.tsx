@@ -102,11 +102,44 @@ const GENERIC_REQUESTABLE_LABELS = {
   previous_visa: 'Previous UAE Visa',
   previous_eid_front: 'Previous Emirates ID (Front)',
   previous_eid_back: 'Previous Emirates ID (Back)',
+  // Dependent visa v2 certificate set + the child-18+ NOC. The certificates
+  // have flat refs in the dependent ONBOARDING flow; noc_unmarried is
+  // requestable-only (TME prepares the Arabic undertaking separately). On a
+  // re-request all four take the generic extra_documents path, like
+  // relationship_certificate above.
+  marriage_certificate: 'Marriage Certificate (attested)',
+  divorce_certificate: 'Divorce Certificate (attested)',
+  death_certificate: 'Death Certificate (attested)',
+  noc_unmarried: 'Signed Non-Marriage Undertaking (NOC)',
 } as const;
 type GenericRequestKey = keyof typeof GENERIC_REQUESTABLE_LABELS;
 const GENERIC_KEYS = Object.keys(GENERIC_REQUESTABLE_LABELS) as readonly GenericRequestKey[];
 
 const GENERIC_SLOT_HINT = 'Upload a clear scan or photo (PDF or image).';
+
+// Relationship-specific marriage_certificate labels — the generic label
+// ("Marriage Certificate (attested)") invites a Father/Mother sponsor to
+// upload their OWN marriage certificate instead of their parents'. Keyed by
+// prefill_employee_data.dependent_type; keep the wording in sync with
+// dependentMarriageCertificateLabel in the portal's staff-onboarding-email.ts
+// (the request email names the same document).
+const MARRIAGE_CERT_LABELS_BY_RELATIONSHIP: Record<string, string> = {
+  Son: 'Marriage Certificate of the Parents (attested)',
+  Daughter: 'Marriage Certificate of the Parents (attested)',
+  Father: "Marriage Certificate of the Sponsor's Parents (attested)",
+  Mother: "Marriage Certificate of the Sponsor's Parents (attested)",
+  'Father-in-Law': 'Marriage Certificate of Sponsor and Spouse (attested)',
+  'Mother-in-Law': 'Marriage Certificate of Sponsor and Spouse (attested)',
+};
+
+// Per-key helper text for generic slots that need more guidance than the
+// default scan/photo hint. Falls back to GENERIC_SLOT_HINT for every other key.
+const GENERIC_SLOT_HINTS: Partial<Record<GenericRequestKey, string>> = {
+  noc_unmarried:
+    'This is the Arabic non-marriage undertaking prepared by TME Services. Please sign it as the sponsor and upload the signed copy here (PDF or image).',
+};
+const genericSlotHint = (key: string): string =>
+  (GENERIC_SLOT_HINTS as Partial<Record<string, string>>)[key] ?? GENERIC_SLOT_HINT;
 
 // Custom-named requests travel as `custom:<display name>` keys. They render
 // the same generic FileUploadSlot, upload under the fixed 'custom' storage
@@ -328,6 +361,20 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   // lives in prefill_employee_data), so fall back to the prefill.
   const nationality =
     submission.employee_data?.nationality ?? submission.prefill_employee_data?.nationality;
+
+  // Relationship from the portal-written prefill (dependent requests carry
+  // dependent_type there) — names WHOSE marriage certificate the
+  // marriage_certificate slot wants. Falls back to the generic label when the
+  // relationship is absent or unmapped (e.g. Spouse, Maid, staff requests).
+  const dependentType = (
+    submission.prefill_employee_data as { dependent_type?: string } | null
+  )?.dependent_type;
+  const displayName = (key: RequestedKey): string => {
+    if (key === 'marriage_certificate' && dependentType) {
+      return MARRIAGE_CERT_LABELS_BY_RELATIONSHIP[dependentType] ?? keyDisplayName(key);
+    }
+    return keyDisplayName(key);
+  };
   const additionalVariant = passportAdditionalPageVariant(nationality);
   const passportSlotConfig = (key: PassportRequestKey) => {
     const cfg = PASSPORT_SLOTS[key];
@@ -971,8 +1018,8 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       const extraRef = docs.extra_documents?.[gKey];
       return (
         <FileUploadSlot
-          label={keyDisplayName(gKey)}
-          description={GENERIC_SLOT_HINT}
+          label={displayName(gKey)}
+          description={genericSlotHint(gKey)}
           onUpload={handleGenericUpload(gKey)}
           onRemove={handleGenericRemove(gKey)}
           uploaded={!!extraRef?.path}
@@ -1022,7 +1069,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
               <span
                 className={`w-2 h-2 rounded-full flex-shrink-0 ${isSatisfied(key) ? 'bg-green-500' : 'bg-gray-300'}`}
               />
-              {keyDisplayName(key)}
+              {displayName(key)}
             </li>
           ))}
         </ul>
@@ -1034,7 +1081,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
           <div className="flex items-center gap-3 mb-4">
             {sectionIcon(key)}
             <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
-              {keyDisplayName(key)}
+              {displayName(key)}
             </h2>
           </div>
           {renderSlot(key)}

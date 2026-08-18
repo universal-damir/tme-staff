@@ -19,7 +19,13 @@
 
 import { NextRequest } from 'next/server';
 import type { StaffDocumentReferences } from '@/types';
-import { sponsorshipTypeFromSponsor, sponsorDocsRequired, passportAdditionalPageVariant } from '@/lib/staff-form-logic';
+import {
+  sponsorshipTypeFromSponsor,
+  sponsorDocsRequired,
+  passportAdditionalPageVariant,
+  isPakistaniNationality,
+} from '@/lib/staff-form-logic';
+import { isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
 const IPV6 = /^([0-9a-fA-F:]+)$/;
@@ -227,6 +233,15 @@ export const GENERIC_REQUESTED_KEYS: ReadonlySet<string> = new Set([
   'previous_visa',
   'previous_eid_front',
   'previous_eid_back',
+  // Dependent visa v2 certificate set — same flat-ref-in-onboarding /
+  // generic-on-re-request split as relationship_certificate above.
+  'marriage_certificate',
+  'divorce_certificate',
+  'death_certificate',
+  // Requestable ONLY (never collected in the onboarding form): the signed
+  // non-marriage undertaking for a dependent child 18+, arranged by TME and
+  // re-collected via the Request Documents flow.
+  'noc_unmarried',
 ]);
 
 /**
@@ -334,7 +349,10 @@ export function missingRequestedDocuments(row: {
  *  - Photo present AND (AI-validated OR submitted for manual review).
  *  - Passport cover + data page, plus the additional page for Indian/Syrian
  *    passports (keyed off an uploaded data page, exactly like the staff gate).
- *  - Relationship certificate + the mandatory attestation confirmation.
+ *  - Pakistan National ID (front + back) when the dependent is Pakistani.
+ *  - The sponsor's UAE bank IBAN (AE + 21 digits).
+ *  - The relationship-driven certificate set (see the matrix inside
+ *    `dependentRequirements`) + the mandatory attestation confirmation.
  *  - Previously held a UAE visa → the previous visa and BOTH Emirates ID sides.
  */
 export function missingDependentRequirements(
@@ -370,6 +388,12 @@ export function missingDependentRequirements(
  *   - The ID photo is ALWAYS required (validated or needsReview): the UAE
  *     authority wants a newly-taken photo for the new visa, so there is no
  *     "photo unchanged" escape hatch anywhere in this flow.
+ *   - The sponsor IBAN is still required (prefilled from file, editable).
+ *   - Pakistan National ID: satisfied by the copies already on file
+ *     (`existing_documents.pakistan_id_front/_back`) OR fresh uploads —
+ *     absent both, the sponsor must upload.
+ *   - The "details on file are still up to date" confirmation
+ *     (`details_confirmed_up_to_date`) is mandatory on a renewal.
  *
  * Returns humanized names of what's missing; empty array = submittable.
  */
@@ -429,6 +453,23 @@ function dependentRequirements(
   requireField('mobile_uae', 'UAE mobile number');
   requireField('email', 'Email address');
 
+  // Sponsor's UAE bank IBAN — required by the authorities for the dependent
+  // visa application, in BOTH modes (a renewal arrives with it prefilled but
+  // must still submit a valid value). Spaces are tolerated (the form strips
+  // them; a hand-crafted POST may not).
+  const sponsorIban = str('sponsor_iban').replace(/\s+/g, '').toUpperCase();
+  if (!sponsorIban) {
+    missing.push("Sponsor's UAE bank IBAN");
+  } else if (!isUaeIban(sponsorIban) || !validateIbanFormat(sponsorIban).valid) {
+    missing.push("Sponsor's UAE bank IBAN (must be AE followed by 21 digits)");
+  }
+
+  // Renewal only: the sponsor must explicitly confirm the details and
+  // documents on file are still up to date.
+  if (isRenewal && data.details_confirmed_up_to_date !== true) {
+    missing.push('Confirmation that the details on file are still up to date');
+  }
+
   // Visa history + certificate attestation are first-registration only.
   const previouslyHeldVisa = data.previously_held_uae_visa;
   if (!isRenewal) {
@@ -471,8 +512,58 @@ function dependentRequirements(
     missing.push('Passport additional page');
   }
 
+  // Pakistan National ID (front + back) when the DEPENDENT is a Pakistani
+  // national. On a renewal the copies already on file satisfy the slot
+  // (the sponsor may re-upload if the card was renewed); on a first
+  // registration only fresh uploads count. Fail closed when neither exists.
+  if (isPakistaniNationality(typeof data.nationality === 'string' ? data.nationality : null)) {
+    const frontOk =
+      !!docs.pakistan_id_front?.path ||
+      (isRenewal && !!row.existing_documents?.pakistan_id_front?.path);
+    const backOk =
+      !!docs.pakistan_id_back?.path ||
+      (isRenewal && !!row.existing_documents?.pakistan_id_back?.path);
+    if (!frontOk) missing.push('Pakistan National ID (front)');
+    if (!backOk) missing.push('Pakistan National ID (back)');
+  }
+
   if (!isRenewal) {
-    if (!docs.relationship_certificate?.path) missing.push('Relationship certificate');
+    // Relationship-driven certificate set (CS amendments 13.08). The primary
+    // certificate (`relationship_certificate`) is required for EVERY
+    // relationship; the matrix adds the rest. `dependent_type` is the
+    // portal's prefilled value (the route injects it before gating so a
+    // hand-crafted POST cannot claim a lighter relationship); an absent or
+    // unknown value (legacy rows, Maid) falls back to the primary-only rule.
+    const relationship = str('dependent_type');
+    const marriageCertRequired =
+      relationship === 'Son' ||
+      relationship === 'Daughter' ||
+      relationship === 'Father' ||
+      relationship === 'Mother' ||
+      relationship === 'Father-in-Law' ||
+      relationship === 'Mother-in-Law';
+    const parentsStatusRequired =
+      relationship === 'Father' ||
+      relationship === 'Mother' ||
+      relationship === 'Father-in-Law' ||
+      relationship === 'Mother-in-Law';
+
+    if (!docs.relationship_certificate?.path) {
+      missing.push(relationship === 'Spouse' ? 'Marriage certificate' : 'Relationship certificate');
+    }
+    if (marriageCertRequired && !docs.marriage_certificate?.path) {
+      missing.push('Marriage certificate');
+    }
+    if (parentsStatusRequired) {
+      const parentsStatus = str('parents_marital_status');
+      if (parentsStatus !== 'Married' && parentsStatus !== 'Divorced' && parentsStatus !== 'Deceased') {
+        missing.push('Marital status of the parents');
+      } else if (parentsStatus === 'Divorced' && !docs.divorce_certificate?.path) {
+        missing.push('Divorce certificate');
+      } else if (parentsStatus === 'Deceased' && !docs.death_certificate?.path) {
+        missing.push('Death certificate');
+      }
+    }
 
     if (previouslyHeldVisa === true) {
       if (!docs.previous_visa?.path) missing.push('Previous UAE residence visa');

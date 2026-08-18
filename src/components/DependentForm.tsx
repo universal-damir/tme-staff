@@ -31,8 +31,10 @@ import {
   shouldOfferManualReview,
   buildManualReviewPageRef,
   passportAdditionalPageVariant,
+  isPakistaniNationality,
   initialIsInUae,
 } from '@/lib/staff-form-logic';
+import { isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
 import {
   uploadDocument,
   uploadPassportPage,
@@ -51,6 +53,7 @@ import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
+  CreditCard,
   FileSignature,
   FileText,
   Info,
@@ -189,14 +192,90 @@ function seedFromPrefill(prefill: DependentPrefillData): Partial<DependentFormDa
 }
 
 /**
- * Relationship-certificate slot label by dependent type. Spouse gets the
- * marriage certificate, children the birth certificate, everyone else a
- * generic proof of relationship.
+ * Relationship-driven certificate set (CS amendments 13.08).
+ *
+ * `relationship_certificate` stays the PRIMARY slot for every relationship;
+ * the matrix adds `marriage_certificate` and, for the parent relationships, a
+ * mandatory "marital status of the parents" select that conditionally demands
+ * `divorce_certificate` / `death_certificate`. The doc type keys are a fixed
+ * contract with the portal — only the labels differ per relationship.
+ *
+ * Maid is no longer offered a link by the portal; a legacy prefill (or an
+ * unknown/absent relationship) falls back to the generic single-certificate
+ * behavior instead of crashing.
  */
-function certificateLabelFor(dependentType: string | undefined): string {
-  if (dependentType === 'Spouse') return 'Marriage Certificate (attested)';
-  if (dependentType === 'Son' || dependentType === 'Daughter') return 'Birth Certificate (attested)';
-  return 'Proof of Relationship (attested)';
+interface CertificateSet {
+  /** Label for the primary `relationship_certificate` slot. */
+  primaryLabel: string;
+  /** When set, `marriage_certificate` is required, under this label. */
+  marriageLabel?: string;
+  /** When set, the parents' marital-status select is required, under this label. */
+  maritalSelectLabel?: string;
+  /** Son/Daughter only: show the NOC info note once the dependent is 18+. */
+  childAgeNote?: boolean;
+}
+
+function certificateSetFor(dependentType: string | undefined): CertificateSet {
+  switch (dependentType) {
+    case 'Spouse':
+      return { primaryLabel: 'Marriage Certificate (attested)' };
+    case 'Son':
+    case 'Daughter':
+      return {
+        primaryLabel: 'Birth Certificate of the Child (attested)',
+        marriageLabel: 'Marriage Certificate of the Parents (attested)',
+        childAgeNote: true,
+      };
+    case 'Father':
+    case 'Mother':
+      return {
+        primaryLabel: 'Birth Certificate of the Sponsor (attested)',
+        marriageLabel: "Marriage Certificate of the Sponsor's Parents (attested)",
+        maritalSelectLabel: "Marital Status of the Sponsor's Parents",
+      };
+    case 'Father-in-Law':
+    case 'Mother-in-Law':
+      return {
+        primaryLabel: 'Birth Certificate of the Spouse (attested)',
+        marriageLabel: 'Marriage Certificate of Sponsor and Spouse (attested)',
+        maritalSelectLabel: "Marital Status of the Spouse's Parents",
+      };
+    default:
+      // Maid / legacy / unknown — generic single certificate.
+      return { primaryLabel: 'Proof of Relationship (attested)' };
+  }
+}
+
+const PARENTS_MARITAL_STATUS_OPTIONS = ['Married', 'Divorced', 'Deceased'] as const;
+
+/**
+ * Age in whole years from the stored DOB. CustomDatePicker keeps
+ * `date_of_birth` as dd.mm.yyyy; prefill/extraction may supply ISO
+ * YYYY-MM-DD. Both carry a 4-digit year, so neither can hit the dd.mm.yy
+ * 69-pivot trap. Anything else (partial, 2-digit year) returns null and the
+ * caller simply shows no age-dependent note.
+ */
+function ageFromIsoDate(dob: string | undefined): number | null {
+  if (!dob) return null;
+  let year: number, month: number, day: number;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+    [year, month, day] = dob.split('-').map(Number);
+  } else if (/^\d{2}\.\d{2}\.\d{4}$/.test(dob)) {
+    [day, month, year] = dob.split('.').map(Number);
+  } else {
+    return null;
+  }
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const m = today.getMonth() + 1;
+  if (m < month || (m === month && today.getDate() < day)) age -= 1;
+  return age >= 0 && age < 150 ? age : null;
+}
+
+/** UAE IBAN check: AE + 21 digits (23 chars), spaces tolerated/stripped. */
+function isValidSponsorIban(value: string | undefined): boolean {
+  const clean = (value ?? '').replace(/\s+/g, '').toUpperCase();
+  return isUaeIban(clean) && validateIbanFormat(clean).valid;
 }
 
 interface FormSectionProps {
@@ -417,7 +496,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   // Saved draft (autosave writes the dependent payload into employee_data).
   const saved = (submission.employee_data ?? null) as unknown as Partial<DependentFormData> | null;
   const dependentType = prefill.dependent_type ?? saved?.dependent_type;
-  const certificateLabel = certificateLabelFor(dependentType);
+  const certSet = certificateSetFor(dependentType);
+  // Whether the relationship demands more than the single primary certificate
+  // — drives the pluralized info-box + attestation wording.
+  const multipleCertificates = !!certSet.marriageLabel;
   const sponsorMobile = prefill.sponsor_mobile;
   // Distinct number for the Home Country Mobile checkbox — copying the
   // sponsor's UAE number into an "outside the UAE" field was wrong.
@@ -444,6 +526,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
   const [signature, setSignature] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
+  // Renewal only: the mandatory "details on file are still up to date" tick.
+  const [detailsConfirmError, setDetailsConfirmError] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [passportError, setPassportError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -456,7 +540,14 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     insidePages?: PassportPageReference;
     additionalPage?: PassportPageReference;
   }>(submission.documents?.passportPages || {});
+  // First registrations only: surfaced when the final-submit re-check finds
+  // the certificate section incomplete (it can regress as late as Review —
+  // parents' marital status flipped, certificate removed).
+  const [certificateError, setCertificateError] = useState<string | null>(null);
   const [certificateDoc, setCertificateDoc] = useState(submission.documents?.relationship_certificate);
+  const [marriageCertDoc, setMarriageCertDoc] = useState(submission.documents?.marriage_certificate);
+  const [divorceCertDoc, setDivorceCertDoc] = useState(submission.documents?.divorce_certificate);
+  const [deathCertDoc, setDeathCertDoc] = useState(submission.documents?.death_certificate);
   const [previousVisaDoc, setPreviousVisaDoc] = useState(submission.documents?.previous_visa);
   const [previousEidFrontDoc, setPreviousEidFrontDoc] = useState(submission.documents?.previous_eid_front);
   const [previousEidBackDoc, setPreviousEidBackDoc] = useState(submission.documents?.previous_eid_back);
@@ -464,15 +555,44 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   const photoDocRef = useRef(photoDoc);
   const passportPagesRef = useRef(passportPages);
   const certificateDocRef = useRef(certificateDoc);
+  const marriageCertDocRef = useRef(marriageCertDoc);
+  const divorceCertDocRef = useRef(divorceCertDoc);
+  const deathCertDocRef = useRef(deathCertDoc);
   const previousVisaDocRef = useRef(previousVisaDoc);
   const previousEidFrontDocRef = useRef(previousEidFrontDoc);
   const previousEidBackDocRef = useRef(previousEidBackDoc);
   useEffect(() => { photoDocRef.current = photoDoc; }, [photoDoc]);
   useEffect(() => { passportPagesRef.current = passportPages; }, [passportPages]);
   useEffect(() => { certificateDocRef.current = certificateDoc; }, [certificateDoc]);
+  useEffect(() => { marriageCertDocRef.current = marriageCertDoc; }, [marriageCertDoc]);
+  useEffect(() => { divorceCertDocRef.current = divorceCertDoc; }, [divorceCertDoc]);
+  useEffect(() => { deathCertDocRef.current = deathCertDoc; }, [deathCertDoc]);
   useEffect(() => { previousVisaDocRef.current = previousVisaDoc; }, [previousVisaDoc]);
   useEffect(() => { previousEidFrontDocRef.current = previousEidFrontDoc; }, [previousEidFrontDoc]);
   useEffect(() => { previousEidBackDocRef.current = previousEidBackDoc; }, [previousEidBackDoc]);
+
+  // Pakistani National ID (front + back) — conditional on the DEPENDENT's
+  // nationality being Pakistan. Same UI-state split + AI side-check as the
+  // EmployeeForm pattern this form was cloned from.
+  const [pakistanIdFrontDoc, setPakistanIdFrontDoc] = useState(submission.documents?.pakistan_id_front);
+  const [pakistanIdBackDoc, setPakistanIdBackDoc] = useState(submission.documents?.pakistan_id_back);
+  const [pakistanIdFrontUI, setPakistanIdFrontUI] = useState({
+    preview: submission.documents?.pakistan_id_front?.path ? getDocumentUrl(submission.documents.pakistan_id_front.path) : (null as string | null),
+    validating: false,
+    error: null as string | null,
+    file: null as File | null,
+  });
+  const [pakistanIdBackUI, setPakistanIdBackUI] = useState({
+    preview: submission.documents?.pakistan_id_back?.path ? getDocumentUrl(submission.documents.pakistan_id_back.path) : (null as string | null),
+    validating: false,
+    error: null as string | null,
+    file: null as File | null,
+  });
+  const pakistanIdFrontDocRef = useRef(pakistanIdFrontDoc);
+  const pakistanIdBackDocRef = useRef(pakistanIdBackDoc);
+  useEffect(() => { pakistanIdFrontDocRef.current = pakistanIdFrontDoc; }, [pakistanIdFrontDoc]);
+  useEffect(() => { pakistanIdBackDocRef.current = pakistanIdBackDoc; }, [pakistanIdBackDoc]);
+  const [pakistanIdError, setPakistanIdError] = useState<string | null>(null);
 
   // --- Renewal: what the portal already holds for this dependent ---
   const existingDocs = submission.existing_documents;
@@ -579,6 +699,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       ...(prefill.first_name ? { first_name: prefill.first_name } : {}),
       ...(prefill.middle_name ? { middle_name: prefill.middle_name } : {}),
       ...(prefill.last_name ? { last_name: prefill.last_name } : {}),
+      // Sponsor's UAE IBAN from client_staff.bank_iban (when on file) —
+      // editable, both modes; a saved draft below still wins.
+      ...(prefill.sponsor_bank_iban ? { sponsor_iban: prefill.sponsor_bank_iban } : {}),
       ...(saved ?? {}),
       dependent_type: dependentType,
     },
@@ -596,6 +719,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     register('dependent_type');
     register('previously_held_uae_visa');
     register('certificate_attestation_confirmed');
+    register('parents_marital_status');
+    register('details_confirmed_up_to_date');
     register('uae_presence');
     register('uae_emirate');
     register('home_country');
@@ -633,6 +758,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   const mobileHomeUseSponsor = watch('mobile_home_use_sponsor') === true;
   const emailUseSponsor = watch('email_use_sponsor') === true;
   const attestationConfirmed = watch('certificate_attestation_confirmed') === true;
+  const parentsMaritalStatus = watch('parents_marital_status');
+  const sponsorIban = watch('sponsor_iban');
+  const detailsConfirmed = watch('details_confirmed_up_to_date') === true;
 
   const nationalityCountryCode = nationality ? nationalityToCountryCode(nationality) : undefined;
 
@@ -742,7 +870,36 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     firstName && nationality && dateOfBirth && gender && passportNo && passportExpiry &&
     motherFullName && fatherFullName && religion && maritalStatus
   );
-  const isCertificateComplete = !!certificateDoc?.path && attestationConfirmed;
+
+  // Pakistan National ID (front + back) when the DEPENDENT is Pakistani.
+  // Gated exactly like the India/Syria additional page: on a fresh upload
+  // path only once the data page is read (nationality may come from the
+  // extraction); on the renewal "passport unchanged" skip the nationality is
+  // prefilled, so the requirement stands immediately. Copies already on file
+  // (renewals) satisfy each side; a fresh upload replaces it — mirrors the
+  // server gate in missingDependentRequirements/-RenewalRequirements.
+  const isPakistaniDependent = isPakistaniNationality(nationality);
+  const requiresPakistanId =
+    isPakistaniDependent && (passportSkipped || (isInsidePagesUploaded && passportDataReady));
+  const pakistanIdFrontOnFile = !!existingDocs?.pakistan_id_front?.path;
+  const pakistanIdBackOnFile = !!existingDocs?.pakistan_id_back?.path;
+  const isPakistanIdComplete =
+    !requiresPakistanId ||
+    ((!!pakistanIdFrontDoc?.path || (isRenewal && pakistanIdFrontOnFile)) &&
+      (!!pakistanIdBackDoc?.path || (isRenewal && pakistanIdBackOnFile)));
+
+  // Certificate set per the relationship matrix: primary always, marriage
+  // certificate when the matrix adds it, the parents' marital-status select
+  // (and its conditional divorce/death certificate) for the parent
+  // relationships, plus the mandatory attestation tick.
+  const isCertificateComplete =
+    !!certificateDoc?.path &&
+    (!certSet.marriageLabel || !!marriageCertDoc?.path) &&
+    (!certSet.maritalSelectLabel ||
+      (!!parentsMaritalStatus &&
+        (parentsMaritalStatus !== 'Divorced' || !!divorceCertDoc?.path) &&
+        (parentsMaritalStatus !== 'Deceased' || !!deathCertDoc?.path))) &&
+    attestationConfirmed;
   const isVisaHistoryComplete =
     previouslyHeldVisa === false ||
     (previouslyHeldVisa === true &&
@@ -753,12 +910,15 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     homeStreetAddress && homeCity && homeCountry &&
     (!isInUAE || (uaeStreetAddress && uaeCity && uaeEmirate))
   );
-  const isContactComplete = !!(mobileUae && email);
+  const isSponsorIbanValid = isValidSponsorIban(sponsorIban);
+  const isContactComplete = !!(mobileUae && email) && isSponsorIbanValid;
 
   const computeCurrentStep = useCallback(() => {
     if (!isPhotoUploaded) return 1;
     if (!isPassportComplete) return 2;
-    if (!isPersonalComplete) return 3;
+    // Pakistan ID lives in step 3 (after nationality confirmation), so it
+    // holds the Personal Details step open exactly like the missing fields.
+    if (!isPersonalComplete || !isPakistanIdComplete) return 3;
     // Steps 4 + 5 are not collected on a renewal — never gate on them there.
     if (!isRenewal && !isCertificateComplete) return 4;
     if (!isRenewal && !isVisaHistoryComplete) return 5;
@@ -770,6 +930,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     isPhotoUploaded,
     isPassportComplete,
     isPersonalComplete,
+    isPakistanIdComplete,
     isCertificateComplete,
     isVisaHistoryComplete,
     isAddressComplete,
@@ -834,6 +995,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       photo: overrides?.photo ?? photoDocRef.current,
       passportPages: overrides?.passportPages ?? passportPagesRef.current,
       relationship_certificate: certificateDocRef.current,
+      marriage_certificate: marriageCertDocRef.current,
+      divorce_certificate: divorceCertDocRef.current,
+      death_certificate: deathCertDocRef.current,
+      pakistan_id_front: pakistanIdFrontDocRef.current,
+      pakistan_id_back: pakistanIdBackDocRef.current,
       previous_visa: previousVisaDocRef.current,
       previous_eid_front: previousEidFrontDocRef.current,
       previous_eid_back: previousEidBackDocRef.current,
@@ -1376,15 +1542,173 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
   };
 
+  // ------------------------------------------------------------------
+  // Pakistani National ID (front + back) — same AI side-check + upload flow
+  // as the EmployeeForm pattern (extract-pakistan-id validates the card and
+  // pre-fills the father's name / home address of the DEPENDENT).
+  // ------------------------------------------------------------------
+
+  const handlePakistanIdFrontUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'ID card (front)');
+    if (pageErr) {
+      setPakistanIdFrontUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
+    const isImage = file.type.startsWith('image/');
+    let preview: string;
+    try {
+      preview = await readFileAsDataUrl(file);
+    } catch {
+      setPakistanIdFrontUI({ preview: null, validating: false, error: "We couldn't read this file. Please try a different one.", file });
+      return false;
+    }
+    setPakistanIdFrontUI({ preview, validating: true, error: null, file });
+
+    // Extracted CNIC number, carried on the doc ref — the portal sync reads
+    // `extracted_data.cnic_number` off the pakistan_id_front row (fixed
+    // contract, mirrors how the passport ref carries its extracted_data).
+    let extractedCnic: string | null = null;
+    if (isImage) {
+      try {
+        const compressedImage = await compressImageForAI(preview);
+        const response = await fetch('/api/extract-pakistan-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: compressedImage, side: 'front', submissionId: submission.id, token: aiToken }),
+        });
+        if (response.ok) {
+          const extractResult = await response.json();
+          if (!extractResult.success && !extractResult.infra) {
+            setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
+            // Clear any previously-validated doc so a stale green "Valid"
+            // badge can't sit next to this red error border.
+            setPakistanIdFrontDoc(undefined);
+            pakistanIdFrontDocRef.current = undefined;
+            await saveDocRefs(buildDocRefs());
+            return false;
+          }
+          if (extractResult.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
+          if (typeof extractResult.data?.cnic_number === 'string' && extractResult.data.cnic_number) {
+            extractedCnic = extractResult.data.cnic_number;
+          }
+        } else {
+          setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+          setPakistanIdFrontDoc(undefined);
+          pakistanIdFrontDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
+        }
+      } catch (err) {
+        console.error('Pakistan ID front validation error:', err);
+        setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+        setPakistanIdFrontDoc(undefined);
+        pakistanIdFrontDocRef.current = undefined;
+        await saveDocRefs(buildDocRefs());
+        return false;
+      }
+    }
+
+    const result = await uploadDocument(submission.id, 'pakistan_id_front', file);
+    if (!result) {
+      setPakistanIdFrontUI({ preview, validating: false, error: 'Failed to upload', file });
+      return false;
+    }
+
+    const newDoc = {
+      ...result,
+      validated: true,
+      // Never attach an empty extracted_data object — the portal treats the
+      // key's presence as "extraction ran".
+      ...(extractedCnic ? { extracted_data: { cnic_number: extractedCnic } } : {}),
+    };
+    setPakistanIdFrontDoc(newDoc);
+    pakistanIdFrontDocRef.current = newDoc;
+    setPakistanIdFrontUI({ preview, validating: false, error: null, file });
+    setPakistanIdError(null);
+    await saveDocRefs(buildDocRefs());
+    return true;
+  };
+
+  const handlePakistanIdBackUpload = async (file: File): Promise<boolean> => {
+    const pageErr = await singlePagePdfError(file, 'ID card (back)');
+    if (pageErr) {
+      setPakistanIdBackUI((prev) => ({ ...prev, validating: false, error: pageErr }));
+      return false;
+    }
+    const isImage = file.type.startsWith('image/');
+    let preview: string;
+    try {
+      preview = await readFileAsDataUrl(file);
+    } catch {
+      setPakistanIdBackUI({ preview: null, validating: false, error: "We couldn't read this file. Please try a different one.", file });
+      return false;
+    }
+    setPakistanIdBackUI({ preview, validating: true, error: null, file });
+
+    if (isImage) {
+      try {
+        const compressedImage = await compressImageForAI(preview);
+        const response = await fetch('/api/extract-pakistan-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: compressedImage, side: 'back', submissionId: submission.id, token: aiToken }),
+        });
+        if (response.ok) {
+          const extractResult = await response.json();
+          if (!extractResult.success && !extractResult.infra) {
+            setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
+            setPakistanIdBackDoc(undefined);
+            pakistanIdBackDocRef.current = undefined;
+            await saveDocRefs(buildDocRefs());
+            return false;
+          }
+          if (extractResult.data?.address) {
+            if (!getValues('home_street_address')) setValue('home_street_address', String(extractResult.data.address));
+            setValue('home_country', 'Pakistan');
+            if (extractResult.data.address_city && !getValues('home_city')) {
+              setValue('home_city', String(extractResult.data.address_city));
+            }
+            setTimeout(() => autoSave(getValues()), 100);
+          }
+        }
+      } catch (err) {
+        console.error('Pakistan ID back validation error:', err);
+      }
+    }
+
+    const result = await uploadDocument(submission.id, 'pakistan_id_back', file);
+    if (!result) {
+      setPakistanIdBackUI({ preview, validating: false, error: 'Failed to upload', file });
+      return false;
+    }
+
+    const newDoc = { ...result, validated: true };
+    setPakistanIdBackDoc(newDoc);
+    pakistanIdBackDocRef.current = newDoc;
+    setPakistanIdBackUI({ preview, validating: false, error: null, file });
+    setPakistanIdError(null);
+    await saveDocRefs(buildDocRefs());
+    return true;
+  };
+
   const additionalPageScan = useScannerIntercept(handleAdditionalPageUpload);
   const coverScan = useScannerIntercept(handleCoverUpload);
   const insideScan = useScannerIntercept(handleInsideUpload);
+  const pakistanIdFrontScan = useScannerIntercept(handlePakistanIdFrontUpload);
+  const pakistanIdBackScan = useScannerIntercept(handlePakistanIdBackUpload);
 
   // ------------------------------------------------------------------
   // Plain uploads (no AI): certificate + previously-held visa / EID
   // ------------------------------------------------------------------
 
-  type PlainDocKey = 'relationship_certificate' | 'previous_visa' | 'previous_eid_front' | 'previous_eid_back';
+  type PlainDocKey =
+    | 'relationship_certificate'
+    | 'marriage_certificate'
+    | 'divorce_certificate'
+    | 'death_certificate'
+    | 'previous_visa'
+    | 'previous_eid_front'
+    | 'previous_eid_back';
 
   const PLAIN_SETTERS: Record<
     PlainDocKey,
@@ -1394,6 +1718,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     }
   > = {
     relationship_certificate: { set: setCertificateDoc, ref: certificateDocRef },
+    marriage_certificate: { set: setMarriageCertDoc, ref: marriageCertDocRef },
+    divorce_certificate: { set: setDivorceCertDoc, ref: divorceCertDocRef },
+    death_certificate: { set: setDeathCertDoc, ref: deathCertDocRef },
     previous_visa: { set: setPreviousVisaDoc, ref: previousVisaDocRef },
     previous_eid_front: { set: setPreviousEidFrontDoc, ref: previousEidFrontDocRef },
     previous_eid_back: { set: setPreviousEidBackDoc, ref: previousEidBackDocRef },
@@ -1457,6 +1784,39 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       return;
     }
     setPassportError(null);
+
+    // Nationality can also flip the Pakistan National ID requirement as late
+    // as the review step — mirror the server gate so the sponsor is sent to
+    // the right slot instead of hitting the 422.
+    if (requiresPakistanId && !isPakistanIdComplete) {
+      setPakistanIdError('Pakistani nationals also need the National ID card (CNIC/NICOP). Please upload the front and back below.');
+      setViewingStep(3);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setPakistanIdError(null);
+
+    // The certificate matrix can also regress as late as the review step
+    // (parents' marital status flipped, a certificate removed) — re-check it
+    // here so the sponsor is sent back to the certificate step instead of
+    // hitting the server's 422. First registrations only; renewals don't
+    // collect step 4.
+    if (!isRenewal && !isCertificateComplete) {
+      setCertificateError('Please complete the relationship certificate section before submitting.');
+      setViewingStep(4);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setCertificateError(null);
+
+    // Renewal: the on-file confirmation is mandatory before signing.
+    if (isRenewal && data.details_confirmed_up_to_date !== true) {
+      setDetailsConfirmError('Please confirm that the details and documents on file are still up to date.');
+      setViewingStep(8);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setDetailsConfirmError(null);
 
     if (!signature) {
       setSignatureError('Please sign the form');
@@ -1964,8 +2324,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         </div>
       </RevealSection>
 
-      {/* Step 3: Personal Details */}
+      {/* Step 3: Personal Details (+ Pakistan National ID when required) */}
       <RevealSection show={viewingStep === 3 || viewingStep === 8}>
+        <div className="space-y-6">
         <FormSection
           title="Personal Details"
           icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -2143,26 +2504,156 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             </div>
           )}
 
-          {viewingStep === 3 && (
-            <StepNavButtons
-              enabled={isPersonalComplete && isPassportComplete}
-              onBack={() => setViewingStep(stepBefore(3))}
-              onContinue={() => {
-                if (!lastName && !noLastNameWarning) {
-                  setNoLastNameWarning(true);
-                  return;
-                }
-                setViewingStep(stepAfter(3));
-              }}
-            />
-          )}
         </FormSection>
+
+        {/* Pakistani National ID — conditional on the DEPENDENT's nationality.
+            Same gating as the India/Syria additional page (fresh-upload path
+            waits for the data-page read; the renewal "passport unchanged"
+            skip requires it immediately off the prefilled nationality). On a
+            renewal the copies on file satisfy the slots — re-uploading is
+            only needed when the card was renewed or replaced. */}
+        {requiresPakistanId && (
+          <FormSection
+            title="Pakistani National ID (CNIC/NICOP)"
+            icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
+            <div className="space-y-4">
+              <div
+                className="flex items-start gap-3 p-4 rounded-lg"
+                style={{ backgroundColor: '#EBF4FF' }}
+              >
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <p className="font-medium">Pakistani nationals are required to provide a copy of their National ID Card (CNIC/NICOP) with chip</p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Please upload the front and back of the dependent&apos;s Pakistan National Identity Card.
+                  </p>
+                </div>
+              </div>
+
+              {/* Renewal: copies already on file — show them; a fresh upload
+                  is only needed when the card changed. */}
+              {isRenewal && (pakistanIdFrontOnFile || pakistanIdBackOnFile) && (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-600">
+                    These are the copies TME Services holds. Upload a new front or back below only if the card has been renewed or replaced.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {existingDocs?.pakistan_id_front?.publicUrl && (
+                      <ExistingDocPreview label="Pakistan ID (Front)" doc={existingDocs.pakistan_id_front} />
+                    )}
+                    {existingDocs?.pakistan_id_back?.publicUrl && (
+                      <ExistingDocPreview label="Pakistan ID (Back)" doc={existingDocs.pakistan_id_back} />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Sample images above upload areas */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="text-center">
+                  <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                  <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 object-contain" />
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                  <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 object-contain" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
+                {/* Front */}
+                <div className="flex flex-col">
+                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                  <UploadSlot
+                    label=""
+                    description="Front of Pakistan ID"
+                    expectedType="INSIDE_PAGES"
+                    accept="application/pdf,image/jpeg,image/png"
+                    maxSizeMB={10}
+                    file={pakistanIdFrontUI.file}
+                    preview={pakistanIdFrontUI.preview || undefined}
+                    validated={!!pakistanIdFrontDoc?.validated}
+                    validating={pakistanIdFrontUI.validating}
+                    error={pakistanIdFrontUI.error || undefined}
+                    onUpload={pakistanIdFrontScan.intercepted}
+                    onRemove={async () => {
+                      setPakistanIdFrontUI({ preview: null, validating: false, error: null, file: null });
+                      setPakistanIdFrontDoc(undefined);
+                      pakistanIdFrontDocRef.current = undefined;
+                      await saveDocRefs(buildDocRefs());
+                    }}
+                  />
+                  {pakistanIdFrontScan.scannerModal}
+                </div>
+
+                {/* Back */}
+                <div className="flex flex-col">
+                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                  <UploadSlot
+                    label=""
+                    description="Back of Pakistan ID"
+                    expectedType="INSIDE_PAGES"
+                    accept="application/pdf,image/jpeg,image/png"
+                    maxSizeMB={10}
+                    file={pakistanIdBackUI.file}
+                    preview={pakistanIdBackUI.preview || undefined}
+                    validated={!!pakistanIdBackDoc?.validated}
+                    validating={pakistanIdBackUI.validating}
+                    error={pakistanIdBackUI.error || undefined}
+                    onUpload={pakistanIdBackScan.intercepted}
+                    onRemove={async () => {
+                      setPakistanIdBackUI({ preview: null, validating: false, error: null, file: null });
+                      setPakistanIdBackDoc(undefined);
+                      pakistanIdBackDocRef.current = undefined;
+                      await saveDocRefs(buildDocRefs());
+                    }}
+                  />
+                  {pakistanIdBackScan.scannerModal}
+                </div>
+              </div>
+
+              {pakistanIdFrontDoc?.validated && pakistanIdBackDoc?.validated && (
+                <div className="flex items-center gap-2 text-green-600 text-sm">
+                  <CheckCircle className="w-4 h-4" />
+                  Pakistan National ID uploaded (front and back).
+                </div>
+              )}
+
+              {pakistanIdError && <p className="text-sm text-red-500">{pakistanIdError}</p>}
+            </div>
+          </FormSection>
+        )}
+
+        {viewingStep === 3 && (
+          <StepNavButtons
+            enabled={isPersonalComplete && isPassportComplete && isPakistanIdComplete}
+            onBack={() => setViewingStep(stepBefore(3))}
+            onContinue={() => {
+              if (!lastName && !noLastNameWarning) {
+                setNoLastNameWarning(true);
+                return;
+              }
+              setViewingStep(stepAfter(3));
+            }}
+          />
+        )}
+        </div>
       </RevealSection>
 
-      {/* Step 4: Relationship Certificate */}
+      {/* Step 4: Relationship Certificates — relationship-driven set (see
+          certificateSetFor). The primary slot is always required; the matrix
+          adds the marriage certificate, the parents' marital-status select,
+          and the conditional divorce/death certificate. */}
       <RevealSection show={!isRenewal && (viewingStep === 4 || viewingStep === 8)}>
         <FormSection
-          title="Relationship Certificate"
+          title={multipleCertificates ? 'Relationship Certificates' : 'Relationship Certificate'}
           icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
           stepNumber={displayedStepNumber(4)}
         >
@@ -2170,24 +2661,111 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
               <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
               <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                <p className="font-medium">Upload the {certificateLabel}</p>
+                <p className="font-medium">
+                  {multipleCertificates
+                    ? 'Upload the certificates listed below'
+                    : `Upload the ${certSet.primaryLabel}`}
+                </p>
                 <p className="mt-2 text-xs text-gray-600">
-                  The certificate must be attested by the UAE Ministry of Foreign Affairs (MoFA), or — at
-                  minimum — by the UAE Embassy in the country where it was issued. If it is in a language
-                  other than English or Arabic, a legal translation must be attached. An unattested
-                  certificate will be rejected by the immigration authorities.
+                  {multipleCertificates ? 'Each certificate' : 'The certificate'} must be attested by the
+                  UAE Ministry of Foreign Affairs (MoFA) or, at minimum, by the UAE Embassy in the country
+                  where it was issued. If a certificate is in a language other than English or Arabic, a
+                  legal translation must be attached. An unattested certificate will be rejected by the
+                  immigration authorities.
+                </p>
+                <p className="mt-2 text-xs text-gray-600">
+                  Please note that TME Services can only proceed with the dependent visa application once
+                  all of the requested documents have been provided.
+                </p>
+                <p className="mt-2 text-xs text-gray-600">
+                  If you have not yet had the required marriage or birth certificate attested, please
+                  contact TME Services so that we can guide you through the process.
                 </p>
               </div>
             </div>
 
             <FileUploadSlot
-              label={certificateLabel}
+              label={certSet.primaryLabel}
               description="Upload a clear scan of the attested certificate (PDF or image)."
               onUpload={handlePlainUpload('relationship_certificate')}
               onRemove={handlePlainRemove('relationship_certificate')}
               uploaded={!!certificateDoc?.path}
               filename={certificateDoc?.filename}
             />
+
+            {certSet.marriageLabel && (
+              <FileUploadSlot
+                label={certSet.marriageLabel}
+                description="Upload a clear scan of the attested certificate (PDF or image)."
+                onUpload={handlePlainUpload('marriage_certificate')}
+                onRemove={handlePlainRemove('marriage_certificate')}
+                uploaded={!!marriageCertDoc?.path}
+                filename={marriageCertDoc?.filename}
+              />
+            )}
+
+            {certSet.maritalSelectLabel && (
+              <>
+                <div className="max-w-sm">
+                  <CustomDropdown
+                    label={certSet.maritalSelectLabel}
+                    options={PARENTS_MARITAL_STATUS_OPTIONS.map((s) => ({ value: s, label: s }))}
+                    value={parentsMaritalStatus || ''}
+                    onChange={(val) =>
+                      setValue('parents_marital_status', val as 'Married' | 'Divorced' | 'Deceased', {
+                        shouldDirty: true,
+                      })
+                    }
+                    required
+                  />
+                </div>
+
+                {parentsMaritalStatus === 'Divorced' && (
+                  <FileUploadSlot
+                    label="Divorce Certificate (attested)"
+                    description="Upload a clear scan of the attested certificate (PDF or image)."
+                    onUpload={handlePlainUpload('divorce_certificate')}
+                    onRemove={handlePlainRemove('divorce_certificate')}
+                    uploaded={!!divorceCertDoc?.path}
+                    filename={divorceCertDoc?.filename}
+                  />
+                )}
+
+                {parentsMaritalStatus === 'Deceased' && (
+                  <FileUploadSlot
+                    label="Death Certificate (attested)"
+                    description="Upload a clear scan of the attested certificate (PDF or image)."
+                    onUpload={handlePlainUpload('death_certificate')}
+                    onRemove={handlePlainRemove('death_certificate')}
+                    uploaded={!!deathCertDoc?.path}
+                    filename={deathCertDoc?.filename}
+                  />
+                )}
+              </>
+            )}
+
+            {/* Child 18+: the non-marriage undertaking is arranged by TME
+                separately (Arabic document) — an info note, no upload. Age is
+                computed from the RAW stored DOB (ISO), never a display
+                format. */}
+            {certSet.childAgeNote &&
+              (() => {
+                const age = ageFromIsoDate(dateOfBirth);
+                return age !== null && age >= 18;
+              })() && (
+                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Non-marriage undertaking (NOC)</p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      As the dependent is 18 years of age or older, the authorities also require a
+                      non-marriage undertaking (NOC). You do not need to upload anything here. TME
+                      Services will arrange the required document separately and contact you for a
+                      signature.
+                    </p>
+                  </div>
+                </div>
+              )}
 
             <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
               <input
@@ -2197,10 +2775,13 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 onChange={(e) => setValue('certificate_attestation_confirmed', e.target.checked, { shouldDirty: true })}
               />
               <span>
-                I confirm this certificate is attested by MoFA or, at minimum, by the UAE Embassy in the
-                country of issue. I understand TME Services will verify the attestation.
+                {multipleCertificates
+                  ? 'I confirm these certificates are attested by MoFA or, at minimum, by the UAE Embassy in the country of issue. I understand TME Services will verify the attestation.'
+                  : 'I confirm this certificate is attested by MoFA or, at minimum, by the UAE Embassy in the country of issue. I understand TME Services will verify the attestation.'}
               </span>
             </label>
+
+            {certificateError && <p className="text-sm text-red-500">{certificateError}</p>}
           </div>
 
           {viewingStep === 4 && (
@@ -2478,6 +3059,31 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             )}
           </FormSection>
 
+          {/* Sponsor's UAE bank account — sits with the other sponsor-related
+              contact inputs. Stored only on the dependent application; never
+              written back to the payroll account. */}
+          <FormSection
+            title="Sponsor's Bank Account"
+            icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          >
+            <Input
+              label="Your (the sponsor's) UAE bank account (IBAN)"
+              placeholder="AE00 0000 0000 0000 0000 000"
+              helperText="The authorities require the sponsor's UAE bank account for the dependent visa application."
+              error={errors.sponsor_iban?.message}
+              required
+              {...register('sponsor_iban', {
+                required: 'Required',
+                validate: (value) =>
+                  isValidSponsorIban(value) || 'Enter a UAE IBAN: AE followed by 21 digits',
+                onBlur: (e) =>
+                  setValue('sponsor_iban', e.target.value.replace(/\s+/g, '').toUpperCase(), {
+                    shouldValidate: true,
+                  }),
+              })}
+            />
+          </FormSection>
+
           <FormSection title="Anything Else?" icon={<Info className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}>
             <textarea
               className="w-full px-4 py-2 border-2 rounded-lg text-sm focus:outline-none transition-colors"
@@ -2511,6 +3117,33 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 By signing below, I confirm that the information and documents provided above for my{' '}
                 {relationshipNoun} are accurate and complete.
               </p>
+
+              {/* Renewal only: mandatory confirmation that the on-file record
+                  is still current. Blocks submission until ticked (client and
+                  server side); travels in the payload as
+                  details_confirmed_up_to_date. */}
+              {isRenewal && (
+                <div className="border border-gray-200 rounded-lg p-4">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={detailsConfirmed}
+                      onChange={(e) => {
+                        setValue('details_confirmed_up_to_date', e.target.checked, { shouldDirty: true });
+                        if (e.target.checked && detailsConfirmError) setDetailsConfirmError(null);
+                      }}
+                      className="mt-0.5 w-4 h-4 rounded border-gray-300"
+                    />
+                    <span className="text-sm font-medium text-gray-800">
+                      I confirm that the details and documents TME Services has on file are still up to date.
+                    </span>
+                  </label>
+                  {detailsConfirmError && (
+                    <p className="mt-2 text-sm text-red-500">{detailsConfirmError}</p>
+                  )}
+                </div>
+              )}
+
               <SignaturePad
                 onSignatureChange={(value) => {
                   setSignature(value);
