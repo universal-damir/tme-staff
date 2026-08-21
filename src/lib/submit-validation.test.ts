@@ -604,61 +604,59 @@ describe('missingDependentRequirements', () => {
     ).toEqual([]);
   });
 
-  it('Father/Mother and in-laws: require the parents\' marital status select', () => {
+  it('Father/Mother and in-laws: the parents\' marital status derives from the OWN status (asked once, Step 3)', () => {
     const docsWithMarriage = {
       ...dependentDocs,
       marriage_certificate: { path: 'd/marriage.pdf', filename: 'marriage.pdf' },
     };
     for (const relationship of ['Father', 'Mother', 'Father-in-Law', 'Mother-in-Law']) {
+      // Married parent: marriage certificate required.
       expect(
         missingDependentRequirements(
-          { documents: docsWithMarriage },
-          { ...completeDependentData, dependent_type: relationship }
+          { documents: dependentDocs },
+          { ...completeDependentData, dependent_type: relationship, marital_status: 'Married' }
         )
-      ).toEqual(['Marital status of the parents']);
+      ).toEqual(['Marriage certificate']);
       expect(
         missingDependentRequirements(
           { documents: docsWithMarriage },
-          { ...completeDependentData, dependent_type: relationship, parents_marital_status: 'Married' }
+          { ...completeDependentData, dependent_type: relationship, marital_status: 'Married' }
         )
       ).toEqual([]);
     }
   });
 
-  it('Divorced/Deceased parents add the divorce/death certificate (marriage cert stays required)', () => {
-    const docsWithMarriage = {
-      ...dependentDocs,
-      marriage_certificate: { path: 'd/marriage.pdf', filename: 'marriage.pdf' },
-    };
+  it('Divorced/Widowed parents need the divorce/death certificate, NOT the marriage certificate', () => {
     const fatherData = { ...completeDependentData, dependent_type: 'Father' };
     expect(
       missingDependentRequirements(
-        { documents: docsWithMarriage },
-        { ...fatherData, parents_marital_status: 'Divorced' }
+        { documents: dependentDocs },
+        { ...fatherData, marital_status: 'Divorced' }
       )
     ).toEqual(['Divorce certificate']);
-    expect(
-      missingDependentRequirements(
-        { documents: docsWithMarriage },
-        { ...fatherData, parents_marital_status: 'Deceased' }
-      )
-    ).toEqual(['Death certificate']);
-    // Marriage certificate is required in ALL three marital-status cases.
+    // Widowed maps to the portal's 'Deceased'.
     expect(
       missingDependentRequirements(
         { documents: dependentDocs },
-        { ...fatherData, parents_marital_status: 'Deceased' }
+        { ...fatherData, marital_status: 'Widowed' }
       )
-    ).toEqual(['Marriage certificate', 'Death certificate']);
+    ).toEqual(['Death certificate']);
     expect(
       missingDependentRequirements(
         {
           documents: {
-            ...docsWithMarriage,
+            ...dependentDocs,
             death_certificate: { path: 'd/death.pdf', filename: 'death.pdf' },
           },
         },
-        { ...fatherData, parents_marital_status: 'Deceased' }
+        { ...fatherData, marital_status: 'Widowed' }
+      )
+    ).toEqual([]);
+    // Single (never married): only the birth certificate.
+    expect(
+      missingDependentRequirements(
+        { documents: dependentDocs },
+        { ...fatherData, marital_status: 'Single' }
       )
     ).toEqual([]);
   });

@@ -246,8 +246,6 @@ function certificateSetFor(dependentType: string | undefined): CertificateSet {
   }
 }
 
-const PARENTS_MARITAL_STATUS_OPTIONS = ['Married', 'Divorced', 'Deceased'] as const;
-
 /**
  * Age in whole years from the stored DOB. CustomDatePicker keeps
  * `date_of_birth` as dd.mm.yyyy; prefill/extraction may supply ISO
@@ -758,9 +756,32 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   const mobileHomeUseSponsor = watch('mobile_home_use_sponsor') === true;
   const emailUseSponsor = watch('email_use_sponsor') === true;
   const attestationConfirmed = watch('certificate_attestation_confirmed') === true;
-  const parentsMaritalStatus = watch('parents_marital_status');
   const sponsorIban = watch('sponsor_iban');
   const detailsConfirmed = watch('details_confirmed_up_to_date') === true;
+
+  // CS feedback 21.08: the parents' marital status is asked ONCE — Step 3's
+  // Marital Status field IS it (for the parent relationships the dependent is
+  // one of the sponsor's/spouse's parents). Step 4 derives from it instead of
+  // asking again: Widowed maps to the portal's 'Deceased'; Single (never
+  // married) demands no marriage certificate at all.
+  const derivedParentsStatus: 'Married' | 'Divorced' | 'Deceased' | undefined =
+    certSet.maritalSelectLabel
+      ? maritalStatus === 'Married' || maritalStatus === 'Divorced'
+        ? maritalStatus
+        : maritalStatus === 'Widowed'
+          ? 'Deceased'
+          : undefined
+      : undefined;
+  // Divorced/deceased parents need no marriage certificate (confirmed by
+  // Ulesh, CS feedback 21.08); Son/Daughter keep it unconditionally.
+  const marriageCertNeeded =
+    !!certSet.marriageLabel && (!certSet.maritalSelectLabel || derivedParentsStatus === 'Married');
+
+  // Keep the synced payload field in step with the derived value — the portal
+  // contract (`parents_marital_status`, migration 442) is unchanged.
+  useEffect(() => {
+    setValue('parents_marital_status', derivedParentsStatus);
+  }, [derivedParentsStatus, setValue]);
 
   const nationalityCountryCode = nationality ? nationalityToCountryCode(nationality) : undefined;
 
@@ -894,11 +915,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   // relationships, plus the mandatory attestation tick.
   const isCertificateComplete =
     !!certificateDoc?.path &&
-    (!certSet.marriageLabel || !!marriageCertDoc?.path) &&
-    (!certSet.maritalSelectLabel ||
-      (!!parentsMaritalStatus &&
-        (parentsMaritalStatus !== 'Divorced' || !!divorceCertDoc?.path) &&
-        (parentsMaritalStatus !== 'Deceased' || !!deathCertDoc?.path))) &&
+    (!marriageCertNeeded || !!marriageCertDoc?.path) &&
+    (derivedParentsStatus !== 'Divorced' || !!divorceCertDoc?.path) &&
+    (derivedParentsStatus !== 'Deceased' || !!deathCertDoc?.path) &&
     attestationConfirmed;
   const isVisaHistoryComplete =
     previouslyHeldVisa === false ||
@@ -1954,8 +1973,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               ) : (
                 <>
                   Please provide the dependent&apos;s passport, photo, personal details, and the
-                  attested certificate proving the relationship. TME Services will use this
-                  information to apply for the dependent residence visa.
+                  attested certificate proving your relationship. TME Services will use this
+                  information to apply for the dependent&apos;s residence visa.
                 </>
               )}
             </p>
@@ -2678,7 +2697,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   all of the requested documents have been provided.
                 </p>
                 <p className="mt-2 text-xs text-gray-600">
-                  If you have not yet had the required marriage or birth certificate attested, please
+                  In case your marriage or birth certificate hasn&apos;t been attested yet, please
                   contact TME Services so that we can guide you through the process.
                 </p>
               </div>
@@ -2693,7 +2712,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               filename={certificateDoc?.filename}
             />
 
-            {certSet.marriageLabel && (
+            {certSet.marriageLabel && marriageCertNeeded && (
               <FileUploadSlot
                 label={certSet.marriageLabel}
                 description="Upload a clear scan of the attested certificate (PDF or image)."
@@ -2704,44 +2723,41 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               />
             )}
 
-            {certSet.maritalSelectLabel && (
-              <>
-                <div className="max-w-sm">
-                  <CustomDropdown
-                    label={certSet.maritalSelectLabel}
-                    options={PARENTS_MARITAL_STATUS_OPTIONS.map((s) => ({ value: s, label: s }))}
-                    value={parentsMaritalStatus || ''}
-                    onChange={(val) =>
-                      setValue('parents_marital_status', val as 'Married' | 'Divorced' | 'Deceased', {
-                        shouldDirty: true,
-                      })
-                    }
-                    required
-                  />
+            {/* The parents' marital status comes from Step 3 (asked once) —
+                divorced/deceased parents need no marriage certificate, only
+                the matching divorce/death certificate. */}
+            {certSet.marriageLabel && !marriageCertNeeded && (
+              <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">{certSet.marriageLabel}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Based on the marital status provided in Personal Details.
+                  </p>
                 </div>
+                <span className="text-sm font-medium text-red-700 flex-shrink-0">Not required</span>
+              </div>
+            )}
 
-                {parentsMaritalStatus === 'Divorced' && (
-                  <FileUploadSlot
-                    label="Divorce Certificate (attested)"
-                    description="Upload a clear scan of the attested certificate (PDF or image)."
-                    onUpload={handlePlainUpload('divorce_certificate')}
-                    onRemove={handlePlainRemove('divorce_certificate')}
-                    uploaded={!!divorceCertDoc?.path}
-                    filename={divorceCertDoc?.filename}
-                  />
-                )}
+            {derivedParentsStatus === 'Divorced' && (
+              <FileUploadSlot
+                label="Divorce Certificate (attested)"
+                description="Upload a clear scan of the attested certificate (PDF or image)."
+                onUpload={handlePlainUpload('divorce_certificate')}
+                onRemove={handlePlainRemove('divorce_certificate')}
+                uploaded={!!divorceCertDoc?.path}
+                filename={divorceCertDoc?.filename}
+              />
+            )}
 
-                {parentsMaritalStatus === 'Deceased' && (
-                  <FileUploadSlot
-                    label="Death Certificate (attested)"
-                    description="Upload a clear scan of the attested certificate (PDF or image)."
-                    onUpload={handlePlainUpload('death_certificate')}
-                    onRemove={handlePlainRemove('death_certificate')}
-                    uploaded={!!deathCertDoc?.path}
-                    filename={deathCertDoc?.filename}
-                  />
-                )}
-              </>
+            {derivedParentsStatus === 'Deceased' && (
+              <FileUploadSlot
+                label="Death Certificate (attested)"
+                description="Upload a clear scan of the attested certificate (PDF or image)."
+                onUpload={handlePlainUpload('death_certificate')}
+                onRemove={handlePlainRemove('death_certificate')}
+                uploaded={!!deathCertDoc?.path}
+                filename={deathCertDoc?.filename}
+              />
             )}
 
             {/* Child 18+: the non-marriage undertaking is arranged by TME
@@ -2756,16 +2772,34 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
                   <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
                   <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                    <p className="font-medium">Non-marriage undertaking (NOC)</p>
+                    <p className="font-medium">Declaration of Unmarried Status</p>
                     <p className="mt-1 text-xs text-gray-600">
-                      As the dependent is 18 years of age or older, the authorities also require a
-                      non-marriage undertaking (NOC). You do not need to upload anything here. TME
-                      Services will arrange the required document separately and contact you for a
-                      signature.
+                      As the dependent is 18 years of age or older, the authorities also require an
+                      undertaking letter from the Sponsor confirming that the dependent is unmarried.
+                      You do not need to upload anything here. TME Services will arrange the required
+                      document separately and contact you for a signature.
                     </p>
                   </div>
                 </div>
               )}
+
+            {/* Married Mother: her husband's NOC is arranged by TME separately
+                — an info note, no upload. Only for Mother (not Father), and
+                only while her Step-3 marital status is Married. */}
+            {dependentType === 'Mother' && maritalStatus === 'Married' && (
+              <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <p className="font-medium">Husband&apos;s Approval to proceed with Visa Application (NOC)</p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    As the dependent is married, the authorities also require a no-objection
+                    certificate (NOC) confirming her husband&apos;s approval for her to obtain the
+                    residence visa. You do not need to upload anything here. TME Services will
+                    arrange the required document separately and contact you for a signature.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
               <input
