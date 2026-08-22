@@ -20,3 +20,8 @@ export const STORAGE_BUCKET = 'staff-documents';
 // Private bucket for the e-invoicing gap-analysis intake (sample invoices the
 // client uploads). Service-role only; the air-gapped portal pulls + analyses.
 export const GAP_INTAKE_BUCKET = 'gap-intake-documents';
+
+// Private bucket for the Company Setup Intake (IFZA v1) documents the client
+// uploads (passport / photo / EID / proof of address per person). Service-role
+// only; the air-gapped portal pulls via the sync-company-setup cron.
+export const COMPANY_SETUP_BUCKET = 'company-setup-documents';

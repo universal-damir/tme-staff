@@ -22,6 +22,10 @@
 
 import { NextRequest } from 'next/server';
 import { verifyOnboardingAccess, type OnboardingRow } from './onboarding-token';
+import {
+  verifyCompanySetupAccess,
+  type CompanySetupSubmissionRow,
+} from './company-setup-token';
 import { countPdfPagesServer } from './pdf-page-count-server';
 
 export const MAX_AI_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -157,4 +161,83 @@ export async function guardAiRoute(req: NextRequest): Promise<AiGuardResult> {
   }
 
   return { ok: true, body, submissionId, row: access.row! };
+}
+
+// ---------------------------------------------------------------------------
+// Company Setup Intake variant (ADDITIVE — the staff guard above is untouched).
+//
+// The company-setup AI routes live under /api/company-setup/[token]/..., so
+// authorization comes from the URL token resolving to a live
+// `company_setup_intake_submissions` row — not from a submissionId/token pair
+// in the body. Everything else (rate limit, JSON parse, image size cap,
+// single-page-PDF rule) is shared with the staff guard.
+// ---------------------------------------------------------------------------
+
+export interface CompanySetupAiGuardSuccess {
+  ok: true;
+  body: Record<string, unknown>;
+  row: CompanySetupSubmissionRow;
+}
+
+export type CompanySetupAiGuardResult = CompanySetupAiGuardSuccess | AiGuardFailure;
+
+/**
+ * Parse + authorize the body of a company-setup AI route (validate-names,
+ * suggest-names, validate-photo, validate-passport). `token` is the URL
+ * link token. Callers `return NextResponse.json({ error }, { status })` on
+ * failure. Writes are only meaningful before submission, so an already
+ * submitted row is rejected (410-shaped 409 handled by the access check).
+ */
+export async function guardCompanySetupAiRoute(
+  req: NextRequest,
+  token: string
+): Promise<CompanySetupAiGuardResult> {
+  const ip = getClientIp(req);
+  if (rateLimitCheck(ip).blocked) {
+    return { ok: false, status: 429, error: 'Rate limit exceeded' };
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return { ok: false, status: 400, error: 'Invalid JSON body' };
+  }
+
+  // Same base64 size cap as the staff routes (field is named `image` in every
+  // guarded vision route; the name/text routes simply have no image field).
+  const image = body.image;
+  if (typeof image === 'string' && image.length > MAX_AI_IMAGE_BYTES) {
+    return { ok: false, status: 413, error: 'Image too large' };
+  }
+
+  // Identity documents must be a SINGLE page — same rationale as the staff
+  // guard: a multi-page PDF is how a wrong page slips past the vision model.
+  if (
+    typeof image === 'string' &&
+    (image.startsWith('data:application/pdf') || image.includes('application/pdf'))
+  ) {
+    const base64 = image.replace(/^data:[^;]+;base64,/, '');
+    const pages = countPdfPagesServer(base64);
+    if (pages !== null && pages > 1) {
+      return {
+        ok: false,
+        status: 422,
+        error: `This file has ${pages} pages. Please upload only a single page — one page per file.`,
+      };
+    }
+  }
+
+  const access = await verifyCompanySetupAccess(token, { allowSubmitted: false });
+  if (!access.ok || !access.row) {
+    if (access.reason === 'cancelled' || access.reason === 'expired') {
+      return { ok: false, status: 410, error: `Submission ${access.reason}` };
+    }
+    if (access.reason === 'already_submitted') {
+      return { ok: false, status: 409, error: 'Submission already submitted' };
+    }
+    return { ok: false, status: 404, error: 'Submission not found' };
+  }
+
+  return { ok: true, body, row: access.row };
 }

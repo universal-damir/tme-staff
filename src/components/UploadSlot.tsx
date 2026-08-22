@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { TME_COLORS } from '@/lib/constants';
-import { Upload, CheckCircle, AlertCircle, Loader2, FileText, RefreshCw } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, FileText, RefreshCw, X } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 import { useIsMobile } from '@/lib/useIsMobile';
@@ -29,6 +29,13 @@ interface UploadSlotProps {
    * isn't told their photo is verified when it's just been queued.
    */
   needsReview?: boolean;
+  /**
+   * Show a Remove button (wired to onRemove) next to Replace. Off by
+   * default — the staff onboarding forms deliberately dropped the X button
+   * (Replace covers the swap); the company-setup intake opts in so a client
+   * can clear a recorded upload outright.
+   */
+  removable?: boolean;
 }
 
 export function UploadSlot({
@@ -37,7 +44,7 @@ export function UploadSlot({
   expectedType: _expectedType, // Reserved for future use
   file: _file, // File ref tracked by parent
   onUpload,
-  onRemove: _onRemove, // No longer wired — Replace covers swap, no X button anymore
+  onRemove, // Only rendered when `removable` — staff forms keep Replace-only
   validated,
   validating,
   error,
@@ -45,10 +52,10 @@ export function UploadSlot({
   accept = 'application/pdf,image/jpeg,image/png',
   maxSizeMB = 5,
   needsReview = false,
+  removable = false,
 }: UploadSlotProps) {
   void _expectedType;
   void _file;
-  void _onRemove;
   const inputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
   // Identity documents accept PDF + JPEG + PNG. On mobile we narrow to PDF
@@ -338,15 +345,28 @@ export function UploadSlot({
                 still in flight (and so the "Validating..." badge isn't
                 competing with an actionable button). */}
             {!validating && (
-              <button
-                type="button"
-                onClick={() => inputRef.current?.click()}
-                className="absolute top-4 left-4 bg-white rounded-full p-1.5 shadow-md hover:bg-gray-100 transition-colors flex items-center gap-1 px-2"
-                title="Replace with another photo"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-gray-600" />
-                <span className="text-xs font-medium text-gray-700">Replace</span>
-              </button>
+              <div className="absolute top-4 left-4 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  className="bg-white rounded-full p-1.5 shadow-md hover:bg-gray-100 transition-colors flex items-center gap-1 px-2"
+                  title="Replace with another photo"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-gray-600" />
+                  <span className="text-xs font-medium text-gray-700">Replace</span>
+                </button>
+                {removable && (
+                  <button
+                    type="button"
+                    onClick={onRemove}
+                    className="bg-white rounded-full p-1.5 shadow-md hover:bg-red-50 transition-colors flex items-center gap-1 px-2"
+                    title="Remove this file"
+                  >
+                    <X className="w-3.5 h-3.5 text-red-500" />
+                    <span className="text-xs font-medium text-red-500">Remove</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         ) : (
