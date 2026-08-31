@@ -9,6 +9,7 @@
 
 import {
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
+  composeFullName,
   type CompanySetupActivity,
   type CompanySetupCompanyData,
   type CompanySetupContact,
@@ -211,6 +212,9 @@ export function rekeyDocumentsAfterRemove(
 export type PassportExtractedFields = Partial<
   Record<
     | 'fullName'
+    | 'firstName'
+    | 'middleName'
+    | 'lastName'
     | 'nationality'
     | 'dateOfBirth'
     | 'gender'
@@ -265,14 +269,30 @@ export function applyPassportExtraction(
   const applied: PassportExtractedFields = {};
   const next: CompanySetupPerson = { ...person };
 
-  const fullName = toAscii(
-    [data.first_name, data.middle_name, data.family_name]
-      .map((n) => (typeof n === 'string' ? n.trim() : ''))
-      .filter(Boolean)
-      .join(' ')
-  );
-  if (fullName && isBlank(person.fullName)) {
+  // The passport prints the name in three parts, so they are applied as three
+  // parts and fullName is composed from them. Fill-only as a UNIT: if the
+  // person already carries any part of a name, nothing here is touched.
+  const first = toAscii(typeof data.first_name === 'string' ? data.first_name.trim() : '');
+  const middle = toAscii(typeof data.middle_name === 'string' ? data.middle_name.trim() : '');
+  const last = toAscii(typeof data.family_name === 'string' ? data.family_name.trim() : '');
+  const nameIsBlank =
+    isBlank(person.fullName) &&
+    isBlank(person.firstName) &&
+    isBlank(person.middleName) &&
+    isBlank(person.lastName);
+  if ((first || middle || last) && nameIsBlank) {
+    const fullName = composeFullName({
+      firstName: first,
+      middleName: middle,
+      lastName: last,
+    });
+    next.firstName = first;
+    next.middleName = middle;
+    next.lastName = last;
     next.fullName = fullName;
+    applied.firstName = first;
+    applied.middleName = middle;
+    applied.lastName = last;
     applied.fullName = fullName;
   }
 
@@ -345,6 +365,17 @@ export function clearAppliedExtraction(
       else next[field] = undefined;
     }
   }
+  // fullName is derived from the parts, so it must follow whatever survived
+  // the undo — a part the client edited keeps the name alive. A person with no
+  // parts at all (a legacy row that only ever had fullName) is left exactly as
+  // the loop above decided.
+  const hadAppliedParts =
+    applied.firstName !== undefined ||
+    applied.middleName !== undefined ||
+    applied.lastName !== undefined;
+  const hasParts =
+    !isBlank(next.firstName) || !isBlank(next.middleName) || !isBlank(next.lastName);
+  if (hasParts || hadAppliedParts) next.fullName = composeFullName(next);
   return next;
 }
 

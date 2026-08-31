@@ -78,11 +78,26 @@ export default function CurrencyInput({
     }
   }, [value, isFocused, decimals]);
 
+  /**
+   * Thousand separators WHILE typing. Dropping them during editing meant a
+   * salary read "10000" the whole time it was being entered and only became
+   * "10,000" after clicking away — the one moment the number is hard to read
+   * is the moment it was shown unformatted.
+   */
+  const formatWhileTyping = (raw: string): string => {
+    const cleaned = raw.replace(/,/g, '');
+    if (cleaned === '') return '';
+    const [intPart, ...rest] = cleaned.split('.');
+    const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    // A trailing "." the user just typed is preserved, so "1000." keeps its dot.
+    if (decimals === 0 || rest.length === 0) return grouped;
+    return `${grouped}.${rest.join('').slice(0, decimals)}`;
+  };
+
   const handleFocus = () => {
     setIsFocused(true);
-    // Show raw number without formatting during editing
     const numValue = typeof value === 'string' ? parseFloat(value.replace(/,/g, '')) : value;
-    setDisplayValue(numValue === 0 || isNaN(numValue) ? '' : String(numValue));
+    setDisplayValue(numValue === 0 || isNaN(numValue) ? '' : formatWhileTyping(String(numValue)));
   };
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
@@ -113,7 +128,7 @@ export default function CurrencyInput({
     const regex = decimals === 0 ? /^[\d,]*$/ : /^[\d.,]*$/;
     if (!regex.test(inputValue)) return;
 
-    setDisplayValue(inputValue);
+    setDisplayValue(formatWhileTyping(inputValue));
   };
 
   return (

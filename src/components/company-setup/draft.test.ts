@@ -37,6 +37,9 @@ describe('applyPassportExtraction', () => {
       NATIONALITIES
     );
     expect(person.fullName).toBe('Thomas Michael Mueller');
+    expect(person.firstName).toBe('Thomas');
+    expect(person.middleName).toBe('Michael');
+    expect(person.lastName).toBe('Mueller');
     expect(person.nationality).toBe('Germany'); // demonym resolved
     expect(person.dateOfBirth).toBe('1985-12-12');
     expect(person.gender).toBe('male');
@@ -46,6 +49,9 @@ describe('applyPassportExtraction', () => {
     expect(person.passportExpiryDate).toBe('2030-05-01');
     expect(applied).toEqual({
       fullName: 'Thomas Michael Mueller',
+      firstName: 'Thomas',
+      middleName: 'Michael',
+      lastName: 'Mueller',
       nationality: 'Germany',
       dateOfBirth: '1985-12-12',
       gender: 'male',
@@ -102,6 +108,21 @@ describe('applyPassportExtraction', () => {
       NATIONALITIES
     );
     expect(person.fullName).toBe('Aisha Khan');
+    expect(person.firstName).toBe('Aisha');
+    expect(person.middleName).toBe('');
+    expect(person.lastName).toBe('Khan');
+  });
+
+  it('leaves the whole name alone when the client already typed a part', () => {
+    const typed: CompanySetupPerson = { ...emptyPerson(), lastName: 'KHAN' };
+    const { person, applied } = applyPassportExtraction(
+      typed,
+      { first_name: 'Aisha', family_name: 'Khan' },
+      NATIONALITIES
+    );
+    expect(person.firstName).toBeUndefined();
+    expect(person.lastName).toBe('KHAN');
+    expect(applied.firstName).toBeUndefined();
   });
 });
 
@@ -123,6 +144,27 @@ describe('clearAppliedExtraction', () => {
     expect(cleared.fullName).toBe('');
     expect(cleared.nationality).toBeUndefined();
     expect(cleared.passportNumber).toBeUndefined();
+  });
+
+  it('recomposes the full name from the parts that survived the undo', () => {
+    const appliedWithParts = {
+      fullName: 'Thomas Michael Mueller',
+      firstName: 'Thomas',
+      middleName: 'Michael',
+      lastName: 'Mueller',
+    };
+    const person: CompanySetupPerson = {
+      ...emptyPerson(),
+      fullName: 'Thomas Michael Mueller',
+      firstName: 'Thomas',
+      middleName: 'Michael',
+      lastName: 'Muller', // corrected by the client
+    };
+    const cleared = clearAppliedExtraction(person, appliedWithParts);
+    expect(cleared.firstName).toBeUndefined();
+    expect(cleared.middleName).toBeUndefined();
+    expect(cleared.lastName).toBe('Muller');
+    expect(cleared.fullName).toBe('Muller');
   });
 
   it('keeps fields the client edited after the auto-fill', () => {

@@ -62,7 +62,26 @@ export interface CompanySetupVisaInfo {
 
 // Fields mirror the "Natural Person" sheet of the setup Excel.
 export interface CompanySetupPerson {
+  /**
+   * The person's name as one string, ALWAYS equal to the three parts below
+   * joined by single spaces. It stays the required name field because it is
+   * what the invite email, the validation messages, the proof-of-address name
+   * check and the tracker read — and rows created before the split carry only
+   * this. Use composeFullName() whenever a part changes.
+   */
   fullName: string;              // as per passport
+  /**
+   * The name in the three parts the passport prints and clients_v2 stores
+   * (client_shareholders.first_name / middle_name / family_name). Carrying
+   * them through means conversion no longer has to GUESS the split back out
+   * of a joined string — the old heuristic put "Novalic Junior" in the wrong
+   * columns for anyone with two given names. Optional: a legacy row, or a
+   * name typed as one string, has fullName only and still converts via the
+   * fallback split.
+   */
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;             // family name
   roles: CompanySetupPersonRoles;
   shareholdingPct?: number;      // all persons must total 100
   nationality?: string;
@@ -188,6 +207,22 @@ export interface CompanySetupIntake {
   createdByName?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Join the name parts into the single fullName the contract requires. Empty /
+ * whitespace-only parts drop out, so "Damir" + "" + "Novalic" is
+ * "Damir Novalic", never "Damir  Novalic".
+ */
+export function composeFullName(parts: {
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+}): string {
+  return [parts.firstName, parts.middleName, parts.lastName]
+    .map((part) => (part ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
 }
 
 export const COMPANY_SETUP_MAX_SHAREHOLDERS = 6;

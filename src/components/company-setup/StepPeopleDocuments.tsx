@@ -21,11 +21,18 @@ import React, { useRef, useState } from 'react';
 import {
   TME_COLORS,
   NATIONALITIES,
+  LANGUAGES,
   RELIGIONS,
   EDUCATIONAL_QUALIFICATIONS,
   MARITAL_STATUS_OPTIONS,
 } from '@/lib/constants';
-import { Input, CustomDropdown, CustomDatePicker, PhoneInput } from '@/components/ui';
+import {
+  Input,
+  CustomDropdown,
+  CustomDatePicker,
+  MultiSelectDropdown,
+  PhoneInput,
+} from '@/components/ui';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
 import {
@@ -38,6 +45,7 @@ import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 import {
   COMPANY_SETUP_MAX_SHAREHOLDERS,
+  composeFullName,
   type CompanySetupDocRef,
   type CompanySetupDocuments,
   type CompanySetupPerson,
@@ -114,6 +122,17 @@ const sortWithOtherLast = (items: readonly string[]) =>
 
 const SORTED_NATIONALITIES = sortWithOtherLast(NATIONALITIES);
 const SORTED_RELIGIONS = sortWithOtherLast(RELIGIONS);
+const SORTED_LANGUAGES = sortWithOtherLast(LANGUAGES);
+
+/** The contract stores languages as one comma-separated string; the picker
+ *  works in a list. Empty entries drop out so "English, " never becomes a
+ *  blank tag. */
+function splitLanguages(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
 
 const EID_VISA_OPTIONS = [
   { value: 'none', label: 'No — never had a UAE EID or visa' },
@@ -287,6 +306,16 @@ export function StepPeopleDocuments({
   // ---------- Persons ----------
   const updatePerson = (index: number, patch: Partial<CompanySetupPerson>) => {
     onChange(persons.map((p, i) => (i === index ? { ...p, ...patch } : p)));
+  };
+
+  /** The name is typed in three parts; fullName is the contract's required
+   *  field, so it is recomposed on every keystroke and never typed directly. */
+  const updateName = (
+    index: number,
+    patch: Pick<Partial<CompanySetupPerson>, 'firstName' | 'middleName' | 'lastName'>
+  ) => {
+    const merged = { ...persons[index], ...patch };
+    updatePerson(index, { ...patch, fullName: composeFullName(merged) });
   };
 
   const updateRoles = (index: number, key: keyof CompanySetupPerson['roles'], value: boolean) => {
@@ -899,14 +928,32 @@ export function StepPeopleDocuments({
                     </div>
                   )}
                   <div className="space-y-4">
-                    <Input
-                      label="Full name (exactly as written in the passport)"
-                      required
-                      value={person.fullName}
-                      onChange={(e) => updatePerson(index, { fullName: e.target.value })}
-                      placeholder="e.g. THOMAS MICHAEL MUELLER"
-                      maxLength={120}
-                    />
+                    {/* Three parts, exactly as the passport prints them and as
+                        TME stores them. */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <Input
+                        label="First name (as in the passport)"
+                        required
+                        value={person.firstName ?? ''}
+                        onChange={(e) => updateName(index, { firstName: e.target.value })}
+                        placeholder="e.g. THOMAS"
+                        maxLength={60}
+                      />
+                      <Input
+                        label="Middle name"
+                        value={person.middleName ?? ''}
+                        onChange={(e) => updateName(index, { middleName: e.target.value })}
+                        placeholder="e.g. MICHAEL"
+                        maxLength={60}
+                      />
+                      <Input
+                        label="Family name"
+                        value={person.lastName ?? ''}
+                        onChange={(e) => updateName(index, { lastName: e.target.value })}
+                        placeholder="e.g. MUELLER"
+                        maxLength={60}
+                      />
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <CustomDropdown
                         label="Nationality"
@@ -1040,12 +1087,20 @@ export function StepPeopleDocuments({
                     options={EDUCATIONAL_QUALIFICATIONS.map((q) => ({ value: q, label: q }))}
                     placeholder="Select…"
                   />
-                  <Input
+                  {/* Same picker TME uses internally. The contract carries one
+                      comma-separated string, so the list is split on the way in
+                      and joined on the way out; allowCustom keeps a language
+                      outside the list typeable. */}
+                  <MultiSelectDropdown
                     label="Languages spoken"
-                    value={person.languagesSpoken ?? ''}
-                    onChange={(e) => updatePerson(index, { languagesSpoken: e.target.value })}
-                    placeholder="e.g. English, German, Arabic"
-                    maxLength={200}
+                    value={splitLanguages(person.languagesSpoken)}
+                    onChange={(val) =>
+                      updatePerson(index, { languagesSpoken: val.join(', ') })
+                    }
+                    options={SORTED_LANGUAGES.map((l) => ({ value: l, label: l }))}
+                    placeholder="Select languages"
+                    searchable
+                    allowCustom
                   />
                   <CustomDropdown
                     label="Religion"
@@ -1058,7 +1113,15 @@ export function StepPeopleDocuments({
                   <CustomDropdown
                     label="Marital status"
                     value={person.maritalStatus ?? ''}
-                    onChange={(val) => updatePerson(index, { maritalStatus: val })}
+                    onChange={(val) =>
+                      // Leaving Married also drops the spouse name. The field
+                      // is hidden below, but a value left behind would still be
+                      // submitted and reach the authority application.
+                      updatePerson(index, {
+                        maritalStatus: val,
+                        ...(val === 'Married' ? {} : { spouseFullName: undefined }),
+                      })
+                    }
                     options={MARITAL_STATUS_OPTIONS.map((m) => ({ value: m, label: m }))}
                     placeholder="Select…"
                   />
@@ -1317,7 +1380,7 @@ export function StepPeopleDocuments({
                   <div className="max-w-md mt-4">
                     <UploadSlot
                       label="Proof of address — BANK STATEMENT ONLY"
-                      description="A bank statement not older than 3 months, showing your name and home address."
+                      description="A bank statement not older than 3 months, showing your name and home address. A current, savings or credit card statement is fine."
                       file={null}
                       onUpload={(file) => handleAiUpload(index, 'proof_of_address', file, person)}
                       onRemove={() => removeAiDoc(index, 'proof_of_address')}
@@ -1351,8 +1414,10 @@ export function StepPeopleDocuments({
                     <p className="text-xs text-amber-700 flex items-start gap-1 mt-2">
                       <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                       Only a bank statement is accepted as proof of address (not older than 3
-                      months). The address must match the home address entered above. TME will
-                      review this document manually.
+                      months). It can be a current, savings or credit card statement, but not a
+                      utility bill, tenancy contract or bank reference letter. The address must
+                      match the home address entered above. TME will review this document
+                      manually.
                     </p>
                   </div>
                 </div>
