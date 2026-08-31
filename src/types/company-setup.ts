@@ -105,12 +105,19 @@ export interface CompanySetupDocRef {
   // those on removal. Client-side bookkeeping — the portal sync rebuilds refs
   // from a whitelist and drops it.
   extractedData?: Record<string, string>;
+  // Who supplied the file: 'staff' = pre-uploaded in the portal editor (renders
+  // read-only in the client form, omitted from the invite document checklist);
+  // 'client'/undefined = uploaded by the client in the form.
+  source?: 'staff' | 'client';
 }
 
 // Keyed per person index (string of the array index) -> slot -> ref.
 // proof_of_address = BANK STATEMENT ONLY, max 3 months old, always needsReview.
 export type CompanySetupPersonDocuments = Partial<{
   passport: CompanySetupDocRef;
+  // Required for Indian and Syrian passports only: the additional page
+  // (India: address/family page; Syria: issue-details page).
+  passport_additional: CompanySetupDocRef;
   photo: CompanySetupDocRef;
   eid_front: CompanySetupDocRef;
   eid_back: CompanySetupDocRef;
@@ -139,6 +146,10 @@ export interface CompanySetupPrefillData {
 export interface CompanySetupSubmittedData {
   company: CompanySetupCompanyData;
   persons: CompanySetupPerson[]; // 1..6
+  // Client-corrected contact details (editable on the Welcome step). The portal
+  // shows these diffed against the intake columns — NEVER auto-applied, because
+  // contact_email is the address the link was sent to and a Resend would use.
+  contact?: CompanySetupContact;
   confirmedAt: string;           // ISO; client ticked the confirm checkbox
 }
 

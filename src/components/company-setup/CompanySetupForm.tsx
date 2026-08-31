@@ -22,10 +22,13 @@ import {
   type DraftCompany,
 } from './draft';
 import { validateCompanyName } from '@/lib/company-setup-name-validation';
+import { passportAdditionalPageVariant } from '@/lib/staff-form-logic';
+import { Input, PhoneInput } from '@/components/ui';
 import {
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
   COMPANY_SETUP_MAX_SHAREHOLDERS,
   COMPANY_SETUP_MAX_ACTIVITIES,
+  type CompanySetupContact,
   type CompanySetupDocRef,
   type CompanySetupDocuments,
   type CompanySetupPerson,
@@ -33,6 +36,7 @@ import {
   type CompanySetupSubmittedData,
 } from '@/types/company-setup';
 import {
+  AlertCircle,
   Briefcase,
   Building2,
   CheckCircle,
@@ -54,6 +58,26 @@ const STEP_LABELS = [
 ];
 const TOTAL_STEPS = STEP_LABELS.length;
 const AUTOSAVE_DEBOUNCE_MS = 2500;
+// Backoff for a failed autosave — the client keeps typing, we keep retrying.
+const AUTOSAVE_RETRY_BASE_MS = 4000;
+const AUTOSAVE_RETRY_MAX_MS = 60_000;
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Human labels for the document slots (review summary + gating messages). */
+export const DOC_SLOT_LABELS: Record<string, string> = {
+  passport: 'Passport — data page',
+  passport_additional: 'Passport — additional page',
+  photo: 'Portrait photo',
+  eid_front: 'Emirates ID (front)',
+  eid_back: 'Emirates ID (back)',
+  visa_document: 'Current UAE visa',
+  previous_visa_document: 'Previous UAE visa',
+  proof_of_address: 'Proof of address (bank statement)',
+};
+
+/** Why the form can no longer be saved or submitted. */
+export type CompanySetupClosedReason = 'closed' | 'already_submitted';
 
 interface CompanySetupFormProps {
   token: string;
@@ -61,6 +85,12 @@ interface CompanySetupFormProps {
   savedData: Partial<CompanySetupSubmittedData> | null;
   savedDocuments: CompanySetupDocuments | null;
   onSubmitted: () => void;
+  /**
+   * The link stopped accepting writes mid-session (cancelled/expired = 410,
+   * submitted elsewhere = 409). The page swaps to the matching screen instead
+   * of leaving the client typing into a form that can never be saved.
+   */
+  onClosed: (reason: CompanySetupClosedReason) => void;
 }
 
 export function CompanySetupForm({
@@ -69,6 +99,7 @@ export function CompanySetupForm({
   savedData,
   savedDocuments,
   onSubmitted,
+  onClosed,
 }: CompanySetupFormProps) {
   const [draft, setDraft] = useState<CompanySetupDraft>(() => buildDraft(prefill, savedData));
   const [documents, setDocuments] = useState<CompanySetupDocuments>(savedDocuments ?? {});
@@ -80,7 +111,8 @@ export function CompanySetupForm({
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   // ---------- Autosave ----------
   const latestPayload = useRef<{ draft: CompanySetupDraft; documents: CompanySetupDocuments }>({
@@ -90,33 +122,138 @@ export function CompanySetupForm({
   latestPayload.current = { draft, documents };
   const dirty = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // One save at a time, in a strict order: a save started later must never be
+  // overtaken by an earlier one whose response arrives late and re-writes the
+  // column with older values.
+  const inFlight = useRef(false);
+  const seq = useRef(0);
+  const retryDelay = useRef(AUTOSAVE_RETRY_BASE_MS);
+  // The link stopped accepting writes — stop saving, stop retrying.
+  const closed = useRef(false);
+  const saveNowRef = useRef<() => Promise<void>>(async () => {});
+
+  const autosaveBody = useCallback(() => {
+    const { draft: d, documents: docs } = latestPayload.current;
+    return JSON.stringify({
+      submittedData: { company: d.company, persons: d.persons, contact: d.contact },
+      documents: docs,
+    });
+  }, []);
+
+  /** 410 (cancelled/expired) or 409 (submitted elsewhere) anywhere in the form
+   *  lifts the whole page out of the editing state. Returns true when handled. */
+  const handleClosedStatus = useCallback(
+    (status: number): boolean => {
+      if (status !== 410 && status !== 409) return false;
+      if (closed.current) return true;
+      closed.current = true;
+      dirty.current = false;
+      if (timer.current) clearTimeout(timer.current);
+      onClosed(status === 409 ? 'already_submitted' : 'closed');
+      return true;
+    },
+    [onClosed]
+  );
+
+  const scheduleSaveIn = useCallback((delay: number) => {
+    if (closed.current) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => void saveNowRef.current(), delay);
+  }, []);
 
   const saveNow = useCallback(async () => {
-    if (!dirty.current) return;
+    if (closed.current || !dirty.current) return;
+    // A save is already running: leave the work marked dirty; the running save
+    // re-schedules itself on completion.
+    if (inFlight.current) return;
+
     dirty.current = false;
+    inFlight.current = true;
+    const mySeq = ++seq.current;
+    let retryScheduled = false;
     setSaveState('saving');
     try {
-      const { draft: d, documents: docs } = latestPayload.current;
       const res = await fetch(`/api/company-setup/${token}/autosave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          submittedData: { company: d.company, persons: d.persons },
-          documents: docs,
-        }),
+        body: autosaveBody(),
       });
-      setSaveState(res.ok ? 'saved' : 'idle');
+      if (handleClosedStatus(res.status)) return;
+      if (res.ok) {
+        retryDelay.current = AUTOSAVE_RETRY_BASE_MS;
+        // Only the newest save may paint "Saved".
+        if (mySeq === seq.current) {
+          setSaveState('saved');
+          setSaveMessage(null);
+        }
+        return;
+      }
+      // Failure: the work is NOT saved — put it back on the dirty pile.
+      dirty.current = true;
+      setSaveState('error');
+      setSaveMessage(
+        res.status === 413
+          ? 'Your entries have grown too large to save automatically. Please remove a document you uploaded twice, or contact your TME consultant.'
+          : null
+      );
+      if (res.status !== 413) {
+        scheduleSaveIn(retryDelay.current);
+        retryScheduled = true;
+        retryDelay.current = Math.min(retryDelay.current * 2, AUTOSAVE_RETRY_MAX_MS);
+      }
     } catch {
-      setSaveState('idle');
+      dirty.current = true;
+      setSaveState('error');
+      setSaveMessage(null);
+      scheduleSaveIn(retryDelay.current);
+      retryScheduled = true;
+      retryDelay.current = Math.min(retryDelay.current * 2, AUTOSAVE_RETRY_MAX_MS);
+    } finally {
+      inFlight.current = false;
+      // Something changed while we were saving — save again.
+      if (dirty.current && !closed.current && !retryScheduled) {
+        scheduleSaveIn(AUTOSAVE_DEBOUNCE_MS);
+      }
     }
-  }, [token]);
+  }, [token, autosaveBody, handleClosedStatus, scheduleSaveIn]);
+  saveNowRef.current = saveNow;
 
   const scheduleSave = useCallback(() => {
+    if (closed.current) return;
     dirty.current = true;
-    setSaveState('idle');
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => void saveNow(), AUTOSAVE_DEBOUNCE_MS);
-  }, [saveNow]);
+    setSaveState((prev) => (prev === 'error' ? prev : 'idle'));
+    scheduleSaveIn(AUTOSAVE_DEBOUNCE_MS);
+  }, [scheduleSaveIn]);
+
+  // Leaving the page (tab close, navigation, backgrounding on mobile) must not
+  // drop the last edits: keepalive lets the request outlive the document.
+  useEffect(() => {
+    const flush = () => {
+      if (closed.current || !dirty.current) return;
+      try {
+        void fetch(`/api/company-setup/${token}/autosave`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: autosaveBody(),
+          keepalive: true,
+        }).catch(() => {});
+      } catch {
+        // keepalive bodies are capped (~64KB) — a rejected flush just means the
+        // normal debounced save has to do it; dirty stays set.
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [token, autosaveBody]);
 
   useEffect(() => {
     return () => {
@@ -137,6 +274,14 @@ export function CompanySetupForm({
   const updatePersons = useCallback(
     (persons: CompanySetupPerson[]) => {
       setDraft((prev) => ({ ...prev, persons }));
+      scheduleSave();
+    },
+    [scheduleSave]
+  );
+
+  const updateContact = useCallback(
+    (patch: Partial<CompanySetupContact>) => {
+      setDraft((prev) => ({ ...prev, contact: { ...prev.contact, ...patch } }));
       scheduleSave();
     },
     [scheduleSave]
@@ -199,6 +344,7 @@ export function CompanySetupForm({
           method: 'POST',
           body: fd,
         });
+        if (handleClosedStatus(res.status)) return null;
         if (!res.ok) return null;
         const j = (await res.json()) as { path?: string; filename?: string };
         if (!j.path) return null;
@@ -207,7 +353,7 @@ export function CompanySetupForm({
         return null;
       }
     },
-    [token]
+    [token, handleClosedStatus]
   );
 
   // ---------- AI name endpoints ----------
@@ -221,6 +367,7 @@ export function CompanySetupForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ names }),
       });
+      if (handleClosedStatus(res.status)) return false;
       if (!res.ok) {
         // Advisory check — an infra failure never blocks.
         setAiIssues([]);
@@ -243,31 +390,52 @@ export function CompanySetupForm({
     } finally {
       setCheckingNames(false);
     }
-  }, [draft.company.nameOptions, token]);
+  }, [draft.company.nameOptions, token, handleClosedStatus]);
+
+  // Suggestions are only meaningful when they are grounded in THIS company's
+  // activities. There is no generic fallback: an ungrounded "General trading
+  // and services" prompt produced names that had nothing to do with the
+  // business, so the button is disabled until an activity exists.
+  const groundedActivities = useMemo(
+    () =>
+      draft.company.activities
+        .map((a) => ({ code: a.code?.trim() || undefined, description: a.description.trim() }))
+        .filter((a) => a.description.length > 0 || !!a.code),
+    [draft.company.activities]
+  );
 
   const suggestNames = useCallback(async (): Promise<string[] | null> => {
+    if (groundedActivities.length === 0) return null;
     try {
-      const activities = draft.company.activities
-        .map((a) => a.description.trim())
-        .filter(Boolean);
       const res = await fetch(`/api/company-setup/${token}/suggest-names`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          activities: activities.length > 0 ? activities : ['General trading and services'],
-          preferences: draft.company.businessDescription?.trim() || undefined,
+          activities: groundedActivities,
+          licenseType: draft.company.licenseType,
+          businessDescription: draft.company.businessDescription?.trim() || undefined,
         }),
       });
+      if (handleClosedStatus(res.status)) return null;
       if (!res.ok) return null;
       const j = (await res.json()) as { suggestions?: string[] };
       return j.suggestions ?? null;
     } catch {
       return null;
     }
-  }, [draft.company.activities, draft.company.businessDescription, token]);
+  }, [
+    groundedActivities,
+    draft.company.licenseType,
+    draft.company.businessDescription,
+    token,
+    handleClosedStatus,
+  ]);
 
   // ---------- Step gates ----------
   const totals = useMemo(() => roleTotals(draft.persons), [draft.persons]);
+
+  const contactOk =
+    draft.contact.name.trim().length > 0 && EMAIL_PATTERN.test(draft.contact.email.trim());
 
   const activitiesOk =
     draft.company.activities.length >= 1 &&
@@ -282,8 +450,16 @@ export function CompanySetupForm({
   const peopleOk =
     draft.persons.length >= 1 &&
     draft.persons.length <= COMPANY_SETUP_MAX_SHAREHOLDERS &&
+    // nationality + date of birth are server-required at submit — gate them
+    // here too, so the asterisks in the form tell the truth and the client is
+    // never let through to a 422 they cannot see.
     draft.persons.every(
-      (p) => p.fullName.trim().length > 0 && !!p.religion && !!p.currentOrPastEidVisa
+      (p) =>
+        p.fullName.trim().length > 0 &&
+        !!p.nationality &&
+        !!p.dateOfBirth &&
+        !!p.religion &&
+        !!p.currentOrPastEidVisa
     ) &&
     totals.gmCount === 1 &&
     totals.secretaryCount === 1 &&
@@ -299,6 +475,10 @@ export function CompanySetupForm({
   const documentsOk = draft.persons.every((person, index) => {
     const docs = documents[String(index)] ?? {};
     if (!docs.passport?.path || !docs.photo?.path || !docs.proof_of_address?.path) return false;
+    // Indian / Syrian passports carry a second required page.
+    if (passportAdditionalPageVariant(person.nationality) && !docs.passport_additional?.path) {
+      return false;
+    }
     if (person.currentOrPastEidVisa === 'current') {
       if (!docs.eid_front?.path || !docs.eid_back?.path || !docs.visa_document?.path) return false;
     }
@@ -342,6 +522,7 @@ export function CompanySetupForm({
       const submittedData = {
         company: draft.company,
         persons: draft.persons,
+        contact: draft.contact,
         confirmedAt: new Date().toISOString(), // server overwrites with its own stamp
       } as CompanySetupSubmittedData;
       const res = await fetch(`/api/company-setup/${token}/submit`, {
@@ -349,6 +530,10 @@ export function CompanySetupForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ submittedData, documents, confirmed: true }),
       });
+      if (handleClosedStatus(res.status)) {
+        setSubmitting(false);
+        return;
+      }
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as {
           error?: string;
@@ -364,6 +549,10 @@ export function CompanySetupForm({
         setSubmitting(false);
         return;
       }
+      // Submitted: the row is closed for writes — stop autosaving.
+      closed.current = true;
+      dirty.current = false;
+      if (timer.current) clearTimeout(timer.current);
       onSubmitted();
     } catch {
       setSubmitError('Submission failed — please check your connection and try again.');
@@ -372,7 +561,7 @@ export function CompanySetupForm({
   };
 
   // ---------- Render ----------
-  const contact = prefill?.contact;
+  const contact = draft.contact;
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -383,11 +572,17 @@ export function CompanySetupForm({
         onStepClick={goToStep}
       />
 
-      <div className="flex justify-end -mt-1 mb-1 pr-1 h-4">
+      <div className="flex justify-end -mt-1 mb-1 pr-1 min-h-4">
         {saveState === 'saving' && <span className="text-xs text-gray-400">Saving…</span>}
         {saveState === 'saved' && (
           <span className="text-xs text-gray-400 flex items-center gap-1">
             <CheckCircle className="w-3 h-3 text-green-500" /> Saved
+          </span>
+        )}
+        {saveState === 'error' && (
+          <span className="text-xs text-amber-700 flex items-center gap-1 text-right">
+            <AlertCircle className="w-3 h-3 flex-shrink-0" />
+            {saveMessage ?? 'Not saved — retrying'}
           </span>
         )}
       </div>
@@ -400,27 +595,49 @@ export function CompanySetupForm({
         >
           <div className="space-y-5">
             <p className="text-sm text-gray-600 leading-relaxed">
-              {contact?.name ? `Dear ${contact.name}, welcome` : 'Welcome'} to the TME Services
-              company setup form for your new IFZA (International Free Zone Authority) company.
-              This form collects everything the authority needs to start the incorporation. You
-              can pause at any time — your progress is saved automatically.
+              {contact.name.trim() ? `Dear ${contact.name.trim()}, welcome` : 'Welcome'} to the TME
+              Services company setup form for your new IFZA (International Free Zone Authority)
+              company. This form collects everything the authority needs to start the
+              incorporation. You can pause at any time — your progress is saved automatically.
             </p>
 
-            {contact && (
-              <div className="rounded-xl border border-gray-100 p-4">
-                <p className="text-sm font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-                  Your contact details
-                </p>
-                <div className="text-sm text-gray-700 space-y-1">
-                  <p>{contact.name}</p>
-                  <p>{contact.email}</p>
-                  {contact.mobile && <p>{contact.mobile}</p>}
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Not correct? Please contact your TME consultant before continuing.
-                </p>
+            <div className="rounded-xl border border-gray-100 p-4">
+              <p className="text-sm font-semibold mb-1" style={{ color: TME_COLORS.primary }}>
+                Your contact details
+              </p>
+              <p className="text-xs text-gray-500 mb-3">
+                These are the details we have for you. Please correct them if anything is wrong.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input
+                  label="Full name"
+                  required
+                  value={contact.name}
+                  onChange={(e) => updateContact({ name: e.target.value })}
+                  placeholder="Your name"
+                  maxLength={120}
+                />
+                <Input
+                  label="Email address"
+                  type="email"
+                  required
+                  value={contact.email}
+                  onChange={(e) => updateContact({ email: e.target.value })}
+                  placeholder="name@example.com"
+                  maxLength={120}
+                />
+                <PhoneInput
+                  label="Mobile number"
+                  value={contact.mobile || undefined}
+                  onChange={(val) => updateContact({ mobile: val ?? '' })}
+                />
               </div>
-            )}
+              {!contactOk && (
+                <p className="text-xs text-amber-700 mt-2">
+                  Please enter your name and a valid email address to continue.
+                </p>
+              )}
+            </div>
 
             {prefill?.notesForClient && (
               <InfoNote title="A note from your TME consultant">
@@ -434,8 +651,9 @@ export function CompanySetupForm({
               </p>
               <ul className="space-y-2">
                 {[
-                  'Passport copy — a proper flatbed scan of the data page (not a phone photo).',
-                  'A digital passport photo — plain light background, no glasses.',
+                  'Passport copy — a proper flatbed scan of the data page spread (not a phone photo).',
+                  'Indian and Syrian passports only: one additional page — the address / family-details page (India) or the issue-details page (Syria).',
+                  'A portrait photo (headshot) — a recent digital photo on a plain light background, no glasses. This is not a passport page.',
                   'Proof of address — a BANK STATEMENT not older than 3 months (no utility bills).',
                   'Emirates ID and UAE visa copies, if the person currently holds or previously held them.',
                 ].map((item, i) => (
@@ -450,7 +668,12 @@ export function CompanySetupForm({
               </ul>
             </div>
           </div>
-          <StepNavButtons enabled onContinue={() => void continueFrom(1)} showBack={false} label="Start" />
+          <StepNavButtons
+            enabled={contactOk}
+            onContinue={() => void continueFrom(1)}
+            showBack={false}
+            label="Start"
+          />
         </FormSection>
       )}
 
@@ -477,9 +700,11 @@ export function CompanySetupForm({
         >
           <StepNames
             company={draft.company}
+            prefill={prefill}
             onChange={updateCompany}
             aiIssues={aiIssues}
             onSuggest={suggestNames}
+            canSuggest={groundedActivities.length > 0}
           />
           {aiChecked && aiIssues.length > 0 && (
             <p className="mt-4 text-xs text-amber-700">
@@ -527,10 +752,11 @@ export function CompanySetupForm({
           />
           {!(peopleOk && documentsOk) && (
             <p className="mt-3 text-xs text-gray-500">
-              To continue: every person needs a full name, religion and EID/visa answer plus the
-              required documents (passport, photo, bank statement, and EID/visa copies where
-              applicable); roles must satisfy the constraints above; and shareholdings must total
-              100%.
+              To continue: every person needs a full name, nationality, date of birth, religion and
+              EID/visa answer, plus the required documents (passport data page, portrait photo,
+              bank statement, the additional passport page for Indian and Syrian passports, and
+              EID/visa copies where applicable); roles must satisfy the constraints above; and
+              shareholdings must total 100%.
             </p>
           )}
           <StepNavButtons
@@ -712,7 +938,12 @@ function ReviewSummary({
         ].filter(Boolean);
         const uploadedDocs = Object.entries(docs)
           .filter(([, ref]) => ref?.path)
-          .map(([slot]) => slot.replace(/_/g, ' '));
+          .map(
+            ([slot, ref]) =>
+              `${DOC_SLOT_LABELS[slot] ?? slot.replace(/_/g, ' ')}${
+                ref?.source === 'staff' ? ' (provided by TME)' : ''
+              }`
+          );
         return (
           <div key={index} className="border-t border-gray-100 pt-4">
             <p className="text-sm font-semibold mb-2" style={{ color: TME_COLORS.primary }}>

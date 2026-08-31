@@ -5,6 +5,10 @@ import { TME_COLORS } from '@/lib/constants';
 import { CurrencyInput } from '@/components/ui';
 import { InfoNote } from './chrome';
 import { deriveNumberOfShares, type DraftCompany } from './draft';
+import {
+  COMPANY_SETUP_MAX_SHARE_CAPITAL_AED,
+  COMPANY_SETUP_MAX_VALUE_PER_SHARE_AED,
+} from '@/lib/company-setup-validation';
 
 // Ported from the portal's cost-overview formatter
 // (src/components/cost-overview/hooks/useFormattedInputs.tsx) — keep in sync.
@@ -52,6 +56,7 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
           label="Share capital"
           currency="AED"
           decimals={0}
+          max={COMPANY_SETUP_MAX_SHARE_CAPITAL_AED}
           value={shareCapitalAED ?? ''}
           onChange={(v) => apply({ shareCapitalAED: v > 0 ? v : undefined })}
           placeholder="10,000"
@@ -60,6 +65,7 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
           label="Value per share"
           currency="AED"
           decimals={0}
+          max={COMPANY_SETUP_MAX_VALUE_PER_SHARE_AED}
           value={valuePerShareAED ?? ''}
           onChange={(v) => apply({ valuePerShareAED: v > 0 ? v : undefined })}
           placeholder="1"

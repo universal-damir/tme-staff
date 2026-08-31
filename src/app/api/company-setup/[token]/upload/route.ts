@@ -6,8 +6,55 @@ import {
   isCompanySetupDocSlot,
 } from '@/lib/company-setup-token';
 import { MAX_FILE_BYTES, detectExtFromMagic, mimeForExt } from '@/lib/file-validation';
+import { getClientIp, rateLimitCheck } from '@/lib/ai-route-guard';
+import type { CompanySetupDocuments } from '@/types/company-setup';
 
 export const runtime = 'nodejs';
+
+// Per-submission ceiling. The portal sync enforces the same 100MB budget when
+// it pulls the files across, so anything above this could never land anyway.
+const MAX_SUBMISSION_BYTES = 100 * 1024 * 1024;
+const MAX_SUBMISSION_FILES = 40;
+
+interface UsageTally {
+  bytes: number;
+  files: number;
+  expiresAt: number;
+}
+
+// Best-effort per-submission tally. In-memory, exactly like the AI guard's
+// rate limiter: a warm Netlify instance shares it, a cold start starts over.
+// Seeded on every request from the number of refs actually recorded on the
+// row, so a resumed draft is never credited a clean slate for its file COUNT
+// (byte totals are not stored on the refs, so those only count this instance's
+// own uploads). Combined with the per-IP rate limit this is enough to stop a
+// script filling the bucket; it is not a hard quota.
+const TALLY_TTL_MS = 6 * 60 * 60 * 1000;
+const usageState = new Map<string, UsageTally>();
+
+function countRecordedRefs(documents: CompanySetupDocuments | null): number {
+  if (!documents) return 0;
+  let count = 0;
+  for (const slots of Object.values(documents)) {
+    if (!slots || typeof slots !== 'object') continue;
+    for (const ref of Object.values(slots)) {
+      if (ref && typeof ref === 'object' && typeof ref.path === 'string') count += 1;
+    }
+  }
+  return count;
+}
+
+function getTally(rowId: string, recordedFiles: number): UsageTally {
+  const now = Date.now();
+  const existing = usageState.get(rowId);
+  if (!existing || existing.expiresAt <= now) {
+    const fresh: UsageTally = { bytes: 0, files: recordedFiles, expiresAt: now + TALLY_TTL_MS };
+    usageState.set(rowId, fresh);
+    return fresh;
+  }
+  if (recordedFiles > existing.files) existing.files = recordedFiles;
+  return existing;
+}
 
 // POST /api/company-setup/[token]/upload
 // Multipart: personIndex ("0".."5"), slot (fixed vocabulary), file.
@@ -21,6 +68,12 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ): Promise<NextResponse> {
   const { token } = await params;
+
+  // Same per-IP budget the AI routes use — without it this route was an
+  // unmetered file sink for anyone holding a live link.
+  if (rateLimitCheck(getClientIp(req)).blocked) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   // Writes: an already-submitted row is closed.
   const access = await verifyCompanySetupAccess(token, { allowSubmitted: false });
@@ -56,6 +109,15 @@ export async function POST(
     return NextResponse.json({ error: 'file_size_out_of_range' }, { status: 413 });
   }
 
+  // Per-submission ceiling — one link must not be able to fill the bucket.
+  const tally = getTally(row.id, countRecordedRefs(row.documents));
+  if (tally.files + 1 > MAX_SUBMISSION_FILES) {
+    return NextResponse.json({ error: 'too_many_files' }, { status: 413 });
+  }
+  if (tally.bytes + file.size > MAX_SUBMISSION_BYTES) {
+    return NextResponse.json({ error: 'submission_quota_exceeded' }, { status: 413 });
+  }
+
   const buf = new Uint8Array(await file.arrayBuffer());
   const detected = detectExtFromMagic(buf);
   if (!detected) {
@@ -78,6 +140,9 @@ export async function POST(
     console.error('company-setup/upload: supabase upload failed');
     return NextResponse.json({ error: 'upload_failed' }, { status: 500 });
   }
+
+  tally.bytes += file.size;
+  tally.files += 1;
 
   // Preserve the original (sanitised) display filename in the response so the
   // form can still show "passport.pdf" to the user, while the on-storage name

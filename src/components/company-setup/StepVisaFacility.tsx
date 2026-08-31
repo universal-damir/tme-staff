@@ -6,6 +6,10 @@ import { Input, CustomDropdown, CurrencyInput } from '@/components/ui';
 import { InfoNote } from './chrome';
 import type { DraftCompany } from './draft';
 import type { CompanySetupFacilityType, CompanySetupPerson } from '@/types/company-setup';
+import {
+  COMPANY_SETUP_MAX_MONTHLY_SALARY_AED,
+  COMPANY_SETUP_MAX_VISA_COUNT,
+} from '@/lib/company-setup-validation';
 
 const FACILITY_OPTIONS: { value: CompanySetupFacilityType; label: string }[] = [
   { value: 'virtual_office', label: 'Virtual Office' },
@@ -76,6 +80,7 @@ export function StepVisaFacility({
                   currency="AED"
                   decimals={0}
                   required
+                  max={COMPANY_SETUP_MAX_MONTHLY_SALARY_AED}
                   value={person.visa.basicMonthlySalaryAED ?? ''}
                   onChange={(v) =>
                     updateVisa(index, { basicMonthlySalaryAED: v > 0 ? v : undefined })
@@ -106,11 +111,22 @@ export function StepVisaFacility({
         <Input
           label="Total number of visas required under the license"
           type="number"
+          inputMode="numeric"
           min={0}
+          max={COMPANY_SETUP_MAX_VISA_COUNT}
+          step={1}
+          maxLength={3}
           value={company.visaCount ?? ''}
           onChange={(e) => {
-            const n = Number(e.target.value);
-            onCompanyChange({ visaCount: Number.isInteger(n) && n >= 0 ? n : undefined });
+            // Strip anything that is not a digit (kills "007", "1e9", "-3"),
+            // then clamp to the same 0..100 window the server enforces.
+            const digits = e.target.value.replace(/\D/g, '').slice(0, 3);
+            if (digits === '') {
+              onCompanyChange({ visaCount: undefined });
+              return;
+            }
+            const n = Math.min(Number(digits), COMPANY_SETUP_MAX_VISA_COUNT);
+            onCompanyChange({ visaCount: n });
           }}
           helperText={
             visaPersonCount > 0

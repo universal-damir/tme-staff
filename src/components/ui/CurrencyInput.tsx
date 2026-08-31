@@ -14,6 +14,12 @@ interface CurrencyInputProps {
   error?: string;
   disabled?: boolean;
   decimals?: number; // Number of decimal places (default: 2)
+  /**
+   * Opt-in upper bound. When set, a value above it is clamped down on blur so
+   * the field can never hold a number the server would reject. Off by default
+   * — existing call sites keep their unbounded behaviour.
+   */
+  max?: number;
 }
 
 /**
@@ -45,6 +51,7 @@ export default function CurrencyInput({
   error,
   disabled = false,
   decimals = 2,
+  max,
 }: CurrencyInputProps) {
   // Set default placeholder based on decimals
   const defaultPlaceholder = placeholder || (decimals === 0 ? '0' : '0.00');
@@ -87,6 +94,9 @@ export default function CurrencyInput({
       // Round to integer if decimals is 0
       if (decimals === 0) {
         numValue = Math.round(numValue);
+      }
+      if (typeof max === 'number' && numValue > max) {
+        numValue = max;
       }
       onChange(numValue);
       setDisplayValue(formatNumber(numValue));

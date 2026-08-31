@@ -133,6 +133,10 @@ export function scrubRowForClient(row: CompanySetupSubmissionRow): CompanySetupC
 // path segment comes from this list, never from free text.
 export const COMPANY_SETUP_DOC_SLOTS = [
   'passport',
+  // Indian / Syrian passports only — the additional page (address / family
+  // details, or the issue-details page). Gated by nationality in the form and
+  // in the submit route's required-documents check.
+  'passport_additional',
   'photo',
   'eid_front',
   'eid_back',
@@ -153,7 +157,21 @@ export function isCompanySetupDocSlot(value: string): value is CompanySetupDocSl
  * fixed vocabulary, and every ref path must live under this submission's own
  * storage folder (`<rowId>/...`) with no traversal — a forged path can never
  * point the portal sync at another submission's files.
+ *
+ * The path must ALSO carry the SLOT it is filed under
+ * (`<rowId>/<personIndex>/<slot>/...`), so a client cannot file their passport
+ * as their proof of address and have the portal copy it into the wrong
+ * shareholder document slot at conversion.
+ *
+ * The person segment is checked for shape (0..5) but NOT against the JSON key:
+ * removing a person re-keys the remaining refs (person 2's documents become
+ * person 1's) while the stored objects keep their original path, so a stale
+ * index there is legitimate.
+ *
+ * A staff-provided ref (`source: 'staff'`) lives in the portal's own
+ * `<rowId>/staff/` namespace, written before the invite went out.
  */
+const CLIENT_PATH_PERSON_SEGMENT = /^[0-5]$/;
 export function documentsErrorForRow(
   documents: unknown,
   rowId: string
@@ -174,11 +192,33 @@ export function documentsErrorForRow(
       if (typeof ref !== 'object' || Array.isArray(ref)) {
         return `documents["${personKey}"].${slot} must be an object`;
       }
+      const source = (ref as { source?: unknown }).source;
+      if (source !== undefined && source !== 'staff' && source !== 'client') {
+        return `documents["${personKey}"].${slot} has an invalid source`;
+      }
       const path = (ref as { path?: unknown }).path;
-      if (typeof path !== 'string' || !path.startsWith(`${rowId}/`)) {
+      if (typeof path !== 'string') {
         return `documents["${personKey}"].${slot} has an invalid path`;
       }
       if (path.includes('..') || path.includes('//') || path.includes('\0')) {
+        return `documents["${personKey}"].${slot} has an invalid path`;
+      }
+      if (source === 'staff') {
+        // Staff-provided files live in the portal's own namespace.
+        if (!path.startsWith(`${rowId}/staff/`)) {
+          return `documents["${personKey}"].${slot} has an invalid path`;
+        }
+        continue;
+      }
+      // Client upload: <rowId>/<0-5>/<slot>/<file>
+      const segments = path.split('/');
+      if (
+        segments.length < 4 ||
+        segments[0] !== rowId ||
+        !CLIENT_PATH_PERSON_SEGMENT.test(segments[1]) ||
+        segments[2] !== slot ||
+        segments[3].length === 0
+      ) {
         return `documents["${personKey}"].${slot} has an invalid path`;
       }
     }

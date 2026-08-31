@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  additionalPageDataOf,
+  applyAdditionalPageExtraction,
   applyPassportExtraction,
   buildDraft,
+  clearAppliedAdditionalPage,
   clearAppliedExtraction,
   deriveNumberOfShares,
   emptyPerson,
@@ -202,6 +205,110 @@ describe('buildDraft company normalization', () => {
       null
     );
     expect(draft.company.numberOfShares).toBe(500);
+  });
+});
+
+describe('buildDraft contact seeding', () => {
+  it('seeds the editable contact from the staff prefill', () => {
+    const draft = buildDraft(
+      { contact: { name: 'Anna Klein', email: 'anna@example.com', mobile: '+4915112345678' } },
+      null
+    );
+    expect(draft.contact).toEqual({
+      name: 'Anna Klein',
+      email: 'anna@example.com',
+      mobile: '+4915112345678',
+    });
+  });
+
+  it("prefers the client's own correction on resume", () => {
+    const draft = buildDraft(
+      { contact: { name: 'Anna Klein', email: 'anna@example.com' } },
+      { contact: { name: 'Anna Klein-Weber', email: 'anna.kw@example.com', mobile: '+971501234567' } }
+    );
+    expect(draft.contact.name).toBe('Anna Klein-Weber');
+    expect(draft.contact.email).toBe('anna.kw@example.com');
+    expect(draft.contact.mobile).toBe('+971501234567');
+  });
+
+  it('never leaves the contact fields undefined', () => {
+    const draft = buildDraft(null, null);
+    expect(draft.contact).toEqual({ name: '', email: '', mobile: '' });
+  });
+});
+
+describe('applyAdditionalPageExtraction', () => {
+  it('fills Indian family details and joins the address parts', () => {
+    const { person, applied } = applyAdditionalPageExtraction(emptyPerson(), {
+      father_name: 'Rajesh Kumar',
+      mother_name: 'Sunita Kumar',
+      spouse_name: 'Priya Kumar',
+      address_street: '14 MG Road',
+      address_city: 'Bengaluru',
+      address_state: 'Karnataka',
+      address_pin: '560001',
+      address_country: 'India',
+    });
+    expect(person.fatherFullName).toBe('Rajesh Kumar');
+    expect(person.motherFullName).toBe('Sunita Kumar');
+    expect(person.spouseFullName).toBe('Priya Kumar');
+    expect(person.maritalStatus).toBe('Married');
+    expect(person.fullAddress).toBe('14 MG Road, Bengaluru, Karnataka, 560001, India');
+    expect(applied.fullAddress).toBe('14 MG Road, Bengaluru, Karnataka, 560001, India');
+  });
+
+  it('fills the Syrian issue/expiry dates the data page does not carry', () => {
+    const { person, applied } = applyAdditionalPageExtraction(emptyPerson(), {
+      passport_issue_date: '05.03.2021',
+      passport_expiry_date: '04.03.2027',
+    });
+    expect(person.passportIssueDate).toBe('2021-03-05');
+    expect(person.passportExpiryDate).toBe('2027-03-04');
+    expect(applied).toEqual({
+      passportIssueDate: '2021-03-05',
+      passportExpiryDate: '2027-03-04',
+    });
+  });
+
+  it('never overwrites what the client or staff already filled', () => {
+    const person = { ...emptyPerson(), fatherFullName: 'Typed By Client', maritalStatus: 'Single' };
+    const { person: next, applied } = applyAdditionalPageExtraction(person, {
+      father_name: 'Rajesh Kumar',
+      spouse_name: 'Priya Kumar',
+    });
+    expect(next.fatherFullName).toBe('Typed By Client');
+    expect(next.maritalStatus).toBe('Single');
+    expect(applied.fatherFullName).toBeUndefined();
+    expect(applied.maritalStatus).toBeUndefined();
+    expect(applied.spouseFullName).toBe('Priya Kumar');
+  });
+});
+
+describe('clearAppliedAdditionalPage', () => {
+  it('clears only untouched auto-filled values', () => {
+    const person = {
+      ...emptyPerson(),
+      fatherFullName: 'Rajesh Kumar',
+      motherFullName: 'Edited By Client',
+    };
+    const cleared = clearAppliedAdditionalPage(person, {
+      fatherFullName: 'Rajesh Kumar',
+      motherFullName: 'Sunita Kumar',
+    });
+    expect(cleared.fatherFullName).toBeUndefined();
+    expect(cleared.motherFullName).toBe('Edited By Client');
+  });
+
+  it('reads the stored map off the doc ref and tolerates plain refs', () => {
+    expect(
+      additionalPageDataOf({
+        path: 'p',
+        filename: 'f',
+        uploadedAt: '2026-08-31T10:00:00.000Z',
+        extractedData: { fatherFullName: 'Rajesh Kumar' },
+      })
+    ).toEqual({ fatherFullName: 'Rajesh Kumar' });
+    expect(additionalPageDataOf(undefined)).toBeUndefined();
   });
 });
 

@@ -41,7 +41,9 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 30;
 const rateState = new Map<string, RateBucket>();
 
-function getClientIp(req: NextRequest): string {
+/** Best-effort client IP from the proxy headers (exported for the non-AI
+ *  company-setup upload route, which reuses the same per-IP budget). */
+export function getClientIp(req: NextRequest): string {
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) {
     const first = forwarded.split(',')[0].trim();
@@ -52,7 +54,9 @@ function getClientIp(req: NextRequest): string {
   return 'unknown';
 }
 
-function rateLimitCheck(ip: string): { blocked: boolean } {
+/** Per-IP sliding budget (30 calls / 60s), shared by the AI routes and the
+ *  company-setup upload route. In-memory: warm instance only, best effort. */
+export function rateLimitCheck(ip: string): { blocked: boolean } {
   const now = Date.now();
   const bucket = rateState.get(ip);
   if (!bucket || bucket.resetAt <= now) {
@@ -188,9 +192,21 @@ export type CompanySetupAiGuardResult = CompanySetupAiGuardSuccess | AiGuardFail
  * failure. Writes are only meaningful before submission, so an already
  * submitted row is rejected (410-shaped 409 handled by the access check).
  */
+export interface CompanySetupAiGuardOptions {
+  /**
+   * Skip the single-page-PDF rejection. Opt-in, for routes whose document is
+   * legitimately multi-page: a bank statement (proof of address) is routinely
+   * 3-8 pages, and the client renders page 1 for the vision check anyway.
+   * Identity-document routes leave this off — a multi-page PDF is exactly how
+   * a wrong passport page slips past the model.
+   */
+  allowMultiPagePdf?: boolean;
+}
+
 export async function guardCompanySetupAiRoute(
   req: NextRequest,
-  token: string
+  token: string,
+  opts: CompanySetupAiGuardOptions = {}
 ): Promise<CompanySetupAiGuardResult> {
   const ip = getClientIp(req);
   if (rateLimitCheck(ip).blocked) {
@@ -214,6 +230,7 @@ export async function guardCompanySetupAiRoute(
   // Identity documents must be a SINGLE page — same rationale as the staff
   // guard: a multi-page PDF is how a wrong page slips past the vision model.
   if (
+    !opts.allowMultiPagePdf &&
     typeof image === 'string' &&
     (image.startsWith('data:application/pdf') || image.includes('application/pdf'))
   ) {

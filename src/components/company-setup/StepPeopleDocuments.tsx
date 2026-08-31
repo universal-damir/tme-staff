@@ -28,7 +28,11 @@ import {
 import { Input, CustomDropdown, CustomDatePicker, PhoneInput } from '@/components/ui';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
-import { shouldOfferManualReview } from '@/lib/staff-form-logic';
+import {
+  shouldOfferManualReview,
+  passportAdditionalPageVariant,
+  type PassportAdditionalPageVariant,
+} from '@/lib/staff-form-logic';
 import { compressImageForAI } from '@/lib/utils';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
@@ -39,14 +43,20 @@ import {
   type CompanySetupPerson,
   type CompanySetupPersonDocuments,
 } from '@/types/company-setup';
+import { COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT } from '@/lib/company-setup-validation';
 import {
+  additionalPageDataOf,
+  applyAdditionalPageExtraction,
   applyPassportExtraction,
+  clearAppliedAdditionalPage,
   clearAppliedExtraction,
   emptyPerson,
   extractedDataOf,
   isoToDisplayDate,
   displayToIsoDate,
   roleTotals,
+  type AdditionalPageExtractedFields,
+  type AdditionalPageExtractionData,
   type PassportExtractedFields,
   type PassportExtractionData,
 } from './draft';
@@ -62,13 +72,8 @@ import {
   XCircle,
 } from 'lucide-react';
 
-type AiSlot = 'photo' | 'passport';
-type PlainSlot =
-  | 'eid_front'
-  | 'eid_back'
-  | 'visa_document'
-  | 'previous_visa_document'
-  | 'proof_of_address';
+type AiSlot = 'photo' | 'passport' | 'passport_additional' | 'proof_of_address';
+type PlainSlot = 'eid_front' | 'eid_back' | 'visa_document' | 'previous_visa_document';
 export type DocSlot = AiSlot | PlainSlot;
 
 interface SlotUiState {
@@ -78,7 +83,26 @@ interface SlotUiState {
   error?: string;
   strikes: number;
   lastErrors?: string[];
+  /** Accepted, but with something for the client (and TME) to look at. */
+  warnings?: string[];
 }
+
+/** Copy for the nationality-dependent additional passport page. */
+const ADDITIONAL_PAGE_COPY: Record<
+  PassportAdditionalPageVariant,
+  { label: string; description: string }
+> = {
+  syria: {
+    label: 'Passport — issue-details page',
+    description:
+      'Syrian passports carry the date and place of issue, the expiry date and the national number on a separate page next to the data page. Please scan that page.',
+  },
+  india: {
+    label: 'Passport — address / family-details page',
+    description:
+      'Indian passports carry the address and the parents’ / spouse’s names on the last page. Please scan that page.',
+  },
+};
 
 // Same helper as EmployeeForm/DependentForm — alphabetical with "Other" last.
 const sortWithOtherLast = (items: readonly string[]) =>
@@ -174,7 +198,17 @@ export function isPersonComplete(
   person: CompanySetupPerson,
   docs: CompanySetupPersonDocuments
 ): boolean {
-  if (!person.fullName.trim() || !person.religion || !person.currentOrPastEidVisa) return false;
+  // nationality + date of birth are server-required at submit; keeping them
+  // out of this check made a person show "Complete" and then fail the submit.
+  if (
+    !person.fullName.trim() ||
+    !person.nationality ||
+    !person.dateOfBirth ||
+    !person.religion ||
+    !person.currentOrPastEidVisa
+  ) {
+    return false;
+  }
   if (
     person.roles.shareholder &&
     !(typeof person.shareholdingPct === 'number' && person.shareholdingPct > 0)
@@ -182,6 +216,10 @@ export function isPersonComplete(
     return false;
   }
   if (!docs.passport?.path || !docs.photo?.path || !docs.proof_of_address?.path) return false;
+  // Indian / Syrian passports need their additional page too.
+  if (passportAdditionalPageVariant(person.nationality) && !docs.passport_additional?.path) {
+    return false;
+  }
   if (person.currentOrPastEidVisa === 'current') {
     if (!docs.eid_front?.path || !docs.eid_back?.path || !docs.visa_document?.path) return false;
   }
@@ -207,6 +245,14 @@ export function StepPeopleDocuments({
   // a result never resurrects a ref the client removed mid-flight.
   const documentsRef = useRef(documents);
   documentsRef.current = documents;
+
+  // Same live view for the persons: the extraction result must be computed
+  // against the CURRENT person and its `applied` map read straight after —
+  // computing inside a setState updater made `applied` arrive one render too
+  // late (empty auto-fill banner, undo that cleared nothing) and ran twice
+  // under React StrictMode.
+  const personsRef = useRef(persons);
+  personsRef.current = persons;
 
   // Last uploaded-but-rejected file per slot, so the 2-strike manual-review
   // fallback can submit it without a re-upload.
@@ -277,7 +323,12 @@ export function StepPeopleDocuments({
       nextPending[`${idx > index ? idx - 1 : idx}:${slot}`] = value;
     }
     pendingUploads.current = nextPending;
-    setOpenIndex((prev) => (prev >= index && prev > 0 ? prev - 1 : prev));
+    // Removing the OPEN person collapses the accordion — silently opening a
+    // different person's card looks like the wrong person was deleted.
+    setOpenIndex((prev) => {
+      if (prev === index) return -1;
+      return prev > index ? prev - 1 : prev;
+    });
   };
 
   // ---------- Passport extraction ----------
@@ -303,12 +354,12 @@ export function StepPeopleDocuments({
       if (!current || current.path !== ref.path) return;
 
       if (res.ok && result?.success && result.data) {
-        let applied: PassportExtractedFields = {};
-        onPatchPerson(personIndex, (person) => {
-          const outcome = applyPassportExtraction(person, result.data!, NATIONALITIES);
-          applied = outcome.applied;
-          return outcome.person;
-        });
+        // Compute FIRST against the live person, then patch with a pure merge.
+        const person = personsRef.current[personIndex];
+        if (!person) return;
+        const outcome = applyPassportExtraction(person, result.data, NATIONALITIES);
+        const applied: PassportExtractedFields = outcome.applied;
+        onPatchPerson(personIndex, () => outcome.person);
         const refWithData: CompanySetupDocRef = { ...current, extractedData: applied };
         onDocumentChange(personIndex, 'passport', refWithData);
         onExtractionApplied();
@@ -321,6 +372,50 @@ export function StepPeopleDocuments({
     }
   };
 
+  /** Additional page (India / Syria): same fill-only flow as the data page. */
+  const runAdditionalExtraction = async (
+    personIndex: number,
+    aiImage: string,
+    ref: { path: string; filename: string; uploadedAt: string },
+    nationality: string | undefined
+  ) => {
+    patchState(personIndex, 'passport_additional', { extracting: true });
+    try {
+      const res = await fetch(`/api/company-setup/${token}/extract-passport-additional`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: aiImage, nationality }),
+      });
+      const result = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        data?: AdditionalPageExtractionData;
+      } | null;
+
+      // Abort if the client removed/replaced the page while we read it.
+      const current = documentsRef.current[String(personIndex)]?.passport_additional;
+      if (!current || current.path !== ref.path) return;
+
+      if (res.ok && result?.success && result.data) {
+        const person = personsRef.current[personIndex];
+        if (!person) return;
+        const outcome = applyAdditionalPageExtraction(person, result.data);
+        const applied: AdditionalPageExtractedFields = outcome.applied;
+        if (Object.keys(applied).length > 0) {
+          onPatchPerson(personIndex, () => outcome.person);
+          onDocumentChange(personIndex, 'passport_additional', {
+            ...current,
+            extractedData: applied,
+          });
+          onExtractionApplied();
+        }
+      }
+    } catch {
+      // Silent — the fields stay manual.
+    } finally {
+      patchState(personIndex, 'passport_additional', { extracting: false });
+    }
+  };
+
   // ---------- AI-validated slots (photo + passport) ----------
   const handleAiUpload = async (
     personIndex: number,
@@ -328,12 +423,16 @@ export function StepPeopleDocuments({
     file: File,
     person: CompanySetupPerson
   ): Promise<boolean> => {
-    patchState(personIndex, slot, { error: undefined });
+    patchState(personIndex, slot, { error: undefined, warnings: undefined });
 
-    const pageErr = await singlePagePdfError(file, slot === 'photo' ? 'photo' : 'page');
-    if (pageErr) {
-      patchState(personIndex, slot, { error: pageErr });
-      return false;
+    // A bank statement is legitimately several pages; identity documents are
+    // one page per file (that rule is what stops a wrong page riding along).
+    if (slot !== 'proof_of_address') {
+      const pageErr = await singlePagePdfError(file, slot === 'photo' ? 'photo' : 'page');
+      if (pageErr) {
+        patchState(personIndex, slot, { error: pageErr });
+        return false;
+      }
     }
 
     let dataUrl: string;
@@ -366,14 +465,26 @@ export function StepPeopleDocuments({
     const endpoint =
       slot === 'photo'
         ? `/api/company-setup/${token}/validate-photo`
-        : `/api/company-setup/${token}/validate-passport`;
+        : slot === 'proof_of_address'
+          ? `/api/company-setup/${token}/validate-proof-of-address`
+          : `/api/company-setup/${token}/validate-passport`;
     // Nationality is OPTIONAL context for the passport check: at this point
     // the client usually has not entered it yet (extraction fills it after
     // this very upload) — pass it only when prefill/extraction already set it.
     const body =
       slot === 'photo'
         ? { image: aiImage }
-        : { image: aiImage, nationality: person.nationality || undefined };
+        : slot === 'proof_of_address'
+          ? {
+              image: aiImage,
+              expectedName: person.fullName?.trim() || undefined,
+              expectedAddress: person.fullAddress?.trim() || undefined,
+            }
+          : {
+              image: aiImage,
+              nationality: person.nationality || undefined,
+              expectedType: slot === 'passport_additional' ? 'ADDITIONAL_PAGE' : 'INSIDE_PAGES',
+            };
 
     try {
       const res = await fetch(endpoint, {
@@ -384,31 +495,10 @@ export function StepPeopleDocuments({
       const result = await res.json().catch(() => ({}));
 
       const infra = result?.infra === true || !res.ok;
-      const accepted = slot === 'photo' ? result?.valid === true : result?.matches === true;
 
-      if (accepted) {
-        const newRef = {
-          path: uploaded.path,
-          filename: uploaded.filename,
-          uploadedAt: new Date().toISOString(),
-        };
-        if (slot === 'passport') {
-          // A replaced passport must not leave the OLD auto-fill behind:
-          // clear fields the previous extraction filled and the client never
-          // edited, then read the new scan.
-          const prevApplied = extractedDataOf(documentsRef.current[String(personIndex)]?.passport);
-          if (prevApplied) {
-            onPatchPerson(personIndex, (p) => clearAppliedExtraction(p, prevApplied));
-          }
-        }
-        onDocumentChange(personIndex, slot, newRef);
-        patchState(personIndex, slot, { validating: false, error: undefined, strikes: 0 });
-        if (slot === 'passport') {
-          void runExtraction(personIndex, aiImage, newRef);
-        }
-        return true;
-      }
-
+      // Infra first: the proof-of-address route reports an unrunnable check as
+      // valid=true + infra, so an accepted-before-infra order would file it as
+      // verified when nothing was verified.
       if (infra) {
         // The check could not run — never strand the client on our
         // infrastructure: accept the upload flagged for manual review.
@@ -419,7 +509,69 @@ export function StepPeopleDocuments({
           needsReview: true,
           validationErrors: ['Automatic check unavailable — flagged for manual review.'],
         });
-        patchState(personIndex, slot, { validating: false, error: undefined });
+        patchState(personIndex, slot, {
+          validating: false,
+          error: undefined,
+          warnings: undefined,
+        });
+        return true;
+      }
+
+      const accepted =
+        slot === 'photo' || slot === 'proof_of_address'
+          ? result?.valid === true
+          : result?.matches === true;
+
+      if (accepted) {
+        const warnings: string[] =
+          slot === 'proof_of_address' && Array.isArray(result?.warnings) ? result.warnings : [];
+        // The bank statement is ALWAYS a human decision (3-month rule, address
+        // match): it stays needsReview whatever the model said, and any
+        // warning travels with the ref so the portal review drawer shows it.
+        const newRef: CompanySetupDocRef =
+          slot === 'proof_of_address'
+            ? {
+                path: uploaded.path,
+                filename: uploaded.filename,
+                uploadedAt: new Date().toISOString(),
+                needsReview: true,
+                ...(warnings.length > 0 ? { validationErrors: warnings } : {}),
+              }
+            : {
+                path: uploaded.path,
+                filename: uploaded.filename,
+                uploadedAt: new Date().toISOString(),
+              };
+        if (slot === 'passport' || slot === 'passport_additional') {
+          // A replaced page must not leave the OLD auto-fill behind: clear the
+          // fields the previous extraction filled and the client never edited,
+          // then read the new scan.
+          const prevRef = documentsRef.current[String(personIndex)]?.[slot];
+          if (slot === 'passport') {
+            const prevApplied = extractedDataOf(prevRef);
+            if (prevApplied) {
+              onPatchPerson(personIndex, (p) => clearAppliedExtraction(p, prevApplied));
+            }
+          } else {
+            const prevApplied = additionalPageDataOf(prevRef);
+            if (prevApplied) {
+              onPatchPerson(personIndex, (p) => clearAppliedAdditionalPage(p, prevApplied));
+            }
+          }
+        }
+        onDocumentChange(personIndex, slot, newRef);
+        patchState(personIndex, slot, {
+          validating: false,
+          error: undefined,
+          strikes: 0,
+          warnings: warnings.length > 0 ? warnings : undefined,
+        });
+        if (slot === 'passport') {
+          void runExtraction(personIndex, aiImage, newRef);
+        }
+        if (slot === 'passport_additional') {
+          void runAdditionalExtraction(personIndex, aiImage, newRef, person.nationality);
+        }
         return true;
       }
 
@@ -428,7 +580,11 @@ export function StepPeopleDocuments({
           ? Array.isArray(result?.errors) && result.errors.length > 0
             ? result.errors
             : ['The photo did not pass the automatic check.']
-          : [result?.errorMessage || 'The passport page did not pass the automatic check.'];
+          : slot === 'proof_of_address'
+            ? Array.isArray(result?.warnings) && result.warnings.length > 0
+              ? result.warnings
+              : ['This document did not pass the automatic check.']
+            : [result?.errorMessage || 'The passport page did not pass the automatic check.'];
 
       // Rejection: clear the recorded ref AND the preview — a file that is
       // not recorded must not sit on screen looking accepted. Count a
@@ -443,6 +599,7 @@ export function StepPeopleDocuments({
             ...current,
             preview: undefined,
             validating: false,
+            warnings: undefined,
             error: errors.join(' '),
             strikes: current.strikes + 1,
             lastErrors: errors,
@@ -478,7 +635,7 @@ export function StepPeopleDocuments({
       needsReview: true,
       validationErrors: state.lastErrors,
     });
-    patchState(personIndex, slot, { error: undefined });
+    patchState(personIndex, slot, { error: undefined, warnings: undefined });
   };
 
   /** Remove an AI slot's file: ref + preview + strikes go; for the passport,
@@ -490,6 +647,14 @@ export function StepPeopleDocuments({
         onPatchPerson(personIndex, (p) => clearAppliedExtraction(p, applied));
       }
     }
+    if (slot === 'passport_additional') {
+      const applied = additionalPageDataOf(
+        documentsRef.current[String(personIndex)]?.passport_additional
+      );
+      if (applied) {
+        onPatchPerson(personIndex, (p) => clearAppliedAdditionalPage(p, applied));
+      }
+    }
     onDocumentChange(personIndex, slot, undefined);
     patchState(personIndex, slot, {
       preview: undefined,
@@ -498,6 +663,7 @@ export function StepPeopleDocuments({
       extracting: false,
       strikes: 0,
       lastErrors: undefined,
+      warnings: undefined,
     });
     delete pendingUploads.current[stateKey(personIndex, slot)];
   };
@@ -554,8 +720,17 @@ export function StepPeopleDocuments({
         const complete = isPersonComplete(person, docs);
         const photoState = getState(index, 'photo');
         const passportState = getState(index, 'passport');
+        const additionalState = getState(index, 'passport_additional');
+        const proofState = getState(index, 'proof_of_address');
         const passportExtracted = extractedDataOf(docs.passport);
-        const wasAutoFilled = !!passportExtracted && Object.keys(passportExtracted).length > 0;
+        const additionalExtracted = additionalPageDataOf(docs.passport_additional);
+        const wasAutoFilled =
+          (!!passportExtracted && Object.keys(passportExtracted).length > 0) ||
+          (!!additionalExtracted && Object.keys(additionalExtracted).length > 0);
+        const additionalVariant = passportAdditionalPageVariant(person.nationality);
+        // Staff-provided files render filled and read-only — the client is
+        // asked to confirm them, never to re-upload them.
+        const isStaffDoc = (slot: DocSlot) => docs[slot]?.source === 'staff';
         return (
           <div key={index} className="bg-white rounded-xl border border-gray-100 shadow-sm">
             {/* Card header */}
@@ -620,15 +795,24 @@ export function StepPeopleDocuments({
               <div className="px-4 pb-5 space-y-6 border-t border-gray-50 pt-4">
                 {/* 1 — Passport first: the scan fills the fields below. */}
                 <div>
+                  <p className="text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
+                    Passport — data page (we read your details from it)
+                  </p>
+                  <p className="text-xs text-gray-500 mb-3">
+                    This is the printed page inside the passport with the photo and the two
+                    machine-readable lines. The portrait photo for the application is a separate
+                    upload further down.
+                  </p>
                   <div className="max-w-md">
                     <UploadSlot
                       label="Passport — data page"
-                      description="Open the passport at the data page (photo + machine-readable lines) and scan it on a flatbed scanner."
+                      description="Open the passport flat at the data page and scan the whole spread — the data page AND the page facing it."
                       expectedType="INSIDE_PAGES"
                       file={null}
                       onUpload={(file) => handleAiUpload(index, 'passport', file, person)}
                       onRemove={() => removeAiDoc(index, 'passport')}
-                      removable
+                      removable={!isStaffDoc('passport')}
+                      providedByStaff={isStaffDoc('passport')}
                       validated={!!docs.passport?.path && !docs.passport.needsReview}
                       validating={!!passportState.validating}
                       error={passportState.error}
@@ -641,7 +825,43 @@ export function StepPeopleDocuments({
                     pendingUploads.current[stateKey(index, 'passport')] && (
                       <ManualReviewOffer onAccept={() => submitForManualReview(index, 'passport')} />
                     )}
-                  {passportState.extracting && (
+
+                  {/* Indian and Syrian passports carry a second required page. */}
+                  {additionalVariant && (
+                    <div className="mt-4">
+                      <div className="max-w-md">
+                        <UploadSlot
+                          label={ADDITIONAL_PAGE_COPY[additionalVariant].label}
+                          description={ADDITIONAL_PAGE_COPY[additionalVariant].description}
+                          expectedType="ADDITIONAL_PAGE"
+                          file={null}
+                          onUpload={(file) =>
+                            handleAiUpload(index, 'passport_additional', file, person)
+                          }
+                          onRemove={() => removeAiDoc(index, 'passport_additional')}
+                          removable={!isStaffDoc('passport_additional')}
+                          providedByStaff={isStaffDoc('passport_additional')}
+                          validated={
+                            !!docs.passport_additional?.path &&
+                            !docs.passport_additional.needsReview
+                          }
+                          validating={!!additionalState.validating}
+                          error={additionalState.error}
+                          preview={previewFor(index, 'passport_additional', docs.passport_additional)}
+                          needsReview={docs.passport_additional?.needsReview === true}
+                        />
+                      </div>
+                      {!docs.passport_additional?.path &&
+                        shouldOfferManualReview(additionalState.strikes) &&
+                        pendingUploads.current[stateKey(index, 'passport_additional')] && (
+                          <ManualReviewOffer
+                            onAccept={() => submitForManualReview(index, 'passport_additional')}
+                          />
+                        )}
+                    </div>
+                  )}
+
+                  {(passportState.extracting || additionalState.extracting) && (
                     <div className="mt-3 rounded-xl border-2 border-blue-100 bg-blue-50/50 p-4">
                       <div className="flex items-center gap-3">
                         <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent" />
@@ -663,7 +883,7 @@ export function StepPeopleDocuments({
                   <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>
                     Personal details
                   </p>
-                  {wasAutoFilled && !passportState.extracting && (
+                  {wasAutoFilled && !passportState.extracting && !additionalState.extracting && (
                     <div
                       className="mb-3 rounded-lg p-3 flex items-start gap-2"
                       style={{ backgroundColor: 'rgba(36,63,123,0.06)' }}
@@ -796,8 +1016,13 @@ export function StepPeopleDocuments({
                         value={person.shareholdingPct ?? ''}
                         onChange={(e) => {
                           const n = Number(e.target.value);
+                          if (!Number.isFinite(n) || n <= 0) {
+                            updatePerson(index, { shareholdingPct: undefined });
+                            return;
+                          }
+                          // Clamp to the 0.01..100 window the server enforces.
                           updatePerson(index, {
-                            shareholdingPct: Number.isFinite(n) && n > 0 ? n : undefined,
+                            shareholdingPct: Math.min(Math.max(n, 0.01), 100),
                           });
                         }}
                         placeholder="e.g. 50"
@@ -985,12 +1210,26 @@ export function StepPeopleDocuments({
                     <Input
                       label="In how many entities?"
                       type="number"
+                      inputMode="numeric"
                       min={1}
+                      max={COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT}
+                      step={1}
+                      maxLength={2}
                       value={person.otherEntityCount ?? ''}
                       onChange={(e) => {
-                        const n = Number(e.target.value);
+                        // Digits only (no "01", no "-3", no "1e5"), clamped to
+                        // the same 1..50 window the server enforces.
+                        const digits = e.target.value.replace(/\D/g, '').slice(0, 2);
+                        if (digits === '') {
+                          updatePerson(index, { otherEntityCount: undefined });
+                          return;
+                        }
+                        const n = Number(digits);
                         updatePerson(index, {
-                          otherEntityCount: Number.isInteger(n) && n > 0 ? n : undefined,
+                          otherEntityCount:
+                            n < 1
+                              ? undefined
+                              : Math.min(n, COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT),
                         });
                       }}
                     />
@@ -1009,13 +1248,13 @@ export function StepPeopleDocuments({
 
                   <div className="max-w-md mb-4">
                     <UploadSlot
-                      label="Passport photo (digital)"
-                      description="A recent digital passport photo — plain light background, no glasses, face fully visible."
-                      expectedType="INSIDE_PAGES"
+                      label="Portrait photo (headshot)"
+                      description="A recent digital headshot — plain light background, no glasses. This is the photo for the application, not a passport page."
                       file={null}
                       onUpload={(file) => handleAiUpload(index, 'photo', file, person)}
                       onRemove={() => removeAiDoc(index, 'photo')}
-                      removable
+                      removable={!isStaffDoc('photo')}
+                      providedByStaff={isStaffDoc('photo')}
                       validated={!!docs.photo?.path && !docs.photo.needsReview}
                       validating={!!photoState.validating}
                       error={photoState.error}
@@ -1032,52 +1271,84 @@ export function StepPeopleDocuments({
                   <div className="space-y-3">
                     {person.currentOrPastEidVisa === 'current' && (
                       <>
-                        <FileUploadSlot
+                        <PlainDocSlot
                           label="Emirates ID — front"
                           description="Current Emirates ID, front side"
+                          staffProvided={isStaffDoc('eid_front')}
                           onUpload={(file) => handlePlainUpload(index, 'eid_front', file)}
                           onRemove={() => onDocumentChange(index, 'eid_front', undefined)}
-                          uploaded={!!docs.eid_front?.path}
-                          filename={docs.eid_front?.filename}
+                          docRef={docs.eid_front}
                         />
-                        <FileUploadSlot
+                        <PlainDocSlot
                           label="Emirates ID — back"
                           description="Current Emirates ID, back side"
+                          staffProvided={isStaffDoc('eid_back')}
                           onUpload={(file) => handlePlainUpload(index, 'eid_back', file)}
                           onRemove={() => onDocumentChange(index, 'eid_back', undefined)}
-                          uploaded={!!docs.eid_back?.path}
-                          filename={docs.eid_back?.filename}
+                          docRef={docs.eid_back}
                         />
-                        <FileUploadSlot
+                        <PlainDocSlot
                           label="Current UAE visa"
                           description="Copy of the current UAE residence visa"
+                          staffProvided={isStaffDoc('visa_document')}
                           onUpload={(file) => handlePlainUpload(index, 'visa_document', file)}
                           onRemove={() => onDocumentChange(index, 'visa_document', undefined)}
-                          uploaded={!!docs.visa_document?.path}
-                          filename={docs.visa_document?.filename}
+                          docRef={docs.visa_document}
                         />
                       </>
                     )}
                     {person.currentOrPastEidVisa === 'past' && (
-                      <FileUploadSlot
+                      <PlainDocSlot
                         label="Previous UAE visa"
                         description="Copy of the previous UAE residence visa"
+                        staffProvided={isStaffDoc('previous_visa_document')}
                         onUpload={(file) => handlePlainUpload(index, 'previous_visa_document', file)}
                         onRemove={() => onDocumentChange(index, 'previous_visa_document', undefined)}
-                        uploaded={!!docs.previous_visa_document?.path}
-                        filename={docs.previous_visa_document?.filename}
+                        docRef={docs.previous_visa_document}
                       />
                     )}
+                  </div>
 
-                    <FileUploadSlot
+                  {/* Proof of address gets the same AI treatment as the other
+                      documents: is it really a bank statement, is it recent
+                      enough, does it show this person's name and address. The
+                      verdict never blocks beyond "not a bank statement" — the
+                      ref always stays needsReview for a human. */}
+                  <div className="max-w-md mt-4">
+                    <UploadSlot
                       label="Proof of address — BANK STATEMENT ONLY"
-                      description="A bank statement not older than 3 months, showing your name and home address"
-                      onUpload={(file) => handlePlainUpload(index, 'proof_of_address', file)}
-                      onRemove={() => onDocumentChange(index, 'proof_of_address', undefined)}
-                      uploaded={!!docs.proof_of_address?.path}
-                      filename={docs.proof_of_address?.filename}
+                      description="A bank statement not older than 3 months, showing your name and home address."
+                      file={null}
+                      onUpload={(file) => handleAiUpload(index, 'proof_of_address', file, person)}
+                      onRemove={() => removeAiDoc(index, 'proof_of_address')}
+                      removable={!isStaffDoc('proof_of_address')}
+                      providedByStaff={isStaffDoc('proof_of_address')}
+                      validated={false}
+                      validating={!!proofState.validating}
+                      error={proofState.error}
+                      preview={previewFor(index, 'proof_of_address', docs.proof_of_address)}
+                      needsReview={docs.proof_of_address?.needsReview === true}
+                      // On a resumed draft the UI state is gone; the warnings
+                      // that travelled with the ref are still there.
+                      warnings={proofState.warnings ?? docs.proof_of_address?.validationErrors}
+                      footer={
+                        (proofState.warnings ?? docs.proof_of_address?.validationErrors ?? [])
+                          .length > 0 ? (
+                          <p className="mt-2 text-xs text-gray-500">
+                            Your file has been kept — you can continue anyway and TME will check it,
+                            or replace it with a more recent statement.
+                          </p>
+                        ) : undefined
+                      }
                     />
-                    <p className="text-xs text-amber-700 flex items-start gap-1">
+                    {!docs.proof_of_address?.path &&
+                      shouldOfferManualReview(proofState.strikes) &&
+                      pendingUploads.current[stateKey(index, 'proof_of_address')] && (
+                        <ManualReviewOffer
+                          onAccept={() => submitForManualReview(index, 'proof_of_address')}
+                        />
+                      )}
+                    <p className="text-xs text-amber-700 flex items-start gap-1 mt-2">
                       <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                       Only a bank statement is accepted as proof of address (not older than 3
                       months). The address must match the home address entered above. TME will
@@ -1103,6 +1374,56 @@ export function StepPeopleDocuments({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * A plain (non-AI) document slot. Identical to FileUploadSlot, except that a
+ * ref TME uploaded on the client's behalf renders as a filled, read-only row:
+ * the client confirms it, they do not re-upload it, and they cannot delete a
+ * file they never provided.
+ */
+function PlainDocSlot({
+  label,
+  description,
+  staffProvided,
+  docRef,
+  onUpload,
+  onRemove,
+}: {
+  label: string;
+  description: string;
+  staffProvided: boolean;
+  docRef: CompanySetupDocRef | undefined;
+  onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
+  onRemove: () => void;
+}) {
+  if (staffProvided && docRef?.path) {
+    return (
+      <div
+        className="border-2 rounded-lg p-4 flex items-center gap-3"
+        style={{ borderColor: `${TME_COLORS.primary}30`, backgroundColor: 'rgba(36,63,123,0.04)' }}
+      >
+        <CheckCircle className="w-5 h-5 flex-shrink-0" style={{ color: TME_COLORS.primary }} />
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-700">{label}</p>
+          <p className="text-xs truncate" style={{ color: TME_COLORS.primary }}>
+            Provided by TME — please confirm
+            {docRef.filename ? ` · ${docRef.filename}` : ''}
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <FileUploadSlot
+      label={label}
+      description={description}
+      onUpload={onUpload}
+      onRemove={onRemove}
+      uploaded={!!docRef?.path}
+      filename={docRef?.filename}
+    />
   );
 }
 

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getSupabaseAdmin, COMPANY_SETUP_BUCKET } from '@/lib/supabase-server';
 import {
   verifyCompanySetupAccess,
   documentsErrorForRow,
 } from '@/lib/company-setup-token';
 import { sanitizeFreeText } from '@/lib/submit-validation';
 import { validateSubmission } from '@/lib/company-setup-validation';
+import { passportAdditionalPageVariant } from '@/lib/staff-form-logic';
 import type {
   CompanySetupDocuments,
   CompanySetupPerson,
@@ -23,6 +24,7 @@ const MAX_SUBMIT_BYTES = 256 * 1024;
  * never reach status='submitted' with missing documents.
  *
  * Per person: passport + photo + proof of address ALWAYS.
+ * Indian / Syrian nationals additionally need the passport's additional page.
  * EID/visa set depends on currentOrPastEidVisa:
  *   'current' -> eid_front + eid_back + visa_document
  *   'past'    -> previous_visa_document
@@ -37,7 +39,15 @@ function missingPersonDocuments(
     const label = person?.fullName?.trim() || `Person ${index + 1}`;
     const docs: CompanySetupPersonDocuments = documents[String(index)] ?? {};
     if (!docs.passport?.path) missing.push(`${label}: passport copy`);
-    if (!docs.photo?.path) missing.push(`${label}: passport photo`);
+    const additionalVariant = passportAdditionalPageVariant(person?.nationality);
+    if (additionalVariant && !docs.passport_additional?.path) {
+      missing.push(
+        additionalVariant === 'syria'
+          ? `${label}: passport issue-details page`
+          : `${label}: passport address / family-details page`
+      );
+    }
+    if (!docs.photo?.path) missing.push(`${label}: portrait photo`);
     if (!docs.proof_of_address?.path) missing.push(`${label}: proof of address (bank statement)`);
     if (person?.currentOrPastEidVisa === 'current') {
       if (!docs.eid_front?.path) missing.push(`${label}: Emirates ID (front)`);
@@ -48,6 +58,35 @@ function missingPersonDocuments(
     }
   });
   return missing;
+}
+
+/**
+ * The storage paths of the documents the gate above just declared present.
+ * Used for the existence check: a ref in the JSON is not proof of a file in
+ * the bucket (an upload can fail after the client recorded it, or a path can
+ * be hand-crafted), and a submission that flips to 'submitted' with a dangling
+ * path becomes a broken sync in the portal.
+ */
+function requiredDocumentPaths(
+  persons: CompanySetupPerson[],
+  documents: CompanySetupDocuments
+): string[] {
+  const paths: string[] = [];
+  persons.forEach((person, index) => {
+    const docs: CompanySetupPersonDocuments = documents[String(index)] ?? {};
+    const slots: Array<keyof CompanySetupPersonDocuments> = ['passport', 'photo', 'proof_of_address'];
+    if (passportAdditionalPageVariant(person?.nationality)) slots.push('passport_additional');
+    if (person?.currentOrPastEidVisa === 'current') {
+      slots.push('eid_front', 'eid_back', 'visa_document');
+    } else if (person?.currentOrPastEidVisa === 'past') {
+      slots.push('previous_visa_document');
+    }
+    for (const slot of slots) {
+      const path = docs[slot]?.path;
+      if (path) paths.push(path);
+    }
+  });
+  return Array.from(new Set(paths));
 }
 
 // POST /api/company-setup/[token]/submit
@@ -152,6 +191,42 @@ export async function POST(
   }
 
   const supabase = getSupabaseAdmin();
+
+  // Every required document must actually exist in the bucket. createSignedUrls
+  // is one round trip for the whole set and reports per-path errors.
+  const paths = requiredDocumentPaths(submittedData.persons, documents);
+  if (paths.length > 0) {
+    const { data: signed, error: signErr } = await supabase.storage
+      .from(COMPANY_SETUP_BUCKET)
+      .createSignedUrls(paths, 60);
+    if (signErr) {
+      console.error('company-setup/submit: could not verify stored documents');
+      return NextResponse.json({ error: 'submit_failed' }, { status: 500 });
+    }
+    const missingFiles = (signed ?? [])
+      .filter((entry) => entry.error || !entry.signedUrl)
+      .map((entry) => entry.path)
+      .filter((p): p is string => typeof p === 'string');
+    // A path we asked about but got no row back for is missing too.
+    const returned = new Set((signed ?? []).map((entry) => entry.path));
+    for (const p of paths) if (!returned.has(p)) missingFiles.push(p);
+    if (missingFiles.length > 0) {
+      console.error(
+        `company-setup/submit: ${missingFiles.length} recorded document(s) are not in storage`
+      );
+      return NextResponse.json(
+        {
+          error: 'validation_failed',
+          errors: [],
+          missingDocuments: [
+            'Some uploaded files could not be found any more. Please re-upload the documents marked below and submit again.',
+          ],
+          missingPaths: missingFiles,
+        },
+        { status: 422 }
+      );
+    }
+  }
   const { error, count } = await supabase
     .from('company_setup_intake_submissions')
     .update(

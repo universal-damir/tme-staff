@@ -11,6 +11,7 @@ import {
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
   type CompanySetupActivity,
   type CompanySetupCompanyData,
+  type CompanySetupContact,
   type CompanySetupDocRef,
   type CompanySetupDocuments,
   type CompanySetupLicenseType,
@@ -27,6 +28,13 @@ export interface DraftCompany extends Omit<CompanySetupCompanyData, 'licenseType
 export interface CompanySetupDraft {
   company: DraftCompany;
   persons: CompanySetupPerson[];
+  /**
+   * The contact details as the CLIENT has them — seeded from what staff
+   * entered, editable on the Welcome step. Kept separate from the intake's
+   * own contact columns in the portal: those are the address the link was
+   * sent to, so a correction is shown as a diff, never auto-applied.
+   */
+  contact: CompanySetupContact;
 }
 
 export function emptyPerson(): CompanySetupPerson {
@@ -116,7 +124,15 @@ export function buildDraft(
   const persons = (sourcePersons ?? []).map((p) => normalizePerson(p));
   if (persons.length === 0) persons.push(emptyPerson());
 
-  return { company: normalizeCompany(sourceCompany ?? undefined), persons };
+  // The client's own correction wins on resume; otherwise the staff prefill.
+  const sourceContact = saved?.contact ?? prefill?.contact;
+  const contact: CompanySetupContact = {
+    name: sourceContact?.name ?? '',
+    email: sourceContact?.email ?? '',
+    mobile: sourceContact?.mobile ?? '',
+  };
+
+  return { company: normalizeCompany(sourceCompany ?? undefined), persons, contact };
 }
 
 export interface RoleTotals {
@@ -230,6 +246,11 @@ export interface PassportExtractionData {
 const isBlank = (v: unknown): boolean =>
   v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
+/** Convert diacritical characters to ASCII (Novalić → Novalic). UAE systems
+ *  and the passport MRZ zone are ASCII-only — same rule as staff onboarding. */
+const toAscii = (str: string): string =>
+  (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
 /**
  * Apply extracted passport data to a person — FILL-ONLY: a field the client
  * already typed, or that arrived pre-filled from TME staff, is never
@@ -244,10 +265,12 @@ export function applyPassportExtraction(
   const applied: PassportExtractedFields = {};
   const next: CompanySetupPerson = { ...person };
 
-  const fullName = [data.first_name, data.middle_name, data.family_name]
-    .map((n) => (typeof n === 'string' ? n.trim() : ''))
-    .filter(Boolean)
-    .join(' ');
+  const fullName = toAscii(
+    [data.first_name, data.middle_name, data.family_name]
+      .map((n) => (typeof n === 'string' ? n.trim() : ''))
+      .filter(Boolean)
+      .join(' ')
+  );
   if (fullName && isBlank(person.fullName)) {
     next.fullName = fullName;
     applied.fullName = fullName;
@@ -271,8 +294,9 @@ export function applyPassportExtraction(
     applied.gender = gender;
   }
 
-  const placeOfBirth =
-    typeof data.place_of_birth === 'string' ? data.place_of_birth.trim() : '';
+  const placeOfBirth = toAscii(
+    typeof data.place_of_birth === 'string' ? data.place_of_birth.trim() : ''
+  );
   if (placeOfBirth && isBlank(person.placeOfBirth)) {
     next.placeOfBirth = placeOfBirth;
     applied.placeOfBirth = placeOfBirth;
@@ -322,6 +346,132 @@ export function clearAppliedExtraction(
     }
   }
   return next;
+}
+
+// ---------------------------------------------------------------------------
+// Passport ADDITIONAL page extraction (India / Syria) -> person prefill
+// ---------------------------------------------------------------------------
+
+/** Person fields the additional-page extraction can auto-fill. */
+export type AdditionalPageExtractedFields = Partial<
+  Record<
+    | 'fatherFullName'
+    | 'motherFullName'
+    | 'spouseFullName'
+    | 'maritalStatus'
+    | 'fullAddress'
+    | 'passportIssueDate'
+    | 'passportExpiryDate',
+    string
+  >
+>;
+
+/** The `data` shape of the extract-passport-additional API response. */
+export interface AdditionalPageExtractionData {
+  father_name?: string;
+  mother_name?: string;
+  spouse_name?: string;
+  address_street?: string;
+  address_city?: string;
+  address_pin?: string;
+  address_state?: string;
+  address_country?: string;
+  passport_issue_date?: string;
+  passport_expiry_date?: string;
+}
+
+/**
+ * Apply extracted additional-page data to a person — FILL-ONLY, exactly like
+ * applyPassportExtraction: staff prefill and anything the client typed always
+ * win. India fills family details + home address; Syria fills the passport
+ * issue/expiry dates its data page does not carry.
+ */
+export function applyAdditionalPageExtraction(
+  person: CompanySetupPerson,
+  data: AdditionalPageExtractionData
+): { person: CompanySetupPerson; applied: AdditionalPageExtractedFields } {
+  const applied: AdditionalPageExtractedFields = {};
+  const next: CompanySetupPerson = { ...person };
+
+  const trimmed = (v: unknown): string => toAscii(typeof v === 'string' ? v.trim() : '');
+
+  const father = trimmed(data.father_name);
+  if (father && isBlank(person.fatherFullName)) {
+    next.fatherFullName = father;
+    applied.fatherFullName = father;
+  }
+
+  const mother = trimmed(data.mother_name);
+  if (mother && isBlank(person.motherFullName)) {
+    next.motherFullName = mother;
+    applied.motherFullName = mother;
+  }
+
+  const spouse = trimmed(data.spouse_name);
+  if (spouse && isBlank(person.spouseFullName)) {
+    next.spouseFullName = spouse;
+    applied.spouseFullName = spouse;
+    // A spouse on the passport page means married — but never overwrite an
+    // answer the client already gave.
+    if (isBlank(person.maritalStatus)) {
+      next.maritalStatus = 'Married';
+      applied.maritalStatus = 'Married';
+    }
+  }
+
+  const address = [
+    trimmed(data.address_street),
+    trimmed(data.address_city),
+    trimmed(data.address_state),
+    trimmed(data.address_pin),
+    trimmed(data.address_country),
+  ]
+    .filter(Boolean)
+    .join(', ');
+  if (address && isBlank(person.fullAddress)) {
+    next.fullAddress = address;
+    applied.fullAddress = address;
+  }
+
+  const issue = data.passport_issue_date ? displayToIsoDate(data.passport_issue_date) : undefined;
+  if (issue && isBlank(person.passportIssueDate)) {
+    next.passportIssueDate = issue;
+    applied.passportIssueDate = issue;
+  }
+
+  const expiry = data.passport_expiry_date
+    ? displayToIsoDate(data.passport_expiry_date)
+    : undefined;
+  if (expiry && isBlank(person.passportExpiryDate)) {
+    next.passportExpiryDate = expiry;
+    applied.passportExpiryDate = expiry;
+  }
+
+  return { person: next, applied };
+}
+
+/**
+ * Undo an additional-page prefill (page removed or replaced): clear only the
+ * fields whose CURRENT value still equals the auto-filled one.
+ */
+export function clearAppliedAdditionalPage(
+  person: CompanySetupPerson,
+  applied: AdditionalPageExtractedFields | undefined
+): CompanySetupPerson {
+  if (!applied) return person;
+  const next: CompanySetupPerson = { ...person };
+  for (const [key, value] of Object.entries(applied)) {
+    const field = key as keyof AdditionalPageExtractedFields;
+    if (next[field] === value) next[field] = undefined;
+  }
+  return next;
+}
+
+/** The narrowed view of an additional-page ref's extractedData. */
+export function additionalPageDataOf(
+  ref: CompanySetupDocRef | undefined
+): AdditionalPageExtractedFields | undefined {
+  return ref?.extractedData as AdditionalPageExtractedFields | undefined;
 }
 
 /** Parse a positive number out of an input string; undefined when blank/invalid. */

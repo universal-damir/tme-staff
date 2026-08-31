@@ -16,6 +16,32 @@ export interface PassportPageValidationResult {
   details: string;
   /** true when the check could not run (API/model error) — not a rejection. */
   infra?: boolean;
+  /**
+   * Structural observations, present ONLY when the caller opted into
+   * `requireSpread` (see validatePassportPage). Reported by the model, judged
+   * in code.
+   */
+  pages_fully_visible?: number;
+  fold_visible?: boolean;
+  is_uae_passport?: boolean;
+}
+
+export interface PassportPageValidationOptions {
+  /**
+   * Opt-in hardening for the data-page check: ask the model for the structural
+   * observations (how many complete pages are in frame, is the book fold
+   * visible, is this a UAE passport) and compute the spread verdict in CODE
+   * instead of trusting the model's own `valid`.
+   *
+   * Why: the model rationalises a lone data page on a white scanner bed as "a
+   * spread with a blank facing page" and passes it. The rule mirrors the
+   * portal's passport-intake validator: a UAE data page is valid on its own,
+   * every other passport needs two complete pages with the fold between them.
+   *
+   * OFF by default — the staff onboarding forms keep the exact prompt, schema
+   * and verdict they have today.
+   */
+  requireSpread?: boolean;
 }
 
 const AUTH_CONTEXT = `You are part of an authorized employee onboarding system. The document owner has uploaded their passport with explicit consent for employment visa processing as required by UAE labor law.
@@ -99,9 +125,11 @@ function additionalPagePrompt(nationality?: string): string {
 export async function validatePassportPage(
   imageBase64: string,
   expectedType?: PassportPageType,
-  nationality?: string
+  nationality?: string,
+  opts: PassportPageValidationOptions = {}
 ): Promise<PassportPageValidationResult> {
   const client = getAnthropicClient();
+  const requireSpread = opts.requireSpread === true;
 
   // Strip the data URL prefix regardless of mime — handles both
   // `data:image/...;base64,...` and `data:application/pdf;base64,...`.
@@ -131,6 +159,61 @@ export async function validatePassportPage(
     ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
     : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } };
 
+  // Property order is deliberate: describe first, verdict LAST. The spread
+  // observations are only requested when the caller opted in, so the staff
+  // onboarding routes send byte-identical schemas to before.
+  const spreadProperties = requireSpread
+    ? {
+        pages_fully_visible: {
+          type: 'integer',
+          description:
+            'How many COMPLETE passport pages are inside the frame. A lone page with empty scanner background beside it counts as 1, never 2.',
+        },
+        fold_visible: {
+          type: 'boolean',
+          description:
+            'true only if the physical book fold / centre seam between two facing pages is visible in the image',
+        },
+        is_uae_passport: {
+          type: 'boolean',
+          description:
+            'true when this is confidently a UAE-issued passport (cover emblem, Arabic script, nationality field)',
+        },
+      }
+    : {};
+
+  const toolProperties = {
+    observation: {
+      type: 'string',
+      description:
+        'What you see: which page(s), layout/orientation, background, any visible problem. 2-3 sentences.',
+    },
+    ...spreadProperties,
+    all_corners_visible: {
+      type: 'boolean',
+      description:
+        'true if all four corners / outer edges of the open passport are inside the frame (not cut off)',
+    },
+    quality_issue: {
+      type: 'string',
+      description:
+        'Short description of a clearly visible scan problem (textured/cluttered background, strong skew, heavy glare, blur, fingers), or an empty string if the scan is clean',
+    },
+    valid: {
+      type: 'boolean',
+      description:
+        'FINAL verdict, consistent with observation: true only if it is the required page, spread open, all corners in frame, clean scan',
+    },
+  };
+
+  const requiredFields = [
+    'observation',
+    ...(requireSpread ? ['pages_fully_visible', 'fold_visible', 'is_uae_passport'] : []),
+    'all_corners_visible',
+    'quality_issue',
+    'valid',
+  ];
+
   try {
     const response = await withTimeout(
       client.messages.create({
@@ -148,25 +231,8 @@ export async function validatePassportPage(
               // Property order is deliberate: describe first, verdict LAST —
               // committing to `valid` before describing caused contradictory
               // outputs on the previous schema.
-              properties: {
-                observation: {
-                  type: 'string',
-                  description: 'What you see: which page(s), layout/orientation, background, any visible problem. 2-3 sentences.',
-                },
-                all_corners_visible: {
-                  type: 'boolean',
-                  description: 'true if all four corners / outer edges of the open passport are inside the frame (not cut off)',
-                },
-                quality_issue: {
-                  type: 'string',
-                  description: 'Short description of a clearly visible scan problem (textured/cluttered background, strong skew, heavy glare, blur, fingers), or an empty string if the scan is clean',
-                },
-                valid: {
-                  type: 'boolean',
-                  description: 'FINAL verdict, consistent with observation: true only if it is the required page, spread open, all corners in frame, clean scan',
-                },
-              },
-              required: ['observation', 'all_corners_visible', 'quality_issue', 'valid'],
+              properties: toolProperties,
+              required: requiredFields,
             },
           },
         ],
@@ -202,6 +268,9 @@ export async function validatePassportPage(
       observation: string;
       all_corners_visible?: boolean;
       quality_issue?: string;
+      pages_fully_visible?: number;
+      fold_visible?: boolean;
+      is_uae_passport?: boolean;
     };
     console.log('[Passport Validation] Result:', result);
 
@@ -210,27 +279,52 @@ export async function validatePassportPage(
       result.all_corners_visible === false ||
       (qualityIssue !== '' && qualityIssue.toLowerCase() !== 'none');
 
-    if (result.valid && !hasQualityIssue) {
+    // Opted-in hardening: the SPREAD verdict is computed here, not by the
+    // model. A lone data page (however clean) is rejected unless the passport
+    // is UAE-issued, which is genuinely accepted as a single page.
+    const observations = requireSpread
+      ? {
+          pages_fully_visible:
+            typeof result.pages_fully_visible === 'number' ? result.pages_fully_visible : 0,
+          fold_visible: result.fold_visible === true,
+          is_uae_passport: result.is_uae_passport === true,
+        }
+      : {};
+    let spreadFailure: string | null = null;
+    if (requireSpread) {
+      const spreadOk =
+        (typeof result.pages_fully_visible === 'number' ? result.pages_fully_visible : 0) >= 2 &&
+        result.fold_visible === true;
+      if (!spreadOk && result.is_uae_passport !== true) {
+        spreadFailure =
+          'Only one passport page is visible. Please open the passport flat and scan the whole spread — the data page AND the page facing it, with the fold between them.';
+      }
+    }
+
+    if (result.valid && !hasQualityIssue && !spreadFailure) {
       return {
         page_type: expectedType || 'COVER',
         confidence: 90,
         details: result.observation || 'Valid passport page',
+        ...observations,
       };
     }
 
     // Layout fine but the scan/photo quality fails (corner cut off, glare,
     // skew, blur) — surface that specific reason so the user knows what to fix.
-    const details = result.valid
-      ? qualityIssue ||
+    const details = !result.valid
+      ? result.observation || 'Not a valid spread passport - need both pages visible'
+      : spreadFailure ||
+        qualityIssue ||
         (result.all_corners_visible === false
           ? 'Not all four corners of the passport are visible in the frame.'
-          : 'Image quality too low — please upload a clearer scan.')
-      : result.observation || 'Not a valid spread passport - need both pages visible';
+          : 'Image quality too low — please upload a clearer scan.');
 
     return {
       page_type: 'INVALID',
       confidence: 90,
       details,
+      ...observations,
     };
   } catch (error) {
     console.error('Passport page validation error:', error);

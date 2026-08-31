@@ -22,8 +22,22 @@ export interface CompanySetupValidationResult {
 const SHAREHOLDING_TOLERANCE = 0.01;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Upper bounds — sanity caps, generous vs. anything IFZA actually issues.
+// The form inputs clamp to the same values; this is the server backstop.
+export const COMPANY_SETUP_MAX_VISA_COUNT = 100;
+export const COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT = 50;
+export const COMPANY_SETUP_MAX_SHARE_CAPITAL_AED = 100_000_000;
+export const COMPANY_SETUP_MAX_VALUE_PER_SHARE_AED = 1_000_000;
+export const COMPANY_SETUP_MAX_MONTHLY_SALARY_AED = 1_000_000;
+
 function isPositiveNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function isBoundedInt(value: unknown, min: number, max: number): value is number {
+  return (
+    typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+  );
 }
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -93,6 +107,34 @@ export function validateCompanyData(
   if (company.numberOfShares !== undefined && !isPositiveNumber(company.numberOfShares)) {
     errors.push('The number of shares must be a positive number.');
   }
+  if (
+    company.shareCapitalAED !== undefined &&
+    isPositiveNumber(company.shareCapitalAED) &&
+    company.shareCapitalAED > COMPANY_SETUP_MAX_SHARE_CAPITAL_AED
+  ) {
+    errors.push(
+      `The share capital cannot exceed AED ${COMPANY_SETUP_MAX_SHARE_CAPITAL_AED.toLocaleString('en-US')}.`
+    );
+  }
+  if (
+    company.valuePerShareAED !== undefined &&
+    isPositiveNumber(company.valuePerShareAED) &&
+    company.valuePerShareAED > COMPANY_SETUP_MAX_VALUE_PER_SHARE_AED
+  ) {
+    errors.push(
+      `The value per share cannot exceed AED ${COMPANY_SETUP_MAX_VALUE_PER_SHARE_AED.toLocaleString('en-US')}.`
+    );
+  }
+
+  // Employment visas: whole number, 0..100.
+  if (
+    company.visaCount !== undefined &&
+    !isBoundedInt(company.visaCount, 0, COMPANY_SETUP_MAX_VISA_COUNT)
+  ) {
+    errors.push(
+      `The number of employment visas must be a whole number between 0 and ${COMPANY_SETUP_MAX_VISA_COUNT}.`
+    );
+  }
 
   // Consistency: shareCapital = valuePerShare * numberOfShares (warning only).
   if (
@@ -136,6 +178,45 @@ export function validatePersons(
     }
     if (person?.roles?.shareholder && !isPositiveNumber(person.shareholdingPct)) {
       errors.push(`${label}: please enter the shareholding percentage.`);
+    }
+    if (isPositiveNumber(person?.shareholdingPct) && person.shareholdingPct > 100) {
+      errors.push(`${label}: the shareholding percentage cannot exceed 100%.`);
+    }
+    // Mandatory on the authority application — required at submit even though
+    // the fields are optional in the prefill/draft contract.
+    if (!person?.nationality || !person.nationality.trim()) {
+      errors.push(`${label}: please select the nationality.`);
+    }
+    if (!person?.dateOfBirth) {
+      errors.push(`${label}: please enter the date of birth.`);
+    } else if (!isValidIsoDate(person.dateOfBirth) || person.dateOfBirth >= todayIso()) {
+      errors.push(`${label}: the date of birth is not a valid date.`);
+    }
+    if (!person?.religion || !person.religion.trim()) {
+      errors.push(`${label}: please enter the religion.`);
+    }
+    if (!person?.currentOrPastEidVisa) {
+      errors.push(`${label}: please answer the Emirates ID / UAE visa question.`);
+    }
+    if (person?.visa?.visaRequired) {
+      if (!person.visa.jobTitle || !person.visa.jobTitle.trim()) {
+        errors.push(`${label}: please enter the job title for the employment visa.`);
+      }
+      if (!isPositiveNumber(person.visa.basicMonthlySalaryAED)) {
+        errors.push(`${label}: please enter the basic monthly salary for the employment visa.`);
+      } else if (person.visa.basicMonthlySalaryAED > COMPANY_SETUP_MAX_MONTHLY_SALARY_AED) {
+        errors.push(
+          `${label}: the basic monthly salary cannot exceed AED ${COMPANY_SETUP_MAX_MONTHLY_SALARY_AED.toLocaleString('en-US')}.`
+        );
+      }
+    }
+    if (
+      person?.otherEntityCount !== undefined &&
+      !isBoundedInt(person.otherEntityCount, 1, COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT)
+    ) {
+      errors.push(
+        `${label}: the number of other entities must be a whole number between 1 and ${COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT}.`
+      );
     }
     // Passport fields are optional everywhere (auto-extraction can fail; staff
     // can parse them later from the uploaded copy) — but when present, dates
@@ -192,14 +273,31 @@ export function validatePersons(
   return { valid: errors.length === 0, errors, warnings };
 }
 
-/** Full submission check: company block + persons block. */
+/** Client-corrected contact block (optional in the submission): name + valid email. */
+export function validateContact(
+  contact: CompanySetupSubmittedData['contact']
+): CompanySetupValidationResult {
+  const errors: string[] = [];
+  if (contact) {
+    if (!contact.name || !contact.name.trim()) {
+      errors.push('Please enter the contact name.');
+    }
+    if (!contact.email || !EMAIL_PATTERN.test(contact.email.trim())) {
+      errors.push('Please enter a valid contact email address.');
+    }
+  }
+  return { valid: errors.length === 0, errors, warnings: [] };
+}
+
+/** Full submission check: company block + persons block + contact block. */
 export function validateSubmission(
   data: CompanySetupSubmittedData
 ): CompanySetupValidationResult {
   const company = validateCompanyData(data.company);
   const persons = validatePersons(data.persons);
+  const contact = validateContact(data.contact);
 
-  const errors = [...company.errors, ...persons.errors];
+  const errors = [...company.errors, ...persons.errors, ...contact.errors];
   const warnings = [...company.warnings, ...persons.warnings];
 
   return { valid: errors.length === 0, errors, warnings };

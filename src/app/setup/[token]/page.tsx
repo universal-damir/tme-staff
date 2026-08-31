@@ -17,7 +17,8 @@ type PageState =
   | 'success'
   | 'already_submitted'
   | 'not_found'
-  | 'closed' // cancelled / expired
+  | 'cancelled'
+  | 'expired'
   | 'error';
 
 interface IntakePayload {
@@ -71,7 +72,12 @@ export default function CompanySetupIntakePage() {
         const res = await fetch(`/api/company-setup/${token}`);
         if (cancelled) return;
         if (res.status === 404) return setState('not_found');
-        if (res.status === 410) return setState('closed');
+        if (res.status === 410) {
+          // The route names the reason — cancelled and expired are different
+          // situations for the client and get different copy.
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          return setState(body.error === 'cancelled' ? 'cancelled' : 'expired');
+        }
         if (!res.ok) return setState('error');
         const json: IntakePayload = await res.json();
         setData(json);
@@ -113,7 +119,7 @@ export default function CompanySetupIntakePage() {
     );
   }
 
-  if (state === 'closed') {
+  if (state === 'expired') {
     return (
       <Shell>
         <CenterCard>
@@ -121,7 +127,28 @@ export default function CompanySetupIntakePage() {
           <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
             This link has expired
           </h2>
-          <p className="text-gray-600">Please contact your TME consultant to receive a fresh link.</p>
+          <p className="text-gray-600 max-w-md">
+            Setup links stay open for a limited time. Anything you already filled in is saved —
+            please ask your TME consultant to send you a fresh link and you can carry on where you
+            left off.
+          </p>
+        </CenterCard>
+      </Shell>
+    );
+  }
+
+  if (state === 'cancelled') {
+    return (
+      <Shell>
+        <CenterCard>
+          <AlertTriangle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.secondary }} />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+            This setup form has been closed
+          </h2>
+          <p className="text-gray-600 max-w-md">
+            TME has closed this company setup form, so it no longer accepts entries. If you did not
+            expect this, please contact your TME consultant.
+          </p>
         </CenterCard>
       </Shell>
     );
@@ -154,6 +181,12 @@ export default function CompanySetupIntakePage() {
         savedDocuments={data?.documents ?? null}
         onSubmitted={() => {
           setState('success');
+          window.scrollTo({ top: 0 });
+        }}
+        onClosed={(reason) => {
+          // The link stopped accepting writes while the client was working.
+          // Expired is the far likelier of the two 410 reasons mid-session.
+          setState(reason === 'already_submitted' ? 'already_submitted' : 'expired');
           window.scrollTo({ top: 0 });
         }}
       />
