@@ -10,6 +10,7 @@ import { DocumentRequestForm } from '@/components/DocumentRequestForm';
 import { DependentForm } from '@/components/DependentForm';
 import type { StaffOnboardingSubmission, EmployerFormData, EmployeeFormData } from '@/types';
 import { Loader2, CheckCircle, XCircle, AlertTriangle, Lock } from 'lucide-react';
+import { sponsorshipTypeFromSponsor } from '@/lib/staff-form-logic';
 
 type PageState =
   | 'loading'
@@ -480,6 +481,18 @@ function OnboardingPageInner() {
     submission.onboarding_type === 'document_request' || isDependentDocumentRequest;
   const isDependentRenewal = submission.onboarding_type === 'dependent_renewal';
   const isDependent = submission.onboarding_type === 'dependent' || isDependentRenewal;
+  // Renewal header wording. Only company-sponsored staff renew a residence
+  // visa; for family- and self/GCC-sponsored staff the applicant already holds
+  // their own visa and TME only files the Labour Card, so their renewal is an
+  // Employment ID renewal. Derived the same way as EmployeeForm's gate — the
+  // employer's FINAL sponsor pick first, then the prefilled column, then
+  // 'company' — so the title matches the flow the applicant actually gets.
+  const headerSponsor = (submission.employer_data as Record<string, unknown> | null)?.sponsor as
+    | string
+    | undefined;
+  const headerSponsorshipType = headerSponsor
+    ? sponsorshipTypeFromSponsor(headerSponsor)
+    : (submission.sponsorship_type ?? 'company');
   const isShowingEmployer = pageState === 'employer' || (pageState === 'combined' && !showEmployeeSection);
   // Widen the page only for the renewal employer step, where Salary Contract +
   // Payroll render side-by-side. Other steps (employee form, success states)
@@ -523,10 +536,14 @@ function OnboardingPageInner() {
               : isDocumentRequest
               ? `Document Re-Upload${submission.staff_name ? ` for ${submission.staff_name}` : ''}`
               : isDependentRenewal ? 'Dependent Visa Renewal'
-              : isDependent ? 'Dependent Registration'
+              : isDependent ? 'Dependent Onboarding'
               : isPartnerInvestorTrack
               ? (isRenewal ? 'Partner / Investor Visa Renewal' : 'Partner / Investor Visa Application')
-              : isRenewal ? 'Staff Renewal' : 'Staff Onboarding'}
+              : isRenewal
+              ? (headerSponsorshipType === 'company'
+                  ? 'Staff Visa Renewal'
+                  : 'Staff Employment ID Renewal')
+              : 'Staff Onboarding'}
           </h1>
           {isDependentDocumentRequest ? (
             <p className="text-gray-600">
@@ -581,7 +598,7 @@ function OnboardingPageInner() {
             />
           )}
 
-          {/* Dependent Registration — sponsor fills in one form for their
+          {/* Dependent Onboarding — sponsor fills in one form for their
               dependent (own steps + signature, submits itself). */}
           {pageState === 'dependent' && (
             <DependentForm
