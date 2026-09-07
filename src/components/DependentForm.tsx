@@ -233,12 +233,15 @@ function certificateSetFor(dependentType: string | undefined): CertificateSet {
         marriageLabel: "Marriage Certificate of the Sponsor's Parents (attested)",
         maritalSelectLabel: "Marital Status of the Sponsor's Parents",
       };
+    // CS feedback 03.09: the in-laws' marriage certificate is the SPONSOR's own
+    // (sponsor + spouse), not the spouse's parents' — so the dependent's marital
+    // status says nothing about it. ALWAYS required, no divorce/death substitute,
+    // hence no `maritalSelectLabel`.
     case 'Father-in-Law':
     case 'Mother-in-Law':
       return {
         primaryLabel: 'Birth Certificate of the Spouse (attested)',
         marriageLabel: 'Marriage Certificate of Sponsor and Spouse (attested)',
-        maritalSelectLabel: "Marital Status of the Spouse's Parents",
       };
     default:
       // Maid / legacy / unknown — generic single certificate.
@@ -773,7 +776,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           : undefined
       : undefined;
   // Divorced/deceased parents need no marriage certificate (confirmed by
-  // Ulesh, CS feedback 21.08); Son/Daughter keep it unconditionally.
+  // Ulesh, CS feedback 21.08) — Father/Mother only. Son/Daughter and the
+  // in-laws keep it unconditionally (neither carries a `maritalSelectLabel`).
   const marriageCertNeeded =
     !!certSet.marriageLabel && (!certSet.maritalSelectLabel || derivedParentsStatus === 'Married');
 
@@ -1946,41 +1950,37 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         }}
       />
 
-      {/* Intro — who this form is for */}
-      <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm">
-        <div className="flex items-start gap-3">
-          <Users className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-          <div className="text-sm text-gray-600">
-            <p>
-              You are {isRenewal ? 'renewing the residence visa of' : 'registering'}{' '}
-              <span className="font-medium" style={{ color: TME_COLORS.primary }}>
-                {dependentType ? `your ${relationshipNoun}` : 'your dependent'}
-              </span>
-              {prefill.sponsor_staff_name ? (
-                <> as a dependent under your sponsorship ({prefill.sponsor_staff_name}).</>
-              ) : (
-                <> as a dependent under your sponsorship.</>
-              )}
-            </p>
-            <p className="mt-2">
-              {isRenewal ? (
-                <>
-                  The details below are the ones TME Services holds today — please review them,
-                  correct anything that has changed, and upload a <strong>newly taken</strong> photo
-                  (the authority does not accept the photo already on file). The attested
-                  relationship certificate is already on record and is not needed again.
-                </>
-              ) : (
-                <>
-                  Please provide the dependent&apos;s passport, photo, personal details, and the
-                  attested certificate proving your relationship. TME Services will use this
-                  information to apply for the dependent&apos;s residence visa.
-                </>
-              )}
-            </p>
+      {/* Intro — RENEWAL ONLY. CS feedback 03.09: on a first registration this
+          box repeated on every step and only restated the page header, so it
+          was dropped. The renewal copy stays: it carries the instructions that
+          exist nowhere else (review what is on file, newly taken photo, no
+          certificate needed again). */}
+      {isRenewal && (
+        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm">
+          <div className="flex items-start gap-3">
+            <Users className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+            <div className="text-sm text-gray-600">
+              <p>
+                You are renewing the residence visa of{' '}
+                <span className="font-medium" style={{ color: TME_COLORS.primary }}>
+                  {dependentType ? `your ${relationshipNoun}` : 'your dependent'}
+                </span>
+                {prefill.sponsor_staff_name ? (
+                  <> as a dependent under your sponsorship ({prefill.sponsor_staff_name}).</>
+                ) : (
+                  <> as a dependent under your sponsorship.</>
+                )}
+              </p>
+              <p className="mt-2">
+                The details below are the ones TME Services holds today — please review them,
+                correct anything that has changed, and upload a <strong>newly taken</strong> photo
+                (the authority does not accept the photo already on file). The attested
+                relationship certificate is already on record and is not needed again.
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Step 1: ID Photo */}
       <RevealSection show={viewingStep === 1 || viewingStep === 8}>

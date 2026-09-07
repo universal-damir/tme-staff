@@ -535,19 +535,21 @@ function dependentRequirements(
     // hand-crafted POST cannot claim a lighter relationship); an absent or
     // unknown value (legacy rows, Maid) falls back to the primary-only rule.
     const relationship = str('dependent_type');
-    const parentTrack =
-      relationship === 'Father' ||
-      relationship === 'Mother' ||
-      relationship === 'Father-in-Law' ||
-      relationship === 'Mother-in-Law';
+    const sponsorParentTrack = relationship === 'Father' || relationship === 'Mother';
+    // CS feedback 03.09: the IN-LAWS ask for the sponsor's OWN marriage
+    // certificate (sponsor + spouse), which the dependent's marital status
+    // says nothing about — always required, never substituted by a divorce or
+    // death certificate. Only Father/Mother run the marital-status branch.
+    const inLawTrack =
+      relationship === 'Father-in-Law' || relationship === 'Mother-in-Law';
     // CS feedback 21.08: the parents' marital status is asked ONCE, in the
-    // Personal Details step — the dependent IS one of the sponsor's/spouse's
-    // parents. Widowed maps to 'Deceased'; divorced/deceased parents need no
-    // marriage certificate (confirmed by Ulesh); Single (never married) needs
-    // neither. The form mirrors this mapping into `parents_marital_status`
-    // for the portal contract, but the OWN status is the source of truth.
+    // Personal Details step — the dependent IS one of the sponsor's parents.
+    // Widowed maps to 'Deceased'; divorced/deceased parents need no marriage
+    // certificate (confirmed by Ulesh); Single (never married) needs neither.
+    // The form mirrors this mapping into `parents_marital_status` for the
+    // portal contract, but the OWN status is the source of truth.
     const ownStatus = str('marital_status');
-    const parentsStatus = parentTrack
+    const parentsStatus = sponsorParentTrack
       ? ownStatus === 'Married' || ownStatus === 'Divorced'
         ? ownStatus
         : ownStatus === 'Widowed'
@@ -557,7 +559,8 @@ function dependentRequirements(
     const marriageCertRequired =
       relationship === 'Son' ||
       relationship === 'Daughter' ||
-      (parentTrack && parentsStatus === 'Married');
+      inLawTrack ||
+      (sponsorParentTrack && parentsStatus === 'Married');
 
     if (!docs.relationship_certificate?.path) {
       missing.push(relationship === 'Spouse' ? 'Marriage certificate' : 'Relationship certificate');
