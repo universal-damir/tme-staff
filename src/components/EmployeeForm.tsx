@@ -106,6 +106,12 @@ const STEP_LABELS = [
   'Review & Sign',
   'Sponsor Documents & NOC',
 ];
+/**
+ * Review & Sign. Note it is step 8, NOT the last label — "Sponsor Documents
+ * & NOC" (9) is a real upload step that runs AFTER review on the family
+ * sponsorship track, so its guidance must stay put.
+ */
+const REVIEW_STEP = 8;
 
 // Visa category labels for display
 const VISA_CATEGORY_LABELS: Record<string, string> = {
@@ -1175,6 +1181,14 @@ export function EmployeeForm({
     return idx < 0 ? internal : idx + 1;
   };
   const [viewingStep, setViewingStep] = useState(currentStep);
+
+  // Review re-renders every section so the employee can check what is about to
+  // be signed. The upload HOW-TO that belongs on each step — "spread open, all
+  // four corners", the sample photos — is noise there: the files are already
+  // uploaded and validated. Suppress the instructional blocks on review only;
+  // notes about the applicant's STATE (in-UAE, renewal rules) stay.
+  // CS feedback 11.09 — mirrors DependentForm.
+  const isReview = viewingStep === REVIEW_STEP;
 
   // If viewingStep ever lands on a hidden internal step (e.g. user navigated
   // there before the renewal flow was loaded), advance to the next visible.
@@ -2753,6 +2767,7 @@ export function EmployeeForm({
           stepNumber={displayedStepNumber(1)}
         >
           <PhotoUpload
+            hideGuidance={isReview}
             submissionId={submission.id}
             value={photoDoc}
             existingPhoto={existingDocs?.photo}
@@ -2925,25 +2940,27 @@ export function EmployeeForm({
             stepNumber={displayedStepNumber(2)}
           >
             <div className="space-y-4">
-              <div
-                className="flex items-start gap-3 p-4 rounded-lg"
-                style={{ backgroundColor: '#EBF4FF' }}
-              >
-                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                  <p className="font-medium">Upload your passport cover (open/spread showing front + back cover)</p>
-                  <p className="mt-2 text-xs text-gray-600">
-                    Single page photos are not accepted. Passport must be spread open.
-                  </p>
-                  <p className="mt-2 text-xs text-gray-600">
-                    All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
-                    {isMobile
-                      ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
-                      : 'Upload a PDF or a clear JPEG/PNG scan (not a photo of the passport on a table).'}
-                  </p>
-                  <SampleImageToggle imageSrc="/samples/passport-cover-example.png" altText="Example passport cover spread" label="See example photo" />
+              {!isReview && (
+                <div
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: '#EBF4FF' }}
+                >
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Upload your passport cover (open/spread showing front + back cover)</p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      Single page photos are not accepted. Passport must be spread open.
+                    </p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
+                      {isMobile
+                        ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
+                        : 'Upload a PDF or a clear JPEG/PNG scan (not a photo of the passport on a table).'}
+                    </p>
+                    <SampleImageToggle imageSrc="/samples/passport-cover-example.png" altText="Example passport cover spread" label="See example photo" />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <UploadSlot
                 label="Passport Cover"
@@ -3030,25 +3047,27 @@ export function EmployeeForm({
             stepNumber={displayedStepNumber(3)}
           >
             <div className="space-y-4">
-              <div
-                className="flex items-start gap-3 p-4 rounded-lg"
-                style={{ backgroundColor: '#EBF4FF' }}
-              >
-                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                  <p className="font-medium">Upload your passport inside pages (open/spread showing data page + opposite page)</p>
-                  <p className="mt-2 text-xs text-gray-600">
-                    Your details will be automatically extracted from this page.
-                  </p>
-                  <p className="mt-2 text-xs text-gray-600">
-                    All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
-                    {isMobile
-                      ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
-                      : 'Upload a PDF or a clear JPEG/PNG scan (not a photo of the passport on a table).'}
-                  </p>
-                  <SampleImageToggle imageSrc="/samples/passport-inside-example.png" altText="Example passport inside pages spread" label="See example photo" />
+              {!isReview && (
+                <div
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: '#EBF4FF' }}
+                >
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Upload your passport inside pages (open/spread showing data page + opposite page)</p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      Your details will be automatically extracted from this page.
+                    </p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
+                      {isMobile
+                        ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
+                        : 'Upload a PDF or a clear JPEG/PNG scan (not a photo of the passport on a table).'}
+                    </p>
+                    <SampleImageToggle imageSrc="/samples/passport-inside-example.png" altText="Example passport inside pages spread" label="See example photo" />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <UploadSlot
                 label=""
@@ -3307,19 +3326,21 @@ export function EmployeeForm({
               icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
             >
               <div className="space-y-4">
-                <div
-                  className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ backgroundColor: '#EBF4FF' }}
-                >
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                    <p className="font-medium">{additionalPageCopy.heading}</p>
-                    <p className="mt-1 text-xs text-gray-600">
-                      {additionalPageCopy.sub}
-                    </p>
-                    <SampleImageToggle imageSrc={additionalPageCopy.sampleSrc} altText={additionalPageCopy.sampleAlt} label="See example photo" />
+                {!isReview && (
+                  <div
+                    className="flex items-start gap-3 p-4 rounded-lg"
+                    style={{ backgroundColor: '#EBF4FF' }}
+                  >
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <p className="font-medium">{additionalPageCopy.heading}</p>
+                      <p className="mt-1 text-xs text-gray-600">
+                        {additionalPageCopy.sub}
+                      </p>
+                      <SampleImageToggle imageSrc={additionalPageCopy.sampleSrc} altText={additionalPageCopy.sampleAlt} label="See example photo" />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <UploadSlot
                   label=""
@@ -3385,36 +3406,40 @@ export function EmployeeForm({
               icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
             >
               <div className="space-y-4">
-                <div
-                  className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ backgroundColor: '#EBF4FF' }}
-                >
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                    <p className="font-medium">Pakistani nationals are required to provide a copy of their National ID Card (CNIC/NICOP) with chip</p>
-                    <p className="mt-1 text-xs text-gray-600">
-                      Please upload the front and back of your Pakistan National Identity Card. Your details will be automatically extracted.
-                    </p>
+                {!isReview && (
+                  <div
+                    className="flex items-start gap-3 p-4 rounded-lg"
+                    style={{ backgroundColor: '#EBF4FF' }}
+                  >
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <p className="font-medium">Pakistani nationals are required to provide a copy of their National ID Card (CNIC/NICOP) with chip</p>
+                      <p className="mt-1 text-xs text-gray-600">
+                        Please upload the front and back of your Pakistan National Identity Card. Your details will be automatically extracted.
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Sample images above upload areas */}
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div className="text-center">
-                    <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
-                    <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 object-contain" />
+                {!isReview && (
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="text-center">
+                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                      <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 object-contain" />
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                      <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 object-contain" />
+                      </div>
                     </div>
                   </div>
-                  <div className="text-center">
-                    <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
-                    <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 object-contain" />
-                    </div>
-                  </div>
-                </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
                   {/* Front */}
@@ -3672,31 +3697,35 @@ export function EmployeeForm({
               {hasPreviousUaeDocs === true && (
                 <div className="space-y-5 pl-6 border-l-2 border-gray-200">
                   {/* Combined guidance — applies to both the visa and the EID uploads below */}
-                  <div
-                    className="flex items-start gap-3 p-4 rounded-lg"
-                    style={{ backgroundColor: '#EBF4FF' }}
-                  >
-                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                      <p className="font-medium">If you have a copy, please upload your previous UAE visa and the front and back of your Emirates ID.</p>
+                  {!isReview && (
+                    <div
+                      className="flex items-start gap-3 p-4 rounded-lg"
+                      style={{ backgroundColor: '#EBF4FF' }}
+                    >
+                      <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                      <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                        <p className="font-medium">If you have a copy, please upload your previous UAE visa and the front and back of your Emirates ID.</p>
 
-                      <p className="mt-1 text-xs text-gray-600">
-                        UAE authorities may request these during visa processing. Expired documents are accepted.
-                      </p>
+                        <p className="mt-1 text-xs text-gray-600">
+                          UAE authorities may request these during visa processing. Expired documents are accepted.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Previous UAE visa upload — accepts PDF/image, AI-validated loosely.
                       Uses UploadSlot for visual consistency with the EID drop-zones below. */}
                   <div className="space-y-3">
                     <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Previous UAE visa</p>
-                    <div className="text-center mb-2">
-                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Example</p>
-                      <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/samples/visa-example.png" alt="Example UAE visa" className="h-32 sm:h-40 object-contain" />
+                    {!isReview && (
+                      <div className="text-center mb-2">
+                        <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Example</p>
+                        <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src="/samples/visa-example.png" alt="Example UAE visa" className="h-32 sm:h-40 object-contain" />
+                        </div>
                       </div>
-                    </div>
+                    )}
                     <UploadSlot
                       label=""
                       description="Scan or photo of your previous UAE visa (PDF or image)"
@@ -3723,22 +3752,24 @@ export function EmployeeForm({
                   {/* EID sample images — stacked on mobile so each renders the
                       same size as the visa example above (a 2-col grid squeezed
                       them too small on phones); side-by-side from sm up. */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                    <div className="text-center">
-                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
-                      <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/samples/eid-front-example.png" alt="Example Emirates ID front" className="h-32 sm:h-40 object-contain" />
+                  {!isReview && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                      <div className="text-center">
+                        <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                        <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src="/samples/eid-front-example.png" alt="Example Emirates ID front" className="h-32 sm:h-40 object-contain" />
+                        </div>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                        <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src="/samples/eid-back-example.png" alt="Example Emirates ID back" className="h-32 sm:h-40 object-contain" />
+                        </div>
                       </div>
                     </div>
-                    <div className="text-center">
-                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
-                      <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/samples/eid-back-example.png" alt="Example Emirates ID back" className="h-32 sm:h-40 object-contain" />
-                      </div>
-                    </div>
-                  </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
                     {/* EID Front */}

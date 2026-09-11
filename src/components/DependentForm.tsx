@@ -131,6 +131,8 @@ const STEP_LABELS = [
 ];
 const ONBOARDING_STEP_INDICES = [1, 2, 3, 4, 5, 6, 7, 8];
 const RENEWAL_STEP_INDICES = [1, 2, 3, 6, 7, 8];
+/** Last step in both arrays — the Review & Sign page. */
+const REVIEW_STEP = 8;
 
 /**
  * Fields a renewal seeds from `prefill_employee_data`.
@@ -240,7 +242,7 @@ function certificateSetFor(dependentType: string | undefined): CertificateSet {
     case 'Father-in-Law':
     case 'Mother-in-Law':
       return {
-        primaryLabel: 'Birth Certificate of the Spouse (attested)',
+        primaryLabel: 'Birth Certificate of Your Spouse (attested)',
         marriageLabel: 'Marriage Certificate of Sponsor and Spouse (attested)',
       };
     default:
@@ -962,6 +964,15 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
   const currentStep = computeCurrentStep();
   const [viewingStep, setViewingStep] = useState(currentStep);
+
+  // Review (step 8) re-renders every section so the sponsor can check what is
+  // about to be signed. The upload HOW-TO that belongs on each step — "spread
+  // open, all four corners", the attestation rules, the sample photos — is
+  // noise there: the files are already uploaded and validated. Suppress the
+  // instructional blocks on review only. Notes that tell the sponsor what
+  // happens NEXT (the two NOC notices) stay, they are not upload guidance.
+  // CS feedback 11.09.
+  const isReview = viewingStep === REVIEW_STEP;
 
   // Scroll to top on every step transition (blur first so the browser doesn't
   // re-anchor on the focused Continue button) — same treatment as EmployeeForm.
@@ -1995,6 +2006,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             // Renewal only: shows the photo on file and enables the SHA-256 +
             // vision reuse protection. A first registration has none.
             existingPhoto={isRenewal ? existingDocs?.photo : undefined}
+            hideGuidance={isReview}
             onUpload={handlePhotoUpload}
             onValidated={async (validated, validationErrors, aiRejected, flags) => {
               photoSamePhotoRef.current = flags?.samePhoto === true;
@@ -2172,22 +2184,24 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             stepNumber={displayedStepNumber(2)}
           >
             <div className="space-y-4">
-              <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                  <p className="font-medium">Upload the passport cover (open/spread showing front + back cover)</p>
-                  <p className="mt-2 text-xs text-gray-600">
-                    Single page photos are not accepted. The passport must be spread open.
-                  </p>
-                  <p className="mt-2 text-xs text-gray-600">
-                    All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
-                    {isMobile
-                      ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
-                      : 'Upload a PDF or a clear JPEG/PNG scan (not a photo of the passport on a table).'}
-                  </p>
-                  <SampleImageToggle imageSrc="/samples/passport-cover-example.png" altText="Example passport cover spread" label="See example photo" />
+              {!isReview && (
+                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Upload the passport cover (open/spread showing front + back cover)</p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      Single page photos are not accepted. The passport must be spread open.
+                    </p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
+                      {isMobile
+                        ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
+                        : 'Upload a PDF or a clear JPEG/PNG scan (not a photo of the passport on a table).'}
+                    </p>
+                    <SampleImageToggle imageSrc="/samples/passport-cover-example.png" altText="Example passport cover spread" label="See example photo" />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <UploadSlot
                 label="Passport Cover"
@@ -2222,22 +2236,24 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
           >
             <div className="space-y-4">
-              <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                  <p className="font-medium">Upload the passport inside pages (open/spread showing data page + opposite page)</p>
-                  <p className="mt-2 text-xs text-gray-600">
-                    The dependent&apos;s details will be automatically extracted from this page.
-                  </p>
-                  <p className="mt-2 text-xs text-gray-600">
-                    All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
-                    {isMobile
-                      ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
-                      : 'Upload a PDF or a clear JPEG/PNG scan (not a photo of the passport on a table).'}
-                  </p>
-                  <SampleImageToggle imageSrc="/samples/passport-inside-example.png" altText="Example passport inside pages spread" label="See example photo" />
+              {!isReview && (
+                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Upload the passport inside pages (open/spread showing data page + opposite page)</p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      The dependent&apos;s details will be automatically extracted from this page.
+                    </p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
+                      {isMobile
+                        ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
+                        : 'Upload a PDF or a clear JPEG/PNG scan (not a photo of the passport on a table).'}
+                    </p>
+                    <SampleImageToggle imageSrc="/samples/passport-inside-example.png" altText="Example passport inside pages spread" label="See example photo" />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <UploadSlot
                 label=""
@@ -2285,14 +2301,16 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
             >
               <div className="space-y-4">
-                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                    <p className="font-medium">{additionalPageCopy.heading}</p>
-                    <p className="mt-1 text-xs text-gray-600">{additionalPageCopy.sub}</p>
-                    <SampleImageToggle imageSrc={additionalPageCopy.sampleSrc} altText={additionalPageCopy.sampleAlt} label="See example photo" />
+                {!isReview && (
+                  <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <p className="font-medium">{additionalPageCopy.heading}</p>
+                      <p className="mt-1 text-xs text-gray-600">{additionalPageCopy.sub}</p>
+                      <SampleImageToggle imageSrc={additionalPageCopy.sampleSrc} altText={additionalPageCopy.sampleAlt} label="See example photo" />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <UploadSlot
                   label=""
@@ -2537,18 +2555,20 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
           >
             <div className="space-y-4">
-              <div
-                className="flex items-start gap-3 p-4 rounded-lg"
-                style={{ backgroundColor: '#EBF4FF' }}
-              >
-                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                  <p className="font-medium">Pakistani nationals are required to provide a copy of their National ID Card (CNIC/NICOP) with chip</p>
-                  <p className="mt-1 text-xs text-gray-600">
-                    Please upload the front and back of the dependent&apos;s Pakistan National Identity Card.
-                  </p>
+              {!isReview && (
+                <div
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: '#EBF4FF' }}
+                >
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <p className="font-medium">Pakistani nationals are required to provide a copy of their National ID Card (CNIC/NICOP) with chip</p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Please upload the front and back of the dependent&apos;s Pakistan National Identity Card.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Renewal: copies already on file — show them; a fresh upload
                   is only needed when the card changed. */}
@@ -2569,22 +2589,24 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               )}
 
               {/* Sample images above upload areas */}
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="text-center">
-                  <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
-                  <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 object-contain" />
+              {!isReview && (
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="text-center">
+                    <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                    <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 object-contain" />
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                    <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 object-contain" />
+                    </div>
                   </div>
                 </div>
-                <div className="text-center">
-                  <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
-                  <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 object-contain" />
-                  </div>
-                </div>
-              </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
                 {/* Front */}
@@ -2677,31 +2699,33 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           stepNumber={displayedStepNumber(4)}
         >
           <div className="space-y-4">
-            <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-              <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-              <div className="text-sm" style={{ color: TME_COLORS.primary }}>
-                <p className="font-medium">
-                  {multipleCertificates
-                    ? 'Upload the certificates listed below'
-                    : `Upload the ${certSet.primaryLabel}`}
-                </p>
-                <p className="mt-2 text-xs text-gray-600">
-                  {multipleCertificates ? 'Each certificate' : 'The certificate'} must be attested by the
-                  UAE Ministry of Foreign Affairs (MoFA) or, at minimum, by the UAE Embassy in the country
-                  where it was issued. If a certificate is in a language other than English or Arabic, a
-                  legal translation must be attached. An unattested certificate will be rejected by the
-                  immigration authorities.
-                </p>
-                <p className="mt-2 text-xs text-gray-600">
-                  Please note that TME Services can only proceed with the dependent visa application once
-                  all of the requested documents have been provided.
-                </p>
-                <p className="mt-2 text-xs text-gray-600">
-                  In case your marriage or birth certificate hasn&apos;t been attested yet, please
-                  contact TME Services so that we can guide you through the process.
-                </p>
+            {!isReview && (
+              <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <p className="font-medium">
+                    {multipleCertificates
+                      ? 'Upload the certificates listed below'
+                      : `Upload the ${certSet.primaryLabel}`}
+                  </p>
+                  <p className="mt-2 text-xs text-gray-600">
+                    {multipleCertificates ? 'Each certificate' : 'The certificate'} must be attested by the
+                    UAE Ministry of Foreign Affairs (MoFA) or, at minimum, by the UAE Embassy in the country
+                    where it was issued. If a certificate is in a language other than English or Arabic, a
+                    legal translation must be attached. An unattested certificate will be rejected by the
+                    immigration authorities.
+                  </p>
+                  <p className="mt-2 text-xs text-gray-600">
+                    Please note that TME Services can only proceed with the dependent visa application once
+                    all of the requested documents have been provided.
+                  </p>
+                  <p className="mt-2 text-xs text-gray-600">
+                    In case your marriage or birth certificate hasn&apos;t been attested yet, please
+                    contact TME Services so that we can guide you through the process.
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             <FileUploadSlot
               label={certSet.primaryLabel}

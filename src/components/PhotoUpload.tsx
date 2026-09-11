@@ -32,6 +32,13 @@ interface PhotoUploadProps {
   onRemove?: () => void;
   error?: string;
   /**
+   * Suppress the instructional blocks (the "Photo Requirements" checklist).
+   * Set on a review page, where the photo is already uploaded and validated
+   * and the how-to is noise. Defaults to false so the step pages are
+   * unchanged. CS feedback 11.09.
+   */
+  hideGuidance?: boolean;
+  /**
    * The photo already on file for this staff member (renewals / photo
    * re-requests). `sha256` powers the instant byte-identical rejection;
    * `publicUrl` (when the portal supplied a storage path) shows the client
@@ -55,7 +62,7 @@ async function sha256Hex(file: File): Promise<string | null> {
   }
 }
 
-export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error, existingPhoto }: PhotoUploadProps) {
+export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error, existingPhoto, hideGuidance = false }: PhotoUploadProps) {
   const aiToken = useSearchParams().get('token');
   const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -509,35 +516,37 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
       )}
 
       {/* Photo requirements */}
-      <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-        <p className="text-xs font-medium text-gray-600 mb-2">Photo Requirements:</p>
-        <ul className="text-xs text-gray-500 space-y-1">
-          <li className="flex items-center gap-1">
-            <Upload className="w-3 h-3" />
-            White background
-          </li>
-          <li className="flex items-center gap-1">
-            <Upload className="w-3 h-3" />
-            Head AND shoulders visible — space above your head, no tight cropping
-          </li>
-          <li className="flex items-center gap-1">
-            <Upload className="w-3 h-3" />
-            Face 70-80% of photo
-          </li>
-          <li className="flex items-center gap-1">
-            <Upload className="w-3 h-3" />
-            Recent photo (within 6 months) — not a photo of a printed photo
-          </li>
-          <li className="flex items-center gap-1">
-            <Upload className="w-3 h-3" />
-            No glasses, neutral expression
-          </li>
-          <li className="flex items-center gap-1">
-            <Upload className="w-3 h-3" />
-            Clear, no shadows or blur
-          </li>
-        </ul>
-      </div>
+      {!hideGuidance && (
+        <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+          <p className="text-xs font-medium text-gray-600 mb-2">Photo Requirements:</p>
+          <ul className="text-xs text-gray-500 space-y-1">
+            <li className="flex items-center gap-1">
+              <Upload className="w-3 h-3" />
+              White background
+            </li>
+            <li className="flex items-center gap-1">
+              <Upload className="w-3 h-3" />
+              Head AND shoulders visible — space above your head, no tight cropping
+            </li>
+            <li className="flex items-center gap-1">
+              <Upload className="w-3 h-3" />
+              Face 70-80% of photo
+            </li>
+            <li className="flex items-center gap-1">
+              <Upload className="w-3 h-3" />
+              Recent photo (within 6 months) — not a photo of a printed photo
+            </li>
+            <li className="flex items-center gap-1">
+              <Upload className="w-3 h-3" />
+              No glasses, neutral expression
+            </li>
+            <li className="flex items-center gap-1">
+              <Upload className="w-3 h-3" />
+              Clear, no shadows or blur
+            </li>
+          </ul>
+        </div>
+      )}
 
       {(error || uploadError) && (
         <p className="mt-1 text-sm text-red-500">{error || uploadError}</p>
