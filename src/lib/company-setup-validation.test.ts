@@ -53,6 +53,7 @@ function makeCompany(overrides: Partial<CompanySetupCompanyData> = {}): CompanyS
     ],
     activities: [{ description: 'Management consultancy' }],
     licenseType: 'Commercial',
+    businessDescription: 'Management consultancy for small businesses in the UAE.',
     ...overrides,
   };
 }
@@ -192,6 +193,30 @@ describe('validatePersons bounded numbers', () => {
 
 describe('validateCompanyData bounded numbers', () => {
   it('accepts a well-formed company block', () => {
+    expect(validateCompanyData(makeCompany()).valid).toBe(true);
+  });
+
+  it('rejects the same company name on two options, whatever the casing', () => {
+    const result = validateCompanyData(
+      makeCompany({
+        nameOptions: [
+          { name: 'Horizon Trade' },
+          { name: 'Northstone Group' },
+          { name: '  horizon trade  ' },
+        ],
+      })
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain(
+      'Name option 3: this is the same name as option 1. Please give 3 different names.'
+    );
+  });
+
+  it('requires a business description', () => {
+    expect(validateCompanyData(makeCompany({ businessDescription: '  ' })).valid).toBe(false);
+    expect(validateCompanyData(makeCompany({ businessDescription: undefined })).valid).toBe(
+      false
+    );
     expect(validateCompanyData(makeCompany()).valid).toBe(true);
   });
 

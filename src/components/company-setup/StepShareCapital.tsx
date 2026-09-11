@@ -48,7 +48,7 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
         The standard IFZA share capital is AED 10,000 or more (e.g. AED 10,000 as 10,000 shares of
         AED 1 each, or 100 shares of AED 100 each). The share capital does not have to be paid
         into a bank account for the license to be issued. If you are unsure, leave the fields
-        empty — your TME consultant will advise you.
+        empty and your TME consultant will advise you.
       </InfoNote>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -91,7 +91,7 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
             style={{ height: 42, fontFamily: 'Inter, sans-serif' }}
           />
           <p className="text-xs text-gray-500 mt-1">
-            Share capital / value per share — calculated automatically.
+            Share capital / value per share are calculated automatically.
           </p>
         </div>
       </div>

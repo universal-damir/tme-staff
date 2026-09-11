@@ -9,6 +9,7 @@ import {
   deriveNumberOfShares,
   emptyPerson,
   extractedDataOf,
+  missingForPeopleStep,
   rekeyDocumentsAfterRemove,
   type PassportExtractionData,
 } from './draft';
@@ -386,5 +387,62 @@ describe('rekeyDocumentsAfterRemove keeps extraction data attached', () => {
     );
     expect(Object.keys(rekeyed).sort()).toEqual(['0', '1']);
     expect(extractedDataOf(rekeyed['1'].passport)).toEqual({ fullName: 'c.pdf' });
+  });
+});
+
+describe('missingForPeopleStep', () => {
+  const complete = (over: Partial<CompanySetupPerson> = {}): CompanySetupPerson => ({
+    fullName: 'Damir Novalic',
+    roles: { shareholder: true, generalManager: true, director: true, secretary: true },
+    shareholdingPct: 100,
+    nationality: 'German',
+    dateOfBirth: '1985-04-12',
+    religion: 'Christian',
+    currentOrPastEidVisa: 'none',
+    visa: { visaRequired: false },
+    ...over,
+  });
+  const docs = (over: Record<string, unknown> = {}) => ({
+    '0': {
+      passport: { path: 'p', filename: 'p', uploadedAt: '' },
+      photo: { path: 'h', filename: 'h', uploadedAt: '' },
+      proof_of_address: { path: 'b', filename: 'b', uploadedAt: '' },
+      ...over,
+    },
+  }) as never;
+
+  it('is empty when everything is there', () => {
+    expect(missingForPeopleStep([complete()], docs())).toEqual([]);
+  });
+
+  it('names the person and lists exactly what they are missing', () => {
+    const result = missingForPeopleStep([complete({ religion: undefined })], docs());
+    expect(result).toEqual(['Damir Novalic: religion.']);
+  });
+
+  it('joins several missing items into one readable line', () => {
+    const result = missingForPeopleStep(
+      [complete({ religion: undefined, dateOfBirth: undefined })],
+      docs({ photo: undefined })
+    );
+    expect(result).toEqual([
+      'Damir Novalic: date of birth, religion and the portrait photo.',
+    ]);
+  });
+
+  it('reports the role and shareholding rules separately', () => {
+    const result = missingForPeopleStep(
+      [complete({ roles: { shareholder: true, generalManager: false, director: false, secretary: false }, shareholdingPct: 60 })],
+      docs()
+    );
+    expect(result).toContain('Tick one person as General Manager.');
+    expect(result).toContain('Tick one person as Secretary.');
+    expect(result).toContain('Tick at least one person as Director.');
+    expect(result).toContain('The shareholding adds up to 60%. It must be exactly 100%.');
+  });
+
+  it('falls back to a position label when the name is still empty', () => {
+    const result = missingForPeopleStep([complete({ fullName: '  ' })], docs());
+    expect(result[0]).toMatch(/^Person 1: full name\./);
   });
 });

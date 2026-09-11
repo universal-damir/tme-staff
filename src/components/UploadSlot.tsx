@@ -43,11 +43,27 @@ interface UploadSlotProps {
   removable?: boolean;
   /**
    * The file was uploaded by TME staff, not by the person filling this form.
-   * Renders the slot filled and READ-ONLY: no Replace, no Remove, and a
-   * "Provided by TME" note instead of a verification badge. Off by default —
-   * the staff onboarding forms never see staff-provided refs.
+   * Renders the slot filled with a "Provided by TME" note instead of a
+   * verification badge. Off by default: the staff onboarding forms never see
+   * staff-provided refs.
    */
   providedByStaff?: boolean;
+  /**
+   * Let the client replace a `providedByStaff` file. The form asks them to
+   * confirm our file is correct, so they need a way to say it is not: this
+   * shows an "Upload the correct one" button that runs the normal upload +
+   * check path, and the new file becomes theirs. Off by default, so the staff
+   * onboarding forms keep the read-only behaviour they had.
+   */
+  staffDocReplaceable?: boolean;
+  /**
+   * Render the messages (errors, status line, warnings, footer) BESIDE the
+   * upload tile instead of stacked under it. Off by default, so the staff
+   * onboarding forms keep their single column; the company-setup intake opts
+   * in because a bank statement can carry four lines of warning and reading
+   * them under the image pushed everything else off the screen.
+   */
+  messagesBeside?: boolean;
   /** Extra warnings shown under the slot (advisory, never blocking). */
   warnings?: string[];
   /** Rendered under the warnings — e.g. the "Continue anyway" affordance. */
@@ -70,6 +86,8 @@ export function UploadSlot({
   needsReview = false,
   removable = false,
   providedByStaff = false,
+  staffDocReplaceable = false,
+  messagesBeside = false,
   warnings,
   footer,
 }: UploadSlotProps) {
@@ -180,7 +198,7 @@ export function UploadSlot({
       const typeOk = acceptedTypes.includes(selectedFile.type);
       if (!typeOk) {
         const friendly = isMobile
-          ? 'On mobile, please upload a scanned PDF. Camera photos and image files are not accepted — use a scanner app, or upload a PDF/JPEG/PNG from a computer.'
+          ? 'On mobile, please upload a scanned PDF. Camera photos and image files are not accepted. Use a scanner app, or upload a PDF/JPEG/PNG from a computer.'
           : 'Please upload a PDF, JPEG (.jpg / .jpeg), or PNG.';
         alert(friendly);
         if (inputRef.current) inputRef.current.value = '';
@@ -248,6 +266,15 @@ export function UploadSlot({
         </label>
       )}
 
+      {/* `display: contents` keeps the stacked layout byte-identical for every
+          caller that did not opt into messagesBeside. */}
+      <div
+        className={
+          messagesBeside
+            ? 'flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 items-start'
+            : 'contents'
+        }
+      >
       <div
         className={`relative flex-1 border-2 border-dashed rounded-lg transition-all duration-200 ${getBorderColor()} ${getBgColor()}`}
         onDrop={handleDrop}
@@ -368,18 +395,22 @@ export function UploadSlot({
                 isn't tempted to fire a second upload while the first is
                 still in flight (and so the "Validating..." badge isn't
                 competing with an actionable button). */}
-            {!validating && !providedByStaff && (
+            {!validating && (!providedByStaff || staffDocReplaceable) && (
               <div className="absolute top-4 left-4 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => inputRef.current?.click()}
                   className="bg-white rounded-full p-1.5 shadow-md hover:bg-gray-100 transition-colors flex items-center gap-1 px-2"
-                  title="Replace with another photo"
+                  title={
+                    providedByStaff
+                      ? 'Our file is not correct: upload the right one'
+                      : 'Replace with another file'
+                  }
                 >
                   <RefreshCw className="w-3.5 h-3.5 text-gray-600" />
                   <span className="text-xs font-medium text-gray-700">Replace</span>
                 </button>
-                {removable && (
+                {removable && !providedByStaff && (
                   <button
                     type="button"
                     onClick={onRemove}
@@ -397,8 +428,17 @@ export function UploadSlot({
           <div className="w-full h-40 flex flex-col items-center justify-center gap-2 p-4 rounded-lg">
             <FileText className="w-8 h-8" style={{ color: TME_COLORS.primary }} />
             <span className="text-xs text-gray-600 text-center">
-              Provided by TME — please confirm it is correct.
+              Provided by TME. Please confirm it is correct.
             </span>
+            {staffDocReplaceable && (
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                className="mt-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                Not correct? Upload the right one
+              </button>
+            )}
           </div>
         ) : (
           <button
@@ -415,6 +455,7 @@ export function UploadSlot({
         )}
       </div>
 
+      <div className={messagesBeside ? 'min-w-0' : 'contents'}>
       {/* Error Message */}
       {error && (
         <p className="mt-2 text-xs text-red-500 flex items-center gap-1">
@@ -423,30 +464,34 @@ export function UploadSlot({
         </p>
       )}
 
-      {/* Validated Message — green "Page verified" only when AI actually
-          accepted the page. Manual-review submissions get an amber line
-          instead so the user understands the page hasn't been verified
-          yet — TME will check it on the portal side. */}
+      {/* Status line. The preview already carries a badge saying exactly this
+          ("Pending review" / "Valid"), so the line only appears when there is
+          no preview to put a badge on — otherwise every uploaded file said the
+          same thing twice. The error line is different: the badge says
+          "Invalid", the line says WHY, so it always shows. */}
       {providedByStaff ? (
         <p className="mt-2 text-xs text-blue-700 flex items-center gap-1">
           <CheckCircle className="w-3 h-3" />
-          Provided by TME — please confirm
+          Provided by TME. Please confirm it is correct
+          {staffDocReplaceable ? ', or replace it with the right file.' : '.'}
         </p>
       ) : (
-        <>
-          {needsReview && !error && !validating && (
-            <p className="mt-2 text-xs text-amber-700 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />
-              TME will verify this manually
-            </p>
-          )}
-          {validated && !needsReview && !error && !validating && (
-            <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
-              <CheckCircle className="w-3 h-3" />
-              Page verified
-            </p>
-          )}
-        </>
+        !preview && (
+          <>
+            {needsReview && !error && !validating && (
+              <p className="mt-2 text-xs text-amber-700 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                TME will verify this manually
+              </p>
+            )}
+            {validated && !needsReview && !error && !validating && (
+              <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Page verified
+              </p>
+            )}
+          </>
+        )
       )}
 
       {warnings && warnings.length > 0 && !validating && (
@@ -460,6 +505,8 @@ export function UploadSlot({
         </div>
       )}
       {footer}
+      </div>
+      </div>
 
       {lightboxSrc && (
         <ImageLightbox

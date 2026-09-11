@@ -8,6 +8,7 @@
  */
 
 import {
+  COMPANY_SETUP_MAX_SHAREHOLDERS,
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
   composeFullName,
   type CompanySetupActivity,
@@ -21,6 +22,7 @@ import {
   type CompanySetupSubmittedData,
 } from '@/types/company-setup';
 import { resolveExtractedNationality } from '@/lib/country-utils';
+import { passportAdditionalPageVariant } from '@/lib/staff-form-logic';
 
 export interface DraftCompany extends Omit<CompanySetupCompanyData, 'licenseType'> {
   licenseType?: CompanySetupLicenseType;
@@ -166,6 +168,80 @@ export function roleTotals(persons: CompanySetupPerson[]): RoleTotals {
   return { shareholdingSum, shareholderCount, gmCount, directorCount, secretaryCount };
 }
 
+/**
+ * Exactly what is still stopping the People & Documents step from continuing,
+ * named person by person. A generic "every person needs a name, nationality,
+ * date of birth, ..." paragraph tells the client nothing: they have to re-read
+ * the whole form looking for the one empty box. These are the boxes.
+ *
+ * Same rules as the step gate in CompanySetupForm, in the same order.
+ */
+export function missingForPeopleStep(
+  persons: CompanySetupPerson[],
+  documents: CompanySetupDocuments
+): string[] {
+  const missing: string[] = [];
+  if (persons.length < 1) return ['Add at least one person.'];
+
+  persons.forEach((person, index) => {
+    const who = person.fullName.trim() || `Person ${index + 1}`;
+    const need: string[] = [];
+    if (!person.fullName.trim()) need.push('full name');
+    if (!person.nationality) need.push('nationality');
+    if (!person.dateOfBirth) need.push('date of birth');
+    if (!person.religion) need.push('religion');
+    if (!person.currentOrPastEidVisa) need.push('the Emirates ID / visa answer');
+    if (
+      person.roles.shareholder &&
+      !(typeof person.shareholdingPct === 'number' && person.shareholdingPct > 0)
+    ) {
+      need.push('a shareholding percentage');
+    }
+
+    const docs = documents[String(index)] ?? {};
+    if (!docs.passport?.path) need.push('the passport data page');
+    if (passportAdditionalPageVariant(person.nationality) && !docs.passport_additional?.path) {
+      need.push('the additional passport page');
+    }
+    if (!docs.photo?.path) need.push('the portrait photo');
+    if (!docs.proof_of_address?.path) need.push('the bank statement');
+    if (person.currentOrPastEidVisa === 'current') {
+      if (!docs.eid_front?.path) need.push('the Emirates ID front');
+      if (!docs.eid_back?.path) need.push('the Emirates ID back');
+      if (!docs.visa_document?.path) need.push('the UAE visa copy');
+    }
+    if (person.currentOrPastEidVisa === 'past' && !docs.previous_visa_document?.path) {
+      need.push('the previous UAE visa copy');
+    }
+
+    if (need.length > 0) missing.push(`${who}: ${listPhrase(need)}.`);
+  });
+
+  const totals = roleTotals(persons);
+  if (totals.gmCount === 0) missing.push('Tick one person as General Manager.');
+  if (totals.gmCount > 1) missing.push('Only one person can be the General Manager.');
+  if (totals.secretaryCount === 0) missing.push('Tick one person as Secretary.');
+  if (totals.secretaryCount > 1) missing.push('Only one person can be the Secretary.');
+  if (totals.directorCount === 0) missing.push('Tick at least one person as Director.');
+  if (totals.shareholderCount === 0) missing.push('Tick at least one person as Shareholder.');
+  else if (Math.abs(totals.shareholdingSum - 100) > 0.01) {
+    missing.push(
+      `The shareholding adds up to ${totals.shareholdingSum}%. It must be exactly 100%.`
+    );
+  }
+
+  if (persons.length > COMPANY_SETUP_MAX_SHAREHOLDERS) {
+    missing.push(`Please add no more than ${COMPANY_SETUP_MAX_SHAREHOLDERS} people.`);
+  }
+  return missing;
+}
+
+/** "a, b and c" */
+function listPhrase(items: string[]): string {
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 /** ISO YYYY-MM-DD -> dd.mm.yyyy (CustomDatePicker's display format). */
 export function isoToDisplayDate(iso: string | undefined): string {
   if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso ?? '';
@@ -231,6 +307,18 @@ export function extractedDataOf(
   ref: CompanySetupDocRef | undefined
 ): PassportExtractedFields | undefined {
   return ref?.extractedData as PassportExtractedFields | undefined;
+}
+
+/** Key under which the proof-of-address slot parks the address printed on the
+ *  bank statement, so the "use this address" offer survives a reload or a
+ *  resumed draft. `extractedData` is client-side bookkeeping: the portal sync
+ *  rebuilds refs from a whitelist and drops it. */
+export const STATEMENT_ADDRESS_KEY = 'addressOnDocument';
+
+/** The address read off a stored bank statement, if we managed to read one. */
+export function statementAddressOf(ref: CompanySetupDocRef | undefined): string | undefined {
+  const value = ref?.extractedData?.[STATEMENT_ADDRESS_KEY];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 /** The `data` shape of the extract-passport API response (see passport-extraction.ts). */

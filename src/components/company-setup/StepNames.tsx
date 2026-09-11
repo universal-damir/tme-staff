@@ -21,7 +21,7 @@ export interface AiNameIssue {
 
 interface StepNamesProps {
   company: DraftCompany;
-  /** Staff pre-fill — used to mark which options TME suggested. */
+  /** Staff pre-fill: used to mark which options TME suggested. */
   prefill: CompanySetupPrefillData | null;
   onChange: (patch: Partial<DraftCompany>) => void;
   /** AI warnings from the last validate-names call (never blocking). */
@@ -29,7 +29,7 @@ interface StepNamesProps {
   /** Calls the suggest-names endpoint; resolves to the suggestions (or null on failure). */
   onSuggest: () => Promise<string[] | null>;
   /**
-   * False when there is not a single business activity yet — suggestions are
+   * False when there is not a single business activity yet: suggestions are
    * generated FROM the activities, so without them the button is disabled
    * rather than producing names about a business we know nothing about.
    */
@@ -53,14 +53,32 @@ export function StepNames({
   const anyStaffSuggestion = staffNames.some((o) => (o?.name ?? '').trim().length > 0);
   const allFilled = names.every((o) => o.name.trim().length > 0);
 
+  // The authority reads the options as first / second / third choice, so the
+  // same name twice throws a choice away. `duplicateAt` maps an option index to
+  // the earlier option it repeats; `usedNames` is what the chips check against.
+  const usedNames = new Set(
+    names.map((o) => o.name.trim().toLowerCase()).filter(Boolean)
+  );
+  const duplicateAt = new Map<number, number>();
+  const firstSeenAt = new Map<string, number>();
+  names.forEach((o, index) => {
+    const key = o.name.trim().toLowerCase();
+    if (!key) return;
+    const first = firstSeenAt.get(key);
+    if (first === undefined) firstSeenAt.set(key, index);
+    else duplicateAt.set(index, first);
+  });
+
   const setName = (index: number, name: string) => {
     onChange({ nameOptions: names.map((o, i) => (i === index ? { name } : o)) });
   };
 
   const applySuggestion = (name: string) => {
     // Fill the first empty slot. When all three are filled, nothing is
-    // overwritten — silently replacing option 3 destroyed a name the client
-    // had typed. The chips are disabled in that state.
+    // overwritten: silently replacing option 3 destroyed a name the client
+    // had typed. A name already on another line is never filled in twice.
+    // The chips are disabled in both states.
+    if (usedNames.has(name.trim().toLowerCase())) return;
     const emptyIndex = names.findIndex((o) => !o.name.trim());
     if (emptyIndex === -1) return;
     setName(emptyIndex, name);
@@ -89,7 +107,7 @@ export function StepNames({
         available and approved.
       </p>
 
-      {/* The full IFZA name rules — always visible on this step (PM requirement:
+      {/* The full IFZA name rules, always visible on this step (PM requirement:
           a clearly displayed checklist, never a tooltip). */}
       <div
         className="rounded-xl border-2 p-4"
@@ -124,6 +142,9 @@ export function StepNames({
         {names.map((option, index) => {
           const trimmed = option.name.trim();
           const result = trimmed ? validateCompanyName(trimmed) : null;
+          const duplicateOf = duplicateAt.get(index);
+          const isDuplicate = duplicateOf !== undefined;
+          const showsError = isDuplicate || (result !== null && !result.valid);
           const ai = aiIssues.find((i) => i.name === trimmed && i.issues.length > 0);
           const staffName = (staffNames[index]?.name ?? '').trim();
           const isStaffSuggestion = staffName.length > 0 && staffName === trimmed;
@@ -153,19 +174,17 @@ export function StepNames({
                   type="text"
                   value={option.name}
                   onChange={(e) => setName(index, e.target.value)}
-                  placeholder="e.g. Horizon Trade FZCO — type the name without the suffix"
+                  placeholder="e.g. Horizon Trade (type the name without the FZCO suffix)"
                   maxLength={120}
                   className={`w-full px-3 pr-16 rounded-lg border-2 focus:outline-none transition-all duration-200 ${
-                    result && !result.valid ? 'border-red-400' : 'border-gray-200'
+                    showsError ? 'border-red-400' : 'border-gray-200'
                   }`}
                   style={{ height: 42 }}
                   onFocus={(e) => {
-                    if (!(result && !result.valid))
-                      e.currentTarget.style.borderColor = TME_COLORS.primary;
+                    if (!showsError) e.currentTarget.style.borderColor = TME_COLORS.primary;
                   }}
                   onBlur={(e) => {
-                    if (!(result && !result.valid))
-                      e.currentTarget.style.borderColor = TME_COLORS.border;
+                    if (!showsError) e.currentTarget.style.borderColor = TME_COLORS.border;
                   }}
                 />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -181,13 +200,19 @@ export function StepNames({
                     </button>
                   )}
                   {result &&
-                    (result.valid ? (
+                    (result.valid && !isDuplicate ? (
                       <CheckCircle className="w-5 h-5 text-green-500" />
                     ) : (
                       <XCircle className="w-5 h-5 text-red-500" />
                     ))}
                 </span>
               </div>
+              {isDuplicate && (
+                <p className="mt-1 text-xs text-red-500">
+                  This is the same name as option {(duplicateOf ?? 0) + 1}. Please give{' '}
+                  {COMPANY_SETUP_NAME_OPTIONS_REQUIRED} different names.
+                </p>
+              )}
               {result &&
                 result.errors.map((error, i) => (
                   <p key={i} className="mt-1 text-xs text-red-500">
@@ -196,6 +221,7 @@ export function StepNames({
                 ))}
               {result &&
                 result.valid &&
+                !isDuplicate &&
                 result.warnings.map((warning, i) => (
                   <p key={i} className="mt-1 text-xs text-amber-700 flex items-start gap-1">
                     <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
@@ -223,7 +249,7 @@ export function StepNames({
           title={
             canSuggest
               ? undefined
-              : 'Add at least one business activity first — suggestions are based on it.'
+              : 'Add at least one business activity first. Suggestions are based on it.'
           }
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ backgroundColor: '#f0f4ff', color: TME_COLORS.primary }}
@@ -234,40 +260,42 @@ export function StepNames({
         <p className="text-xs text-gray-500 mt-1.5">
           {canSuggest
             ? 'Suggestions are based on your business activities. Final company name approval remains subject to authority approval.'
-            : 'Add at least one business activity first — suggestions are based on it.'}
+            : 'Add at least one business activity first. Suggestions are based on it.'}
         </p>
         {suggestError && <p className="text-xs text-red-500 mt-2">{suggestError}</p>}
         {suggestions && suggestions.length > 0 && (
           <div className="mt-3">
             <InfoNote
-              title={
-                allFilled
-                  ? 'Suggested names'
-                  : 'Suggested names — click one to use it'
-              }
+              title={allFilled ? 'Suggested names' : 'Suggested names: click one to use it'}
             >
               <div className="flex flex-wrap gap-2 mt-1">
-                {suggestions.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => applySuggestion(name)}
-                    disabled={allFilled}
-                    title={
-                      allFilled
-                        ? 'All three options are filled — clear one to use a suggestion.'
-                        : undefined
-                    }
-                    className="px-3 py-1.5 rounded-full text-sm font-medium bg-white border transition-all duration-200 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
-                    style={{ borderColor: `${TME_COLORS.primary}40`, color: TME_COLORS.primary }}
-                  >
-                    {name}
-                  </button>
-                ))}
+                {suggestions.map((name) => {
+                  const alreadyUsed = usedNames.has(name.trim().toLowerCase());
+                  const disabled = alreadyUsed || allFilled;
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => applySuggestion(name)}
+                      disabled={disabled}
+                      title={
+                        alreadyUsed
+                          ? 'You are already using this name.'
+                          : allFilled
+                            ? 'All three options are filled. Clear one to use a suggestion.'
+                            : undefined
+                      }
+                      className="px-3 py-1.5 rounded-full text-sm font-medium bg-white border transition-all duration-200 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
+                      style={{ borderColor: `${TME_COLORS.primary}40`, color: TME_COLORS.primary }}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
               </div>
               {allFilled && (
                 <p className="text-xs text-gray-500 mt-2">
-                  All three options are filled — clear one to use a suggestion.
+                  All three options are filled. Clear one to use a suggestion.
                 </p>
               )}
             </InfoNote>

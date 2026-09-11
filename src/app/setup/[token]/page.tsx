@@ -29,16 +29,20 @@ interface IntakePayload {
   expiresAt: string | null;
 }
 
+// `wide` is the form itself: it carries three-column rows (name parts, employer
+// details, document tiles) that were being squeezed into a 3xl column while the
+// screen stayed empty left and right. The narrow width stays for the one-message
+// screens (expired, cancelled, thank you), where a short line reads better.
 function Shell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="min-h-screen px-4 py-8" style={{ backgroundColor: TME_COLORS.background }}>
-      <div className={`mx-auto ${wide ? 'max-w-3xl' : 'max-w-2xl'}`}>
+      <div className={`mx-auto ${wide ? 'max-w-5xl' : 'max-w-2xl'}`}>
         <div className="mb-6">
           <div
             className="text-xs font-semibold tracking-wide uppercase mb-1"
             style={{ color: TME_COLORS.secondary }}
           >
-            TME Services — Company Setup
+            TME Services: Company Setup
           </div>
           <h1 className="text-2xl font-bold" style={{ color: TME_COLORS.primary }}>
             IFZA Company Setup
@@ -128,7 +132,7 @@ export default function CompanySetupIntakePage() {
             This link has expired
           </h2>
           <p className="text-gray-600 max-w-md">
-            Setup links stay open for a limited time. Anything you already filled in is saved —
+            Setup links stay open for a limited time. Anything you already filled in is saved,
             please ask your TME consultant to send you a fresh link and you can carry on where you
             left off.
           </p>
@@ -160,7 +164,7 @@ export default function CompanySetupIntakePage() {
         <CenterCard>
           <CheckCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.success }} />
           <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            Thank you — we have received your submission
+            Thank you, we have received your submission
           </h2>
           <p className="text-gray-600 max-w-md">
             Our team will review your details and documents, and your TME consultant will be in

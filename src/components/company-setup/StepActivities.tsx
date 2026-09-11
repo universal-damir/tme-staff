@@ -66,8 +66,7 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
           </ul>
         </InfoNote>
         <p className="text-sm text-gray-600">
-          Describe each activity in your own words, or pick the exact wording from the official
-          IFZA list:{' '}
+          Please copy the exact wording of each activity from the official IFZA list:{' '}
           <a
             href={IFZA_BUSINESS_ACTIVITIES_URL}
             target="_blank"
@@ -78,7 +77,7 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
             Browse IFZA activities
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
-          . The activity code is optional — copy it from the IFZA list when known.
+          . The activity code is optional. Copy it from the IFZA list when known.
         </p>
       </div>
 
@@ -149,7 +148,7 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
             {activities.length - COMPANY_SETUP_INCLUDED_ACTIVITIES === 1
               ? 'activity'
               : 'activities'}{' '}
-            beyond the included {COMPANY_SETUP_INCLUDED_ACTIVITIES} — AED{' '}
+            beyond the included {COMPANY_SETUP_INCLUDED_ACTIVITIES}: AED{' '}
             {((activities.length - COMPANY_SETUP_INCLUDED_ACTIVITIES) * 2000).toLocaleString(
               'en-US'
             )}{' '}
@@ -177,6 +176,7 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
       <div>
         <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
           Brief description of your intended business
+          <span className="text-red-500 ml-1">*</span>
         </label>
         <textarea
           value={company.businessDescription ?? ''}
@@ -188,6 +188,9 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
           onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
           onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
         />
+        <p className="text-xs text-gray-500 mt-1">
+          The authority asks what the company will actually do, so this cannot be left empty.
+        </p>
       </div>
     </div>
   );

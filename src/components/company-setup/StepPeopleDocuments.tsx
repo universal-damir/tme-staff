@@ -17,7 +17,7 @@
  * fields it auto-filled (never ones the client has since edited).
  */
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   TME_COLORS,
   NATIONALITIES,
@@ -52,6 +52,7 @@ import {
   type CompanySetupPersonDocuments,
 } from '@/types/company-setup';
 import { COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT } from '@/lib/company-setup-validation';
+import { ADDRESS_MISMATCH_WARNING } from '@/lib/proof-of-address-validation';
 import {
   additionalPageDataOf,
   applyAdditionalPageExtraction,
@@ -60,6 +61,8 @@ import {
   clearAppliedExtraction,
   emptyPerson,
   extractedDataOf,
+  statementAddressOf,
+  STATEMENT_ADDRESS_KEY,
   isoToDisplayDate,
   displayToIsoDate,
   roleTotals,
@@ -69,7 +72,6 @@ import {
   type PassportExtractionData,
 } from './draft';
 import {
-  AlertCircle,
   CheckCircle,
   ChevronDown,
   FileText,
@@ -101,14 +103,14 @@ const ADDITIONAL_PAGE_COPY: Record<
   { label: string; description: string }
 > = {
   syria: {
-    label: 'Passport — issue-details page',
+    label: 'Passport: issue-details page',
     description:
-      'Syrian passports carry the date and place of issue, the expiry date and the national number on a separate page next to the data page. Please scan that page.',
+      'The page next to the data page, with the date and place of issue and the national number.',
   },
   india: {
-    label: 'Passport — address / family-details page',
+    label: 'Passport: address / family-details page',
     description:
-      'Indian passports carry the address and the parents’ / spouse’s names on the last page. Please scan that page.',
+      'The last page, with the address and the parents’ / spouse’s names.',
   },
 };
 
@@ -135,9 +137,9 @@ function splitLanguages(value: string | undefined): string[] {
 }
 
 const EID_VISA_OPTIONS = [
-  { value: 'none', label: 'No — never had a UAE EID or visa' },
-  { value: 'current', label: 'Yes — currently holds a UAE EID / visa' },
-  { value: 'past', label: 'Yes — held a UAE EID / visa in the past' },
+  { value: 'none', label: 'No, never had a UAE EID or visa' },
+  { value: 'current', label: 'Yes, currently holds a UAE EID / visa' },
+  { value: 'past', label: 'Yes, held a UAE EID / visa in the past' },
 ];
 
 const YES_NO_OPTIONS = [
@@ -172,19 +174,19 @@ interface StepPeopleDocumentsProps {
    */
   onPatchPerson: (
     index: number,
-    compute: (person: CompanySetupPerson) => CompanySetupPerson
+    compute: (person: CompanySetupPerson) => CompanySetupPerson,
   ) => void;
   /** Called BEFORE a person is removed so document refs can be re-keyed. */
   onRemovePerson: (index: number) => void;
   onDocumentChange: (
     personIndex: number,
     slot: DocSlot,
-    ref: CompanySetupDocRef | undefined
+    ref: CompanySetupDocRef | undefined,
   ) => void;
   uploadFile: (
     personIndex: number,
     slot: DocSlot,
-    file: File
+    file: File,
   ) => Promise<{ path: string; filename: string } | null>;
   /** Flush the autosave right after an extraction prefill lands. */
   onExtractionApplied: () => void;
@@ -215,7 +217,7 @@ function ConstraintPill({ ok, label }: { ok: boolean; label: string }) {
 /** Per-person completion: required fields + required documents all present. */
 export function isPersonComplete(
   person: CompanySetupPerson,
-  docs: CompanySetupPersonDocuments
+  docs: CompanySetupPersonDocuments,
 ): boolean {
   // nationality + date of birth are server-required at submit; keeping them
   // out of this check made a person show "Complete" and then fail the submit.
@@ -295,7 +297,7 @@ export function StepPeopleDocuments({
   const previewFor = (
     personIndex: number,
     slot: DocSlot,
-    ref?: CompanySetupDocRef
+    ref?: CompanySetupDocRef,
   ): string | undefined => {
     const local = getState(personIndex, slot).preview;
     if (local) return local;
@@ -312,7 +314,7 @@ export function StepPeopleDocuments({
    *  field, so it is recomposed on every keystroke and never typed directly. */
   const updateName = (
     index: number,
-    patch: Pick<Partial<CompanySetupPerson>, 'firstName' | 'middleName' | 'lastName'>
+    patch: Pick<Partial<CompanySetupPerson>, 'firstName' | 'middleName' | 'lastName'>,
   ) => {
     const merged = { ...persons[index], ...patch };
     updatePerson(index, { ...patch, fullName: composeFullName(merged) });
@@ -364,7 +366,7 @@ export function StepPeopleDocuments({
   const runExtraction = async (
     personIndex: number,
     aiImage: string,
-    ref: { path: string; filename: string; uploadedAt: string }
+    ref: { path: string; filename: string; uploadedAt: string },
   ) => {
     patchState(personIndex, 'passport', { extracting: true });
     try {
@@ -389,7 +391,10 @@ export function StepPeopleDocuments({
         const outcome = applyPassportExtraction(person, result.data, NATIONALITIES);
         const applied: PassportExtractedFields = outcome.applied;
         onPatchPerson(personIndex, () => outcome.person);
-        const refWithData: CompanySetupDocRef = { ...current, extractedData: applied };
+        const refWithData: CompanySetupDocRef = {
+          ...current,
+          extractedData: applied,
+        };
         onDocumentChange(personIndex, 'passport', refWithData);
         onExtractionApplied();
       }
@@ -406,7 +411,7 @@ export function StepPeopleDocuments({
     personIndex: number,
     aiImage: string,
     ref: { path: string; filename: string; uploadedAt: string },
-    nationality: string | undefined
+    nationality: string | undefined,
   ) => {
     patchState(personIndex, 'passport_additional', { extracting: true });
     try {
@@ -450,7 +455,7 @@ export function StepPeopleDocuments({
     personIndex: number,
     slot: AiSlot,
     file: File,
-    person: CompanySetupPerson
+    person: CompanySetupPerson,
   ): Promise<boolean> => {
     patchState(personIndex, slot, { error: undefined, warnings: undefined });
 
@@ -468,13 +473,17 @@ export function StepPeopleDocuments({
     try {
       dataUrl = await readFileAsDataUrl(file);
     } catch {
-      patchState(personIndex, slot, { error: 'Could not read this file. Please try again.' });
+      patchState(personIndex, slot, {
+        error: 'Could not read this file. Please try again.',
+      });
       return false;
     }
 
     const uploaded = await uploadFile(personIndex, slot, file);
     if (!uploaded) {
-      patchState(personIndex, slot, { error: 'Upload failed. Please try again.' });
+      patchState(personIndex, slot, {
+        error: 'Upload failed. Please try again.',
+      });
       return false;
     }
     patchState(personIndex, slot, { preview: dataUrl, validating: true });
@@ -536,7 +545,7 @@ export function StepPeopleDocuments({
           filename: uploaded.filename,
           uploadedAt: new Date().toISOString(),
           needsReview: true,
-          validationErrors: ['Automatic check unavailable — flagged for manual review.'],
+          validationErrors: ['Automatic check unavailable. Flagged for manual review.'],
         });
         patchState(personIndex, slot, {
           validating: false,
@@ -557,6 +566,14 @@ export function StepPeopleDocuments({
         // The bank statement is ALWAYS a human decision (3-month rule, address
         // match): it stays needsReview whatever the model said, and any
         // warning travels with the ref so the portal review drawer shows it.
+        // The address the statement actually prints rides along on the ref:
+        // the form offers it as a one-click fix for the home address, and that
+        // offer has to survive a reload or a resumed draft.
+        const printedAddress =
+          slot === 'proof_of_address' &&
+          typeof result?.observations?.address_on_document === 'string'
+            ? result.observations.address_on_document.trim()
+            : '';
         const newRef: CompanySetupDocRef =
           slot === 'proof_of_address'
             ? {
@@ -565,6 +582,9 @@ export function StepPeopleDocuments({
                 uploadedAt: new Date().toISOString(),
                 needsReview: true,
                 ...(warnings.length > 0 ? { validationErrors: warnings } : {}),
+                ...(printedAddress
+                  ? { extractedData: { [STATEMENT_ADDRESS_KEY]: printedAddress } }
+                  : {}),
               }
             : {
                 path: uploaded.path,
@@ -645,7 +665,7 @@ export function StepPeopleDocuments({
         filename: uploaded.filename,
         uploadedAt: new Date().toISOString(),
         needsReview: true,
-        validationErrors: ['Automatic check unavailable — flagged for manual review.'],
+        validationErrors: ['Automatic check unavailable. Flagged for manual review.'],
       });
       patchState(personIndex, slot, { validating: false, error: undefined });
       return true;
@@ -678,7 +698,7 @@ export function StepPeopleDocuments({
     }
     if (slot === 'passport_additional') {
       const applied = additionalPageDataOf(
-        documentsRef.current[String(personIndex)]?.passport_additional
+        documentsRef.current[String(personIndex)]?.passport_additional,
       );
       if (applied) {
         onPatchPerson(personIndex, (p) => clearAppliedAdditionalPage(p, applied));
@@ -701,7 +721,7 @@ export function StepPeopleDocuments({
   const handlePlainUpload = async (
     personIndex: number,
     slot: PlainSlot,
-    file: File
+    file: File,
   ): Promise<{ path: string; filename: string } | null> => {
     const uploaded = await uploadFile(personIndex, slot, file);
     if (!uploaded) return null;
@@ -718,7 +738,7 @@ export function StepPeopleDocuments({
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600">
-        Add every person involved in the company — shareholders, General Manager, Director and
+        Add every person involved in the company: shareholders, General Manager, Director and
         Secretary (up to {COMPANY_SETUP_MAX_SHAREHOLDERS} persons; one person can hold several
         roles). Start with the passport: we read the personal details from it for you.
       </p>
@@ -825,70 +845,110 @@ export function StepPeopleDocuments({
                 {/* 1 — Passport first: the scan fills the fields below. */}
                 <div>
                   <p className="text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
-                    Passport — data page (we read your details from it)
+                    Passport: data page (we read your details from it)
                   </p>
                   <p className="text-xs text-gray-500 mb-3">
-                    This is the printed page inside the passport with the photo and the two
-                    machine-readable lines. The portrait photo for the application is a separate
-                    upload further down.
+                    The printed page with the photo and the two machine-readable lines.
                   </p>
-                  <div className="max-w-md">
-                    <UploadSlot
-                      label="Passport — data page"
-                      description="Open the passport flat at the data page and scan the whole spread — the data page AND the page facing it."
-                      expectedType="INSIDE_PAGES"
-                      file={null}
-                      onUpload={(file) => handleAiUpload(index, 'passport', file, person)}
-                      onRemove={() => removeAiDoc(index, 'passport')}
-                      removable={!isStaffDoc('passport')}
-                      providedByStaff={isStaffDoc('passport')}
-                      validated={!!docs.passport?.path && !docs.passport.needsReview}
-                      validating={!!passportState.validating}
-                      error={passportState.error}
-                      preview={previewFor(index, 'passport', docs.passport)}
-                      needsReview={docs.passport?.needsReview === true}
-                    />
-                  </div>
-                  {!docs.passport?.path &&
-                    shouldOfferManualReview(passportState.strikes) &&
-                    pendingUploads.current[stateKey(index, 'passport')] && (
-                      <ManualReviewOffer onAccept={() => submitForManualReview(index, 'passport')} />
-                    )}
-
-                  {/* Indian and Syrian passports carry a second required page. */}
-                  {additionalVariant && (
-                    <div className="mt-4">
-                      <div className="max-w-md">
-                        <UploadSlot
-                          label={ADDITIONAL_PAGE_COPY[additionalVariant].label}
-                          description={ADDITIONAL_PAGE_COPY[additionalVariant].description}
-                          expectedType="ADDITIONAL_PAGE"
-                          file={null}
-                          onUpload={(file) =>
-                            handleAiUpload(index, 'passport_additional', file, person)
-                          }
-                          onRemove={() => removeAiDoc(index, 'passport_additional')}
-                          removable={!isStaffDoc('passport_additional')}
-                          providedByStaff={isStaffDoc('passport_additional')}
-                          validated={
-                            !!docs.passport_additional?.path &&
-                            !docs.passport_additional.needsReview
-                          }
-                          validating={!!additionalState.validating}
-                          error={additionalState.error}
-                          preview={previewFor(index, 'passport_additional', docs.passport_additional)}
-                          needsReview={docs.passport_additional?.needsReview === true}
-                        />
-                      </div>
-                      {!docs.passport_additional?.path &&
-                        shouldOfferManualReview(additionalState.strikes) &&
-                        pendingUploads.current[stateKey(index, 'passport_additional')] && (
+                  <div className="space-y-4">
+                    <div>
+                      <UploadSlot
+                        label="Passport: data page"
+                        description="Scan the whole spread: the data page and the page facing it."
+                        expectedType="INSIDE_PAGES"
+                        file={null}
+                        onUpload={(file) => handleAiUpload(index, 'passport', file, person)}
+                        onRemove={() => removeAiDoc(index, 'passport')}
+                        removable={!isStaffDoc('passport')}
+                        providedByStaff={isStaffDoc('passport')}
+                        staffDocReplaceable
+                        messagesBeside
+                        validated={!!docs.passport?.path && !docs.passport.needsReview}
+                        validating={!!passportState.validating}
+                        error={passportState.error}
+                        preview={previewFor(index, 'passport', docs.passport)}
+                        needsReview={docs.passport?.needsReview === true}
+                      />
+                      {!docs.passport?.path &&
+                        shouldOfferManualReview(passportState.strikes) &&
+                        pendingUploads.current[stateKey(index, 'passport')] && (
                           <ManualReviewOffer
-                            onAccept={() => submitForManualReview(index, 'passport_additional')}
+                            onAccept={() => submitForManualReview(index, 'passport')}
                           />
                         )}
                     </div>
-                  )}
+
+                    {/* Indian and Syrian passports carry a second required page. */}
+                    {additionalVariant && (
+                      <div>
+                        <div>
+                          <UploadSlot
+                            label={ADDITIONAL_PAGE_COPY[additionalVariant].label}
+                            description={ADDITIONAL_PAGE_COPY[additionalVariant].description}
+                            expectedType="ADDITIONAL_PAGE"
+                            file={null}
+                            onUpload={(file) =>
+                              handleAiUpload(index, 'passport_additional', file, person)
+                            }
+                            onRemove={() => removeAiDoc(index, 'passport_additional')}
+                            removable={!isStaffDoc('passport_additional')}
+                            providedByStaff={isStaffDoc('passport_additional')}
+                            staffDocReplaceable
+                            messagesBeside
+                            validated={
+                              !!docs.passport_additional?.path &&
+                              !docs.passport_additional.needsReview
+                            }
+                            validating={!!additionalState.validating}
+                            error={additionalState.error}
+                            preview={previewFor(
+                              index,
+                              'passport_additional',
+                              docs.passport_additional,
+                            )}
+                            needsReview={docs.passport_additional?.needsReview === true}
+                          />
+                        </div>
+                        {!docs.passport_additional?.path &&
+                          shouldOfferManualReview(additionalState.strikes) &&
+                          pendingUploads.current[stateKey(index, 'passport_additional')] && (
+                            <ManualReviewOffer
+                              onAccept={() => submitForManualReview(index, 'passport_additional')}
+                            />
+                          )}
+                      </div>
+                    )}
+
+                    {/* The headshot belongs with the passport: both are this
+                        person's identity, and the client has the passport open
+                        anyway. It used to sit at the bottom next to the bank
+                        statement, which has nothing to do with it. */}
+                    <div>
+                      <UploadSlot
+                        label="Portrait photo (headshot)"
+                        description="Headshot, plain light background, no glasses."
+                        file={null}
+                        onUpload={(file) => handleAiUpload(index, 'photo', file, person)}
+                        onRemove={() => removeAiDoc(index, 'photo')}
+                        removable={!isStaffDoc('photo')}
+                        providedByStaff={isStaffDoc('photo')}
+                        staffDocReplaceable
+                        messagesBeside
+                        validated={!!docs.photo?.path && !docs.photo.needsReview}
+                        validating={!!photoState.validating}
+                        error={photoState.error}
+                        preview={previewFor(index, 'photo', docs.photo)}
+                        needsReview={docs.photo?.needsReview === true}
+                      />
+                      {!docs.photo?.path &&
+                        shouldOfferManualReview(photoState.strikes) &&
+                        pendingUploads.current[stateKey(index, 'photo')] && (
+                          <ManualReviewOffer
+                            onAccept={() => submitForManualReview(index, 'photo')}
+                          />
+                        )}
+                    </div>
+                  </div>
 
                   {(passportState.extracting || additionalState.extracting) && (
                     <div className="mt-3 rounded-xl border-2 border-blue-100 bg-blue-50/50 p-4">
@@ -922,8 +982,8 @@ export function StepPeopleDocuments({
                         style={{ color: TME_COLORS.primary }}
                       />
                       <p className="text-sm text-gray-700">
-                        These details were auto-filled from your passport — please review and
-                        correct if needed.
+                        These details were auto-filled from your passport. Please review and correct
+                        if needed.
                       </p>
                     </div>
                   )}
@@ -960,7 +1020,10 @@ export function StepPeopleDocuments({
                         required
                         value={person.nationality ?? ''}
                         onChange={(val) => updatePerson(index, { nationality: val })}
-                        options={SORTED_NATIONALITIES.map((n) => ({ value: n, label: n }))}
+                        options={SORTED_NATIONALITIES.map((n) => ({
+                          value: n,
+                          label: n,
+                        }))}
                         placeholder="Select…"
                         searchable
                       />
@@ -968,7 +1031,10 @@ export function StepPeopleDocuments({
                         label="Second nationality (if any)"
                         value={person.otherNationality ?? ''}
                         onChange={(val) => updatePerson(index, { otherNationality: val })}
-                        options={SORTED_NATIONALITIES.map((n) => ({ value: n, label: n }))}
+                        options={SORTED_NATIONALITIES.map((n) => ({
+                          value: n,
+                          label: n,
+                        }))}
                         placeholder="None"
                         searchable
                       />
@@ -976,7 +1042,11 @@ export function StepPeopleDocuments({
                         label="Date of birth"
                         required
                         value={isoToDisplayDate(person.dateOfBirth)}
-                        onChange={(val) => updatePerson(index, { dateOfBirth: displayToIsoDate(val) })}
+                        onChange={(val) =>
+                          updatePerson(index, {
+                            dateOfBirth: displayToIsoDate(val),
+                          })
+                        }
                       />
                       <CustomDropdown
                         label="Gender"
@@ -999,7 +1069,11 @@ export function StepPeopleDocuments({
                       <Input
                         label="Passport number"
                         value={person.passportNumber ?? ''}
-                        onChange={(e) => updatePerson(index, { passportNumber: e.target.value })}
+                        onChange={(e) =>
+                          updatePerson(index, {
+                            passportNumber: e.target.value,
+                          })
+                        }
                         placeholder="e.g. C01X00T47"
                         maxLength={20}
                       />
@@ -1007,14 +1081,18 @@ export function StepPeopleDocuments({
                         label="Passport issue date"
                         value={isoToDisplayDate(person.passportIssueDate)}
                         onChange={(val) =>
-                          updatePerson(index, { passportIssueDate: displayToIsoDate(val) })
+                          updatePerson(index, {
+                            passportIssueDate: displayToIsoDate(val),
+                          })
                         }
                       />
                       <CustomDatePicker
                         label="Passport expiry date"
                         value={isoToDisplayDate(person.passportExpiryDate)}
                         onChange={(val) =>
-                          updatePerson(index, { passportExpiryDate: displayToIsoDate(val) })
+                          updatePerson(index, {
+                            passportExpiryDate: displayToIsoDate(val),
+                          })
                         }
                       />
                     </div>
@@ -1027,7 +1105,8 @@ export function StepPeopleDocuments({
                     className="block text-sm font-medium mb-2"
                     style={{ color: TME_COLORS.primary }}
                   >
-                    Roles in the company<span className="text-red-500 ml-1">*</span>
+                    Roles in the company
+                    <span className="text-red-500 ml-1">*</span>
                   </label>
                   <div className="flex flex-wrap gap-2">
                     {ROLE_DEFS.map((role) => {
@@ -1042,8 +1121,14 @@ export function StepPeopleDocuments({
                           }`}
                           style={
                             active
-                              ? { backgroundColor: TME_COLORS.primary, borderColor: TME_COLORS.primary }
-                              : { color: TME_COLORS.primary, borderColor: `${TME_COLORS.primary}40` }
+                              ? {
+                                  backgroundColor: TME_COLORS.primary,
+                                  borderColor: TME_COLORS.primary,
+                                }
+                              : {
+                                  color: TME_COLORS.primary,
+                                  borderColor: `${TME_COLORS.primary}40`,
+                                }
                           }
                         >
                           {role.label}
@@ -1084,7 +1169,10 @@ export function StepPeopleDocuments({
                     label="Educational qualification"
                     value={person.educationalQualification ?? ''}
                     onChange={(val) => updatePerson(index, { educationalQualification: val })}
-                    options={EDUCATIONAL_QUALIFICATIONS.map((q) => ({ value: q, label: q }))}
+                    options={EDUCATIONAL_QUALIFICATIONS.map((q) => ({
+                      value: q,
+                      label: q,
+                    }))}
                     placeholder="Select…"
                   />
                   {/* Same picker TME uses internally. The contract carries one
@@ -1094,10 +1182,11 @@ export function StepPeopleDocuments({
                   <MultiSelectDropdown
                     label="Languages spoken"
                     value={splitLanguages(person.languagesSpoken)}
-                    onChange={(val) =>
-                      updatePerson(index, { languagesSpoken: val.join(', ') })
-                    }
-                    options={SORTED_LANGUAGES.map((l) => ({ value: l, label: l }))}
+                    onChange={(val) => updatePerson(index, { languagesSpoken: val.join(', ') })}
+                    options={SORTED_LANGUAGES.map((l) => ({
+                      value: l,
+                      label: l,
+                    }))}
                     placeholder="Select languages"
                     searchable
                     allowCustom
@@ -1107,7 +1196,10 @@ export function StepPeopleDocuments({
                     required
                     value={person.religion ?? ''}
                     onChange={(val) => updatePerson(index, { religion: val })}
-                    options={SORTED_RELIGIONS.map((r) => ({ value: r, label: r }))}
+                    options={SORTED_RELIGIONS.map((r) => ({
+                      value: r,
+                      label: r,
+                    }))}
                     placeholder="Select…"
                   />
                   <CustomDropdown
@@ -1122,7 +1214,10 @@ export function StepPeopleDocuments({
                         ...(val === 'Married' ? {} : { spouseFullName: undefined }),
                       })
                     }
-                    options={MARITAL_STATUS_OPTIONS.map((m) => ({ value: m, label: m }))}
+                    options={MARITAL_STATUS_OPTIONS.map((m) => ({
+                      value: m,
+                      label: m,
+                    }))}
                     placeholder="Select…"
                   />
                   {person.maritalStatus === 'Married' && (
@@ -1160,28 +1255,6 @@ export function StepPeopleDocuments({
                   />
                 </div>
 
-                <div>
-                  <label
-                    className="block text-sm font-medium mb-1"
-                    style={{ color: TME_COLORS.primary }}
-                  >
-                    Full home address
-                  </label>
-                  <textarea
-                    value={person.fullAddress ?? ''}
-                    onChange={(e) => updatePerson(index, { fullAddress: e.target.value })}
-                    rows={2}
-                    maxLength={400}
-                    placeholder="Street, number, postcode, city, country"
-                    className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
-                    onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
-                  />
-                  <p className="text-xs text-amber-700 mt-1">
-                    The address must match the address on the bank statement you upload as proof of
-                    address.
-                  </p>
-                </div>
 
                 {/* 5 — UAE history, employer, other entities */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1191,10 +1264,14 @@ export function StepPeopleDocuments({
                       person.visitedOrResidedUAE === undefined
                         ? ''
                         : person.visitedOrResidedUAE
-                        ? 'yes'
-                        : 'no'
+                          ? 'yes'
+                          : 'no'
                     }
-                    onChange={(val) => updatePerson(index, { visitedOrResidedUAE: val === 'yes' })}
+                    onChange={(val) =>
+                      updatePerson(index, {
+                        visitedOrResidedUAE: val === 'yes',
+                      })
+                    }
                     options={YES_NO_OPTIONS}
                     placeholder="Select…"
                   />
@@ -1216,37 +1293,56 @@ export function StepPeopleDocuments({
                   <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>
                     Previous / current employer (if any)
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <Input
-                      label="Employer name"
-                      value={person.previousEmployer?.name ?? ''}
-                      onChange={(e) =>
-                        updatePerson(index, {
-                          previousEmployer: { ...person.previousEmployer, name: e.target.value },
-                        })
-                      }
-                      maxLength={200}
-                    />
-                    <Input
-                      label="Employer address"
-                      value={person.previousEmployer?.address ?? ''}
-                      onChange={(e) =>
-                        updatePerson(index, {
-                          previousEmployer: { ...person.previousEmployer, address: e.target.value },
-                        })
-                      }
-                      maxLength={300}
-                    />
-                    <Input
-                      label="Position"
-                      value={person.previousEmployer?.position ?? ''}
-                      onChange={(e) =>
-                        updatePerson(index, {
-                          previousEmployer: { ...person.previousEmployer, position: e.target.value },
-                        })
-                      }
-                      maxLength={120}
-                    />
+                  {/* A company name or an address is often longer than one
+                      line: a single-line input just scrolls the text out of
+                      sight, so these grow downwards instead. The position is
+                      short and stays a plain input. */}
+                  <div className="grid grid-cols-1 sm:grid-cols-7 gap-4">
+                    <div className="sm:col-span-3">
+                      <GrowingField
+                        label="Employer name"
+                        value={person.previousEmployer?.name ?? ''}
+                        onChange={(value) =>
+                          updatePerson(index, {
+                            previousEmployer: {
+                              ...person.previousEmployer,
+                              name: value,
+                            },
+                          })
+                        }
+                        maxLength={200}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <GrowingField
+                        label="Employer address"
+                        value={person.previousEmployer?.address ?? ''}
+                        onChange={(value) =>
+                          updatePerson(index, {
+                            previousEmployer: {
+                              ...person.previousEmployer,
+                              address: value,
+                            },
+                          })
+                        }
+                        maxLength={300}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Input
+                        label="Position"
+                        value={person.previousEmployer?.position ?? ''}
+                        onChange={(e) =>
+                          updatePerson(index, {
+                            previousEmployer: {
+                              ...person.previousEmployer,
+                              position: e.target.value,
+                            },
+                          })
+                        }
+                        maxLength={120}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1257,8 +1353,8 @@ export function StepPeopleDocuments({
                       person.otherEntityShareholder === undefined
                         ? ''
                         : person.otherEntityShareholder
-                        ? 'yes'
-                        : 'no'
+                          ? 'yes'
+                          : 'no'
                     }
                     onChange={(val) =>
                       updatePerson(index, {
@@ -1290,9 +1386,7 @@ export function StepPeopleDocuments({
                         const n = Number(digits);
                         updatePerson(index, {
                           otherEntityCount:
-                            n < 1
-                              ? undefined
-                              : Math.min(n, COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT),
+                            n < 1 ? undefined : Math.min(n, COMPANY_SETUP_MAX_OTHER_ENTITY_COUNT),
                         });
                       }}
                     />
@@ -1305,37 +1399,105 @@ export function StepPeopleDocuments({
                     Documents
                   </p>
                   <p className="text-xs text-gray-500 mb-3">
-                    Scans must be flat, complete and readable — flatbed scanner quality, not phone
-                    snapshots.
+                    Flatbed scanner quality, not phone photos.
                   </p>
 
-                  <div className="max-w-md mb-4">
+                  {/* Proof of address, and the home address it proves, in one
+                      place: the statement on the left, what the check found on
+                      the right, and the address field underneath so the client
+                      can copy the printed address straight across. */}
+                  <div className="mb-4">
                     <UploadSlot
-                      label="Portrait photo (headshot)"
-                      description="A recent digital headshot — plain light background, no glasses. This is the photo for the application, not a passport page."
+                      label="Proof of address: BANK STATEMENT ONLY"
+                      description="Bank statement in your name, not older than 3 months. Current, savings or credit card."
                       file={null}
-                      onUpload={(file) => handleAiUpload(index, 'photo', file, person)}
-                      onRemove={() => removeAiDoc(index, 'photo')}
-                      removable={!isStaffDoc('photo')}
-                      providedByStaff={isStaffDoc('photo')}
-                      validated={!!docs.photo?.path && !docs.photo.needsReview}
-                      validating={!!photoState.validating}
-                      error={photoState.error}
-                      preview={previewFor(index, 'photo', docs.photo)}
-                      needsReview={docs.photo?.needsReview === true}
+                      onUpload={(file) => handleAiUpload(index, 'proof_of_address', file, person)}
+                      onRemove={() => removeAiDoc(index, 'proof_of_address')}
+                      removable={!isStaffDoc('proof_of_address')}
+                      providedByStaff={isStaffDoc('proof_of_address')}
+                      staffDocReplaceable
+                      messagesBeside
+                      validated={false}
+                      validating={!!proofState.validating}
+                      error={proofState.error}
+                      preview={previewFor(index, 'proof_of_address', docs.proof_of_address)}
+                      needsReview={docs.proof_of_address?.needsReview === true}
+                      // On a resumed draft the UI state is gone; the warnings
+                      // that travelled with the ref are still there.
+                      warnings={proofState.warnings ?? docs.proof_of_address?.validationErrors}
+                      footer={
+                        <>
+                          {(proofState.warnings ?? docs.proof_of_address?.validationErrors ?? [])
+                            .length > 0 && (
+                            <p className="mt-2 text-xs text-gray-500">
+                              Your file is saved. You can carry on, or replace it.
+                            </p>
+                          )}
+                          {/* The address on the statement does not match the one
+                              typed: without a way out the client edits the field,
+                              re-uploads and gets the same warning again. Offer the
+                              printed address as a one-click fix, right beside the
+                              statement it came from. */}
+                          <StatementAddressFix
+                            statementAddress={statementAddressOf(docs.proof_of_address)}
+                            typedAddress={person.fullAddress}
+                            onUse={(address) => {
+                              updatePerson(index, { fullAddress: address });
+                              const kept = (
+                                proofState.warnings ??
+                                docs.proof_of_address?.validationErrors ??
+                                []
+                              ).filter((w) => w !== ADDRESS_MISMATCH_WARNING);
+                              patchState(index, 'proof_of_address', {
+                                warnings: kept.length > 0 ? kept : undefined,
+                              });
+                              const ref = docs.proof_of_address;
+                              if (ref) {
+                                onDocumentChange(index, 'proof_of_address', {
+                                  ...ref,
+                                  validationErrors: kept.length > 0 ? kept : undefined,
+                                });
+                              }
+                            }}
+                          />
+                          {!docs.proof_of_address?.path &&
+                            shouldOfferManualReview(proofState.strikes) &&
+                            pendingUploads.current[stateKey(index, 'proof_of_address')] && (
+                              <ManualReviewOffer
+                                onAccept={() => submitForManualReview(index, 'proof_of_address')}
+                              />
+                            )}
+                        </>
+                      }
                     />
-                    {!docs.photo?.path &&
-                      shouldOfferManualReview(photoState.strikes) &&
-                      pendingUploads.current[stateKey(index, 'photo')] && (
-                        <ManualReviewOffer onAccept={() => submitForManualReview(index, 'photo')} />
-                      )}
+                  <div>
+                    <label
+                      className="block text-sm font-medium mb-1"
+                      style={{ color: TME_COLORS.primary }}
+                    >
+                      Full home address
+                    </label>
+                    <textarea
+                      value={person.fullAddress ?? ''}
+                      onChange={(e) => updatePerson(index, { fullAddress: e.target.value })}
+                      rows={2}
+                      maxLength={400}
+                      placeholder="Street, number, postcode, city, country"
+                      className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
+                      onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+                    />
+                    <p className="text-xs text-amber-700 mt-1">
+                      Must match the address on the statement above.
+                    </p>
+                  </div>
                   </div>
 
                   <div className="space-y-3">
                     {person.currentOrPastEidVisa === 'current' && (
                       <>
                         <PlainDocSlot
-                          label="Emirates ID — front"
+                          label="Emirates ID: front"
                           description="Current Emirates ID, front side"
                           staffProvided={isStaffDoc('eid_front')}
                           onUpload={(file) => handlePlainUpload(index, 'eid_front', file)}
@@ -1343,7 +1505,7 @@ export function StepPeopleDocuments({
                           docRef={docs.eid_front}
                         />
                         <PlainDocSlot
-                          label="Emirates ID — back"
+                          label="Emirates ID: back"
                           description="Current Emirates ID, back side"
                           staffProvided={isStaffDoc('eid_back')}
                           onUpload={(file) => handlePlainUpload(index, 'eid_back', file)}
@@ -1365,60 +1527,15 @@ export function StepPeopleDocuments({
                         label="Previous UAE visa"
                         description="Copy of the previous UAE residence visa"
                         staffProvided={isStaffDoc('previous_visa_document')}
-                        onUpload={(file) => handlePlainUpload(index, 'previous_visa_document', file)}
-                        onRemove={() => onDocumentChange(index, 'previous_visa_document', undefined)}
+                        onUpload={(file) =>
+                          handlePlainUpload(index, 'previous_visa_document', file)
+                        }
+                        onRemove={() =>
+                          onDocumentChange(index, 'previous_visa_document', undefined)
+                        }
                         docRef={docs.previous_visa_document}
                       />
                     )}
-                  </div>
-
-                  {/* Proof of address gets the same AI treatment as the other
-                      documents: is it really a bank statement, is it recent
-                      enough, does it show this person's name and address. The
-                      verdict never blocks beyond "not a bank statement" — the
-                      ref always stays needsReview for a human. */}
-                  <div className="max-w-md mt-4">
-                    <UploadSlot
-                      label="Proof of address — BANK STATEMENT ONLY"
-                      description="A bank statement not older than 3 months, showing your name and home address. A current, savings or credit card statement is fine."
-                      file={null}
-                      onUpload={(file) => handleAiUpload(index, 'proof_of_address', file, person)}
-                      onRemove={() => removeAiDoc(index, 'proof_of_address')}
-                      removable={!isStaffDoc('proof_of_address')}
-                      providedByStaff={isStaffDoc('proof_of_address')}
-                      validated={false}
-                      validating={!!proofState.validating}
-                      error={proofState.error}
-                      preview={previewFor(index, 'proof_of_address', docs.proof_of_address)}
-                      needsReview={docs.proof_of_address?.needsReview === true}
-                      // On a resumed draft the UI state is gone; the warnings
-                      // that travelled with the ref are still there.
-                      warnings={proofState.warnings ?? docs.proof_of_address?.validationErrors}
-                      footer={
-                        (proofState.warnings ?? docs.proof_of_address?.validationErrors ?? [])
-                          .length > 0 ? (
-                          <p className="mt-2 text-xs text-gray-500">
-                            Your file has been kept — you can continue anyway and TME will check it,
-                            or replace it with a more recent statement.
-                          </p>
-                        ) : undefined
-                      }
-                    />
-                    {!docs.proof_of_address?.path &&
-                      shouldOfferManualReview(proofState.strikes) &&
-                      pendingUploads.current[stateKey(index, 'proof_of_address')] && (
-                        <ManualReviewOffer
-                          onAccept={() => submitForManualReview(index, 'proof_of_address')}
-                        />
-                      )}
-                    <p className="text-xs text-amber-700 flex items-start gap-1 mt-2">
-                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                      Only a bank statement is accepted as proof of address (not older than 3
-                      months). It can be a current, savings or credit card statement, but not a
-                      utility bill, tenancy contract or bank reference letter. The address must
-                      match the home address entered above. TME will review this document
-                      manually.
-                    </p>
                   </div>
                 </div>
               </div>
@@ -1463,20 +1580,33 @@ function PlainDocSlot({
   onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
   onRemove: () => void;
 }) {
+  // The form asks the client to confirm our file is correct, so it also has to
+  // let them say it is not: clearing the ref drops the card back to the normal
+  // upload slot, and whatever they upload becomes their own file.
   if (staffProvided && docRef?.path) {
     return (
       <div
         className="border-2 rounded-lg p-4 flex items-center gap-3"
-        style={{ borderColor: `${TME_COLORS.primary}30`, backgroundColor: 'rgba(36,63,123,0.04)' }}
+        style={{
+          borderColor: `${TME_COLORS.primary}30`,
+          backgroundColor: 'rgba(36,63,123,0.04)',
+        }}
       >
         <CheckCircle className="w-5 h-5 flex-shrink-0" style={{ color: TME_COLORS.primary }} />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-gray-700">{label}</p>
           <p className="text-xs truncate" style={{ color: TME_COLORS.primary }}>
-            Provided by TME — please confirm
+            Provided by TME. Please confirm it is correct
             {docRef.filename ? ` · ${docRef.filename}` : ''}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors"
+        >
+          Not correct? Replace it
+        </button>
       </div>
     );
   }
@@ -1492,12 +1622,109 @@ function PlainDocSlot({
   );
 }
 
+/**
+ * The bank statement is the proof of address, so the address on it IS the
+ * answer. When we managed to read it and it is not what the client typed, the
+ * form shows it and offers to copy it into the home address field: without
+ * that, a mismatch is a dead end where they edit, re-upload and get the same
+ * warning again.
+ */
+function StatementAddressFix({
+  statementAddress,
+  typedAddress,
+  onUse,
+}: {
+  statementAddress: string | undefined;
+  typedAddress: string | undefined;
+  onUse: (address: string) => void;
+}) {
+  const address = statementAddress?.trim();
+  const typed = (typedAddress ?? '').trim();
+  if (!address) return null;
+  if (address.toLowerCase() === typed.toLowerCase()) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <p className="text-xs text-amber-800 mb-1">
+        {typed
+          ? 'This is the address printed on the statement you uploaded:'
+          : 'We read this address from the statement you uploaded:'}
+      </p>
+      <p className="text-xs font-semibold text-amber-900 mb-2 break-words">{address}</p>
+      <button
+        type="button"
+        onClick={() => onUse(address)}
+        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors"
+      >
+        Use this as the home address
+      </button>
+      <p className="text-[11px] text-amber-700 mt-2">
+        {typed
+          ? 'This replaces the home address entered above, so both say the same thing.'
+          : 'This fills in the home address above.'}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * A single-line-looking field that grows downwards as the text gets longer, so
+ * a long employer name or address stays readable instead of scrolling out of
+ * the box. Matches the shared Input chrome (42px start height, same border and
+ * focus colour) so the row lines up with the plain inputs beside it.
+ */
+function GrowingField({
+  label,
+  value,
+  onChange,
+  maxLength,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  maxLength?: number;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const resize = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.max(el.scrollHeight, 42)}px`;
+  };
+
+  // Re-measure when the value arrives from outside (prefill, resumed draft).
+  useEffect(() => {
+    resize(ref.current);
+  }, [value]);
+
+  return (
+    <div className="w-full">
+      <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
+        {label}
+      </label>
+      <textarea
+        ref={ref}
+        rows={1}
+        value={value}
+        maxLength={maxLength}
+        onChange={(e) => {
+          onChange(e.target.value);
+          resize(e.target);
+        }}
+        className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-colors duration-200 resize-none overflow-hidden text-sm leading-6"
+        style={{ fontFamily: 'Inter, sans-serif', minHeight: 42 }}
+        onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
+        onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+      />
+    </div>
+  );
+}
+
 function ManualReviewOffer({ onAccept }: { onAccept: () => void }) {
   return (
     <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
       <p className="text-xs text-amber-800 mb-2 flex items-start gap-1">
         <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-        Having trouble with the automatic check? You can submit this file anyway — TME will verify
+        Having trouble with the automatic check? You can submit this file anyway and TME will verify
         it manually.
       </p>
       <button

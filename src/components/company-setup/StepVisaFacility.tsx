@@ -97,7 +97,7 @@ export function StepVisaFacility({
                       style={{ accentColor: TME_COLORS.primary }}
                     />
                     <span className="text-sm text-gray-700">
-                      VIP (express) visa stamping — AED 1,500 extra per visa
+                      VIP (express) visa stamping: AED 1,500 extra per visa
                     </span>
                   </label>
                 </div>
@@ -166,7 +166,7 @@ export function StepVisaFacility({
         </div>
         {company.facilityType === 'virtual_office' && (
           <p className="text-xs text-gray-500">
-            A Virtual Office is included in the standard IFZA package — no physical space needed.
+            A Virtual Office is included in the standard IFZA package, no physical space needed.
           </p>
         )}
       </div>

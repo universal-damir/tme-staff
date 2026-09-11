@@ -46,7 +46,7 @@ export function FileUploadSlot({
     if (!validTypes.includes(file.type)) {
       setError(
         isMobile
-          ? 'On mobile, please upload a scanned PDF. Camera photos are not accepted — use a scanner app, or upload a PDF/JPEG/PNG from a computer.'
+          ? 'On mobile, please upload a scanned PDF. Camera photos are not accepted. Use a scanner app, or upload a PDF/JPEG/PNG from a computer.'
           : 'Please upload a PDF, JPEG (.jpg / .jpeg), or PNG.'
       );
       return;
@@ -132,7 +132,7 @@ export function FileUploadSlot({
       {!uploaded && !error && (
         <p className="text-xs text-amber-700 mt-2">
           {isMobile
-            ? 'Only PDF scans of official documents are accepted on this device. Camera photos are not — please use a scanner app, or upload from a computer.'
+            ? 'Only PDF scans of official documents are accepted on this device. Camera photos are not. Please use a scanner app, or upload from a computer.'
             : 'Only scans of official documents are accepted (PDF, JPEG, or PNG).'}
         </p>
       )}

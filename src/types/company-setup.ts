@@ -176,6 +176,9 @@ export interface CompanySetupRemark {
   text: string;
   userId: number;
   userName: string;
+  /** Employee code of the author ("071"), so a note reads "071 - text".
+   *  Optional: notes written before this field existed have none. */
+  userCode?: string;
   at: string; // ISO
 }
 
@@ -229,5 +232,5 @@ export const COMPANY_SETUP_MAX_SHAREHOLDERS = 6;
 export const COMPANY_SETUP_MAX_ACTIVITIES = 10;
 export const COMPANY_SETUP_INCLUDED_ACTIVITIES = 3;
 export const COMPANY_SETUP_NAME_OPTIONS_REQUIRED = 3;
-export const COMPANY_SETUP_LINK_EXPIRES_HOURS = 336; // 14 days, matches staff onboarding
+export const COMPANY_SETUP_LINK_EXPIRES_HOURS = 720; // 30 days
 export const IFZA_BUSINESS_ACTIVITIES_URL = 'https://activities.ifza.com/';

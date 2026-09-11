@@ -68,6 +68,9 @@ export function validateCompanyData(
       `Please provide exactly ${COMPANY_SETUP_NAME_OPTIONS_REQUIRED} company name options.`
     );
   }
+  // The authority reads the options as first / second / third choice, so the
+  // same name twice throws a choice away. They must be three DIFFERENT names.
+  const seenNameAt = new Map<string, number>();
   nameOptions.forEach((option, index) => {
     const result = validateCompanyName(option?.name ?? '');
     for (const error of result.errors) {
@@ -75,6 +78,17 @@ export function validateCompanyData(
     }
     for (const warning of result.warnings) {
       warnings.push(`Name option ${index + 1}: ${warning}`);
+    }
+    const key = (option?.name ?? '').trim().toLowerCase();
+    if (!key) return;
+    const first = seenNameAt.get(key);
+    if (first === undefined) {
+      seenNameAt.set(key, index);
+    } else {
+      errors.push(
+        `Name option ${index + 1}: this is the same name as option ${first + 1}. ` +
+          `Please give ${COMPANY_SETUP_NAME_OPTIONS_REQUIRED} different names.`
+      );
     }
   });
 
@@ -95,6 +109,12 @@ export function validateCompanyData(
   // License type is mandatory.
   if (!company.licenseType) {
     errors.push('Please choose a license type.');
+  }
+
+  // The business description is mandatory: the authority asks what the company
+  // will actually do, and it is what the name suggester is grounded in.
+  if (!company.businessDescription || !company.businessDescription.trim()) {
+    errors.push('Please add a brief description of your intended business.');
   }
 
   // Share capital numbers must be positive when provided.

@@ -17,6 +17,7 @@ import {
   buildDraft,
   rekeyDocumentsAfterRemove,
   roleTotals,
+  missingForPeopleStep,
   isoToDisplayDate,
   type CompanySetupDraft,
   type DraftCompany,
@@ -66,8 +67,8 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Human labels for the document slots (review summary + gating messages). */
 export const DOC_SLOT_LABELS: Record<string, string> = {
-  passport: 'Passport — data page',
-  passport_additional: 'Passport — additional page',
+  passport: 'Passport: data page',
+  passport_additional: 'Passport: additional page',
   photo: 'Portrait photo',
   eid_front: 'Emirates ID (front)',
   eid_back: 'Emirates ID (back)',
@@ -441,11 +442,17 @@ export function CompanySetupForm({
     draft.company.activities.length >= 1 &&
     draft.company.activities.length <= COMPANY_SETUP_MAX_ACTIVITIES &&
     draft.company.activities.every((a) => a.description.trim().length > 0) &&
-    !!draft.company.licenseType;
+    !!draft.company.licenseType &&
+    (draft.company.businessDescription ?? '').trim().length > 0;
 
-  const namesDeterministicOk = draft.company.nameOptions.every(
-    (o) => o.name.trim().length > 0 && validateCompanyName(o.name.trim()).valid
-  );
+  // Three name options, each valid AND different from the other two: the
+  // authority reads them as first / second / third choice, so the same name
+  // twice throws a choice away.
+  const nameKeys = draft.company.nameOptions.map((o) => o.name.trim().toLowerCase());
+  const namesDeterministicOk =
+    draft.company.nameOptions.every(
+      (o) => o.name.trim().length > 0 && validateCompanyName(o.name.trim()).valid
+    ) && new Set(nameKeys).size === nameKeys.length;
 
   const peopleOk =
     draft.persons.length >= 1 &&
@@ -471,6 +478,13 @@ export function CompanySetupForm({
         !p.roles.shareholder ||
         (typeof p.shareholdingPct === 'number' && p.shareholdingPct > 0)
     );
+
+  // What is actually still missing, named. The button being grey with no
+  // reason is the single most common way a client gets stuck here.
+  const peopleMissing = useMemo(
+    () => missingForPeopleStep(draft.persons, documents),
+    [draft.persons, documents]
+  );
 
   const documentsOk = draft.persons.every((person, index) => {
     const docs = documents[String(index)] ?? {};
@@ -544,7 +558,7 @@ export function CompanySetupForm({
         setSubmitError(
           details.length > 0
             ? `Please fix the following before submitting: ${details.join(' · ')}`
-            : 'Could not submit — please check your entries and try again.'
+            : 'Could not submit. Please check your entries and try again.'
         );
         setSubmitting(false);
         return;
@@ -555,7 +569,7 @@ export function CompanySetupForm({
       if (timer.current) clearTimeout(timer.current);
       onSubmitted();
     } catch {
-      setSubmitError('Submission failed — please check your connection and try again.');
+      setSubmitError('Submission failed. Please check your connection and try again.');
       setSubmitting(false);
     }
   };
@@ -564,7 +578,7 @@ export function CompanySetupForm({
   const contact = draft.contact;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-5xl mx-auto space-y-4">
       <StepProgress
         currentStep={currentStep}
         viewingStep={viewingStep}
@@ -582,7 +596,7 @@ export function CompanySetupForm({
         {saveState === 'error' && (
           <span className="text-xs text-amber-700 flex items-center gap-1 text-right">
             <AlertCircle className="w-3 h-3 flex-shrink-0" />
-            {saveMessage ?? 'Not saved — retrying'}
+            {saveMessage ?? 'Not saved, retrying'}
           </span>
         )}
       </div>
@@ -598,7 +612,7 @@ export function CompanySetupForm({
               {contact.name.trim() ? `Dear ${contact.name.trim()}, welcome` : 'Welcome'} to the TME
               Services company setup form for your new IFZA (International Free Zone Authority)
               company. This form collects everything the authority needs to start the
-              incorporation. You can pause at any time — your progress is saved automatically.
+              incorporation. You can pause at any time, your progress is saved automatically.
             </p>
 
             <div className="rounded-xl border border-gray-100 p-4">
@@ -647,14 +661,13 @@ export function CompanySetupForm({
 
             <div>
               <p className="text-sm font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-                What you will need — for every shareholder, manager, director and secretary
+                What you will need, for every shareholder, manager, director and secretary
               </p>
               <ul className="space-y-2">
                 {[
-                  'Passport copy — a proper flatbed scan of the data page spread (not a phone photo).',
-                  'Indian and Syrian passports only: one additional page — the address / family-details page (India) or the issue-details page (Syria).',
-                  'A portrait photo (headshot) — a recent digital photo on a plain light background, no glasses. This is not a passport page.',
-                  'Proof of address — a BANK STATEMENT not older than 3 months (no utility bills).',
+                  'Passport copy: a proper flatbed scan of the data page spread (not a phone photo).',
+                  'A portrait photo (headshot): a recent digital photo on a plain light background, no glasses.',
+                  'Proof of address: a BANK STATEMENT not older than 3 months (no utility bills).',
                   'Emirates ID and UAE visa copies, if the person currently holds or previously held them.',
                 ].map((item, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
@@ -709,7 +722,7 @@ export function CompanySetupForm({
           {aiChecked && aiIssues.length > 0 && (
             <p className="mt-4 text-xs text-amber-700">
               Our automatic check flagged possible issues above. You can adjust the names, or
-              continue anyway — the final decision rests with the authority.
+              continue anyway. The final decision rests with the authority.
             </p>
           )}
           <StepNavButtons
@@ -750,14 +763,19 @@ export function CompanySetupForm({
             uploadFile={uploadFile}
             onExtractionApplied={flushSaveSoon}
           />
-          {!(peopleOk && documentsOk) && (
-            <p className="mt-3 text-xs text-gray-500">
-              To continue: every person needs a full name, nationality, date of birth, religion and
-              EID/visa answer, plus the required documents (passport data page, portrait photo,
-              bank statement, the additional passport page for Indian and Syrian passports, and
-              EID/visa copies where applicable); roles must satisfy the constraints above; and
-              shareholdings must total 100%.
-            </p>
+          {!(peopleOk && documentsOk) && peopleMissing.length > 0 && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-semibold text-amber-900 mb-1">
+                Still needed before you can continue:
+              </p>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {peopleMissing.map((item, i) => (
+                  <li key={i} className="text-xs text-amber-800">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           <StepNavButtons
             enabled={peopleOk && documentsOk}
@@ -977,7 +995,7 @@ function ReviewSummary({
                 label="Visa"
                 value={
                   person.visa.visaRequired
-                    ? `Yes — ${person.visa.jobTitle ?? ''}${
+                    ? `Yes: ${person.visa.jobTitle ?? ''}${
                         person.visa.basicMonthlySalaryAED
                           ? `, basic AED ${person.visa.basicMonthlySalaryAED.toLocaleString('en-US')}/month`
                           : ''
