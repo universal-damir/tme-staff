@@ -5,6 +5,7 @@ import {
   documentsErrorForRow,
 } from '@/lib/company-setup-token';
 import { sanitizeFreeText } from '@/lib/submit-validation';
+import { foldPayloadToEnglish } from '@/lib/english-only';
 import { validateSubmission } from '@/lib/company-setup-validation';
 import { passportAdditionalPageVariant } from '@/lib/staff-form-logic';
 import type {
@@ -136,8 +137,11 @@ export async function POST(
     return NextResponse.json({ error: 'confirmation_required' }, { status: 400 });
   }
 
-  const submittedData = sanitizeFreeText(
-    body.submittedData
+  // English letters only: the company names, activities and person details
+  // here go straight onto the DET application. `documents` below is left as
+  // it is — those are real storage filenames.
+  const submittedData = foldPayloadToEnglish(
+    sanitizeFreeText(body.submittedData)
   ) as unknown as CompanySetupSubmittedData;
   submittedData.confirmedAt = new Date().toISOString();
 

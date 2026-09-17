@@ -5,6 +5,7 @@ import {
   documentsErrorForRow,
 } from '@/lib/company-setup-token';
 import { sanitizeFreeText } from '@/lib/submit-validation';
+import { foldPayloadToEnglish } from '@/lib/english-only';
 
 export const runtime = 'nodejs';
 
@@ -54,7 +55,10 @@ export async function POST(
     ) {
       return NextResponse.json({ error: 'invalid_submitted_data' }, { status: 400 });
     }
-    patch.submitted_data = sanitizeFreeText(body.submittedData);
+    // Same rule as the final submit — an autosaved draft must not carry a
+    // script the DET form cannot take, or the person would only find out at
+    // the very end.
+    patch.submitted_data = foldPayloadToEnglish(sanitizeFreeText(body.submittedData));
   }
 
   if (body.documents !== undefined) {

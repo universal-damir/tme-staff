@@ -13,6 +13,7 @@ import {
   getSignerIp,
   sanitizeFreeText,
 } from '@/lib/submit-validation';
+import { foldPayloadToEnglish } from '@/lib/english-only';
 import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
@@ -58,7 +59,15 @@ export async function POST(req: NextRequest) {
     const signerIp = getSignerIp(req);
 
     // P2-13: strip control chars / angle brackets / cap string lengths.
-    const cleanEmployerData = sanitizeFreeText(employerData) as Record<string, unknown>;
+    // English letters only. The form folds as the person types, but this is
+    // the gate that counts: a submission can also arrive from a passport
+    // scan's autofill or a replayed request, and every field here is copied
+    // onto an ICP or MoHRE form that takes A-Z and nothing else.
+    // NOT applied to `documents` — those carry real storage filenames, and
+    // renaming one here would break the download that follows.
+    const cleanEmployerData = foldPayloadToEnglish(
+      sanitizeFreeText(employerData)
+    ) as Record<string, unknown>;
 
     // 1. Save employer data to Supabase via the service-role client. Anon
     // RLS used to permit this update (anon_update policy); after the P0-3

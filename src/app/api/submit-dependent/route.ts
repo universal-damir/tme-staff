@@ -25,6 +25,7 @@ import {
   missingDependentRenewalRequirements,
   sanitizeFreeText,
 } from '@/lib/submit-validation';
+import { foldPayloadToEnglish } from '@/lib/english-only';
 import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -117,7 +118,15 @@ export async function POST(req: NextRequest) {
     }
 
     // Strip control chars / angle brackets / cap string lengths.
-    const cleanDependentData = sanitizeFreeText(dependentData) as Record<string, unknown>;
+    // English letters only. The form folds as the person types, but this is
+    // the gate that counts: a submission can also arrive from a passport
+    // scan's autofill or a replayed request, and every field here is copied
+    // onto an ICP or MoHRE form that takes A-Z and nothing else.
+    // NOT applied to `documents` — those carry real storage filenames, and
+    // renaming one here would break the download that follows.
+    const cleanDependentData = foldPayloadToEnglish(
+      sanitizeFreeText(dependentData)
+    ) as Record<string, unknown>;
 
     // dependent_type is read-only in the form — take the portal's value so a
     // hand-crafted POST can't register a different relationship than the one

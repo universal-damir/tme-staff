@@ -14,6 +14,7 @@ import {
   missingRequiredDocuments,
   sanitizeFreeText,
 } from '@/lib/submit-validation';
+import { foldPayloadToEnglish } from '@/lib/english-only';
 import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
@@ -132,7 +133,15 @@ export async function POST(req: NextRequest) {
     }
 
     // P2-13: strip control chars / angle brackets / cap string lengths.
-    const cleanEmployeeData = sanitizeFreeText(employeeData) as Record<string, unknown>;
+    // English letters only. The form folds as the person types, but this is
+    // the gate that counts: a submission can also arrive from a passport
+    // scan's autofill or a replayed request, and every field here is copied
+    // onto an ICP or MoHRE form that takes A-Z and nothing else.
+    // NOT applied to `documents` — those carry real storage filenames, and
+    // renaming one here would break the download that follows.
+    const cleanEmployeeData = foldPayloadToEnglish(
+      sanitizeFreeText(employeeData)
+    ) as Record<string, unknown>;
 
     // Submission telemetry: user agent is server-derived (never from body);
     // submission_device (phone/desktop) is the client's touch heuristic —
@@ -146,7 +155,7 @@ export async function POST(req: NextRequest) {
       delete cleanEmployeeData.submission_device;
     }
     const cleanEmployerData = isSamePerson && employerData
-      ? sanitizeFreeText(employerData) as Record<string, unknown>
+      ? foldPayloadToEnglish(sanitizeFreeText(employerData)) as Record<string, unknown>
       : null;
 
     const now = new Date().toISOString();
