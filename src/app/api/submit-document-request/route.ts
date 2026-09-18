@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     const { data: existing, error: lookupError } = await supabase
       .from('staff_onboarding_submissions')
-      .select('status, onboarding_type, requested_documents, documents')
+      .select('status, onboarding_type, requested_documents, documents, employee_data, prefill_employee_data')
       .eq('id', id)
       .maybeSingle();
 
@@ -72,9 +72,18 @@ export async function POST(req: NextRequest) {
     // (where AI validation exists) validated or explicitly submitted for
     // manual review. Server-side authority — the client form enforces the
     // same rule but only in browser JavaScript.
+    // Nationality decides whether `passport_additional` is a page that exists
+    // at all (new-format Syrian passports have none). Dependent requests carry
+    // no employee_data, so fall back to the portal-written prefill — same
+    // order DocumentRequestForm reads it in.
+    const requestNationality =
+      (existing!.employee_data as { nationality?: string } | null)?.nationality ??
+      (existing!.prefill_employee_data as { nationality?: string } | null)?.nationality ??
+      null;
     const missing = missingRequestedDocuments({
       requested_documents: existing!.requested_documents as string[] | null,
       documents: existing!.documents as StaffDocumentReferences | null,
+      nationality: requestNationality,
     });
     if (missing.length > 0) {
       console.warn(`[submit-document-request] Blocked incomplete submission ${id}: missing ${missing.join(', ')}`);

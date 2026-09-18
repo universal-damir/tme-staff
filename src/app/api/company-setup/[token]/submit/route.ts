@@ -7,7 +7,7 @@ import {
 import { sanitizeFreeText } from '@/lib/submit-validation';
 import { foldPayloadToEnglish } from '@/lib/english-only';
 import { validateSubmission } from '@/lib/company-setup-validation';
-import { passportAdditionalPageVariant } from '@/lib/staff-form-logic';
+import { companySetupAdditionalPageRequired } from '@/components/company-setup/draft';
 import type {
   CompanySetupDocuments,
   CompanySetupPerson,
@@ -40,7 +40,10 @@ function missingPersonDocuments(
     const label = person?.fullName?.trim() || `Person ${index + 1}`;
     const docs: CompanySetupPersonDocuments = documents[String(index)] ?? {};
     if (!docs.passport?.path) missing.push(`${label}: passport copy`);
-    const additionalVariant = passportAdditionalPageVariant(person?.nationality);
+    // Narrowed by what the data page already gave us and by the person's own
+    // declaration: a new-format Syrian passport has no second page, and
+    // demanding it would leave the client unable to submit at all.
+    const additionalVariant = companySetupAdditionalPageRequired(person, docs);
     if (additionalVariant && !docs.passport_additional?.path) {
       missing.push(
         additionalVariant === 'syria'
@@ -76,7 +79,7 @@ function requiredDocumentPaths(
   persons.forEach((person, index) => {
     const docs: CompanySetupPersonDocuments = documents[String(index)] ?? {};
     const slots: Array<keyof CompanySetupPersonDocuments> = ['passport', 'photo', 'proof_of_address'];
-    if (passportAdditionalPageVariant(person?.nationality)) slots.push('passport_additional');
+    if (companySetupAdditionalPageRequired(person, docs)) slots.push('passport_additional');
     if (person?.currentOrPastEidVisa === 'current') {
       slots.push('eid_front', 'eid_back', 'visa_document');
     } else if (person?.currentOrPastEidVisa === 'past') {

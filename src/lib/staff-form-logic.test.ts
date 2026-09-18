@@ -17,6 +17,10 @@ import {
   sponsorshipTypeFromSponsor,
   relationshipOptionsForSponsor,
   initialIsInUae,
+  passportAdditionalPageVariant,
+  passportDataPageCarriesIssueDetails,
+  passportAdditionalPageRequired,
+  passportAdditionalPageRequiredForDocs,
 } from './staff-form-logic';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -498,5 +502,72 @@ describe('initialIsInUae', () => {
         true
       )
     ).toBe(true);
+  });
+});
+
+describe('passport additional page', () => {
+  // The OLD Syrian booklet prints names, birth details and the MRZ on the
+  // data page; date/place of issue, expiry and the national number live on
+  // the page next to it. The NEW booklet (renewals from 2026) prints all of
+  // them on the data page and has no second page at all.
+  const OLD_SYRIAN_DATA_PAGE = {
+    passport_no: 'N014077546',
+    passport_expiry_date: '10.10.2026', // from the MRZ
+  };
+  const NEW_SYRIAN_DATA_PAGE = {
+    passport_no: 'N00176489',
+    passport_issue_date: '19.07.2026',
+    passport_expiry_date: '18.07.2032',
+  };
+
+  it('reads an issue date on the data page as the new booklet', () => {
+    expect(passportDataPageCarriesIssueDetails(NEW_SYRIAN_DATA_PAGE)).toBe(true);
+    expect(passportDataPageCarriesIssueDetails(OLD_SYRIAN_DATA_PAGE)).toBe(false);
+    expect(passportDataPageCarriesIssueDetails({ passport_issue_date: '   ' })).toBe(false);
+    expect(passportDataPageCarriesIssueDetails(undefined)).toBe(false);
+  });
+
+  it('still asks an OLD Syrian passport for its issue-details page', () => {
+    expect(passportAdditionalPageRequired('Syria', OLD_SYRIAN_DATA_PAGE)).toBe('syria');
+    expect(passportAdditionalPageRequired('Syrian', undefined)).toBe('syria');
+  });
+
+  it('does not ask a NEW Syrian passport for a page it does not have', () => {
+    expect(passportAdditionalPageRequired('Syria', NEW_SYRIAN_DATA_PAGE)).toBeNull();
+  });
+
+  it('honours the applicant declaring the page absent', () => {
+    expect(passportAdditionalPageRequired('Syria', OLD_SYRIAN_DATA_PAGE, true)).toBeNull();
+  });
+
+  it('never lets an Indian passport skip its address page', () => {
+    // India's page carries parents/spouse/address — never on the data page,
+    // so neither the auto-detect nor the declaration may excuse it.
+    expect(passportAdditionalPageRequired('India', NEW_SYRIAN_DATA_PAGE)).toBe('india');
+    expect(passportAdditionalPageRequired('Indian', NEW_SYRIAN_DATA_PAGE, true)).toBe('india');
+  });
+
+  it('asks nothing of a nationality with no additional page', () => {
+    expect(passportAdditionalPageVariant('Germany')).toBeNull();
+    expect(passportAdditionalPageRequired('Germany', OLD_SYRIAN_DATA_PAGE)).toBeNull();
+  });
+
+  it('answers the same question off a stored submission', () => {
+    expect(
+      passportAdditionalPageRequiredForDocs('Syria', {
+        passportPages: { insidePages: { path: 'p', filename: 'f', validated: true, extracted_data: NEW_SYRIAN_DATA_PAGE } },
+      })
+    ).toBeNull();
+    expect(
+      passportAdditionalPageRequiredForDocs('Syria', {
+        passportPages: { insidePages: { path: 'p', filename: 'f', validated: true, extracted_data: OLD_SYRIAN_DATA_PAGE } },
+      })
+    ).toBe('syria');
+    expect(
+      passportAdditionalPageRequiredForDocs('Syria', {
+        passportPages: { additionalPageNotApplicable: true },
+      })
+    ).toBeNull();
+    expect(passportAdditionalPageRequiredForDocs('Syria', null)).toBe('syria');
   });
 });

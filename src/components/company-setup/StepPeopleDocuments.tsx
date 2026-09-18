@@ -63,6 +63,8 @@ import {
   extractedDataOf,
   statementAddressOf,
   STATEMENT_ADDRESS_KEY,
+  PASSPORT_ISSUE_ON_DATA_PAGE_KEY,
+  companySetupAdditionalPageRequired,
   isoToDisplayDate,
   displayToIsoDate,
   roleTotals,
@@ -237,8 +239,9 @@ export function isPersonComplete(
     return false;
   }
   if (!docs.passport?.path || !docs.photo?.path || !docs.proof_of_address?.path) return false;
-  // Indian / Syrian passports need their additional page too.
-  if (passportAdditionalPageVariant(person.nationality) && !docs.passport_additional?.path) {
+  // Indian / Syrian passports need their additional page too — except the new
+  // Syrian booklet, which has none (companySetupAdditionalPageRequired).
+  if (companySetupAdditionalPageRequired(person, docs) && !docs.passport_additional?.path) {
     return false;
   }
   if (person.currentOrPastEidVisa === 'current') {
@@ -393,7 +396,18 @@ export function StepPeopleDocuments({
         onPatchPerson(personIndex, () => outcome.person);
         const refWithData: CompanySetupDocRef = {
           ...current,
-          extractedData: applied,
+          extractedData: {
+            ...applied,
+            // Did the DATA PAGE itself carry the issue date? On a Syrian
+            // passport that is the whole test for whether a second page
+            // exists — see companySetupAdditionalPageRequired. Recorded here
+            // because `applied` is fill-only: a client who typed the date
+            // themselves would leave no trace of where it came from.
+            ...(typeof result.data.passport_issue_date === 'string' &&
+            result.data.passport_issue_date.trim()
+              ? { [PASSPORT_ISSUE_ON_DATA_PAGE_KEY]: 'yes' }
+              : {}),
+          },
         };
         onDocumentChange(personIndex, 'passport', refWithData);
         onExtractionApplied();
@@ -776,7 +790,14 @@ export function StepPeopleDocuments({
         const wasAutoFilled =
           (!!passportExtracted && Object.keys(passportExtracted).length > 0) ||
           (!!additionalExtracted && Object.keys(additionalExtracted).length > 0);
-        const additionalVariant = passportAdditionalPageVariant(person.nationality);
+        // Which additional page this person must upload — nationality NARROWED
+        // by what the data page already gave us and by their own declaration.
+        // A new-format Syrian passport has no second page at all.
+        const additionalVariant = companySetupAdditionalPageRequired(person, docs);
+        // The tick stays visible for every Syrian so it can be unticked; the
+        // slot above it disappears while it is on.
+        const offersNoAdditionalPage = passportAdditionalPageVariant(person.nationality) === 'syria';
+        const declaredNoAdditionalPage = !!person.passportHasNoAdditionalPage;
         // Staff-provided files render filled and read-only — the client is
         // asked to confirm them, never to re-upload them.
         const isStaffDoc = (slot: DocSlot) => docs[slot]?.source === 'staff';
@@ -878,7 +899,8 @@ export function StepPeopleDocuments({
                         )}
                     </div>
 
-                    {/* Indian and Syrian passports carry a second required page. */}
+                    {/* Indian and Syrian passports carry a second required page —
+                        except the new Syrian booklet, which has none. */}
                     {additionalVariant && (
                       <div>
                         <div>
@@ -917,6 +939,42 @@ export function StepPeopleDocuments({
                             />
                           )}
                       </div>
+                    )}
+
+                    {/* Syria only: the new booklet (renewals from 2026) prints
+                        the issue details on the data page and has no second
+                        page. The auto-detect above settles it whenever we could
+                        read the data page; this tick is what a person whose
+                        data page did not extract can say for themselves.
+                        Without it they simply cannot submit the form — and
+                        unlike a staff record, nobody at TME can upload the page
+                        on their behalf. India is never offered it: the address
+                        page always exists. */}
+                    {offersNoAdditionalPage && (
+                      <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 flex-shrink-0"
+                          checked={declaredNoAdditionalPage}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            // Ticking drops any page already uploaded so the
+                            // declaration and the file cannot contradict
+                            // each other.
+                            if (checked && docs.passport_additional?.path) {
+                              removeAiDoc(index, 'passport_additional');
+                            }
+                            onPatchPerson(index, (p) => ({
+                              ...p,
+                              passportHasNoAdditionalPage: checked || undefined,
+                            }));
+                          }}
+                        />
+                        <span>
+                          This passport does not have an additional page — the date and place of
+                          issue, expiry date and national number are printed on the photo page.
+                        </span>
+                      </label>
                     )}
 
                     {/* The headshot belongs with the passport: both are this

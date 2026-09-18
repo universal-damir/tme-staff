@@ -422,6 +422,26 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     return persistDocs({ ...docsRef.current, passportPages: pages });
   };
 
+  /**
+   * "My passport does not have this page" — Syria only. The new Syrian
+   * booklet (renewals from 2026) prints date/place of issue, expiry and the
+   * national number on the data page and carries NO second page, so a request
+   * for one can never be satisfied. Ticking it drops any page already
+   * uploaded so the declaration and the file cannot contradict each other.
+   */
+  const setAdditionalPageNotApplicable = (checked: boolean) => {
+    const pages = { ...(docsRef.current.passportPages ?? {}) };
+    if (checked) {
+      delete pages.additionalPage;
+      pages.additionalPageNotApplicable = true;
+      setSlot('passport_additional', EMPTY_UI);
+      resetRejection('passport_additional');
+    } else {
+      delete pages.additionalPageNotApplicable;
+    }
+    return persistDocs({ ...docsRef.current, passportPages: pages });
+  };
+
   // Per-slot UI state (preview/validating/error) + 2-strike manual-review
   // state, keyed by requested type. Mirrors the per-slot useStates in
   // EmployeeForm without 20 separate hooks.
@@ -836,6 +856,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       case 'passport_inside':
         return acceptedDoc(pages.insidePages);
       case 'passport_additional':
+        // Syria only: a declared-absent page counts as satisfied. Mirrors the
+        // server gate in missingRequestedDocuments.
+        if (additionalVariant === 'syria' && pages.additionalPageNotApplicable) return true;
         return acceptedDoc(pages.additionalPage);
       case 'eid_front':
         return acceptedDoc(docs.eid_front);
@@ -959,24 +982,47 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       const cfg = passportSlotConfig(pKey);
       const pageRef = (docs.passportPages ?? {})[cfg.pageKey] as PassportPageReference | undefined;
       const ui = slotUI[pKey] ?? EMPTY_UI;
+      // Syria only: this passport may have no additional page at all.
+      const offerNotApplicable = pKey === 'passport_additional' && additionalVariant === 'syria';
+      const notApplicable =
+        offerNotApplicable && !!(docs.passportPages ?? {}).additionalPageNotApplicable;
       return (
         <>
-          <UploadSlot
-            label={cfg.label}
-            description={cfg.description}
-            expectedType={cfg.expectedType === 'COVER' ? 'COVER' : 'INSIDE_PAGES'}
-            accept="application/pdf,image/jpeg,image/png"
-            file={ui.file}
-            preview={ui.preview || undefined}
-            validated={!!pageRef?.validated}
-            validating={ui.validating}
-            needsReview={!!pageRef?.needsReview}
-            error={ui.error || undefined}
-            onUpload={handlePassportUpload(pKey)}
-            onRemove={() => {}}
-          />
-          <SampleImageToggle imageSrc={cfg.sampleSrc} altText={cfg.sampleAlt} label="See example photo" />
-          {renderManualReview(pKey, confirmCopyFor(cfg), handlePassportManualReview(pKey), !!ui.file, !!pageRef?.validated)}
+          {!notApplicable && (
+            <>
+              <UploadSlot
+                label={cfg.label}
+                description={cfg.description}
+                expectedType={cfg.expectedType === 'COVER' ? 'COVER' : 'INSIDE_PAGES'}
+                accept="application/pdf,image/jpeg,image/png"
+                file={ui.file}
+                preview={ui.preview || undefined}
+                validated={!!pageRef?.validated}
+                validating={ui.validating}
+                needsReview={!!pageRef?.needsReview}
+                error={ui.error || undefined}
+                onUpload={handlePassportUpload(pKey)}
+                onRemove={() => {}}
+              />
+              <SampleImageToggle imageSrc={cfg.sampleSrc} altText={cfg.sampleAlt} label="See example photo" />
+              {renderManualReview(pKey, confirmCopyFor(cfg), handlePassportManualReview(pKey), !!ui.file, !!pageRef?.validated)}
+            </>
+          )}
+          {offerNotApplicable && (
+            <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700 mt-2">
+              <input
+                type="checkbox"
+                className="mt-0.5 flex-shrink-0"
+                checked={notApplicable}
+                onChange={(e) => setAdditionalPageNotApplicable(e.target.checked)}
+              />
+              <span>
+                {isDependentRequest
+                  ? 'This passport does not have this page — the date and place of issue, expiry date and national number are printed on the photo page.'
+                  : 'My passport does not have this page — the date and place of issue, expiry date and national number are printed on my photo page.'}
+              </span>
+            </label>
+          )}
         </>
       );
     }

@@ -369,6 +369,12 @@ export interface StaffDocumentReferences {
     cover?: PassportPageReference;
     insidePages?: PassportPageReference;
     additionalPage?: PassportPageReference;
+    // Syria only: the applicant declared their passport has no additional
+    // page (the new 2026- booklet prints the issue details on the data page
+    // and carries no second page). Set from the tick in the additional-page
+    // section; the escape hatch for when data-page extraction failed and the
+    // auto-detect in passportAdditionalPageRequired() could not tell.
+    additionalPageNotApplicable?: boolean;
     extracted_data?: Record<string, unknown>;
   };
   // Renewals only ('renewal' and 'dependent_renewal'): the employee — or, on

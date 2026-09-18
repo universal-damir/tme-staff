@@ -291,6 +291,72 @@ describe('missingRequestedDocuments', () => {
     ).toEqual([]);
   });
 
+  // The document request that stranded Lougain Barhoum (10932 / 036): CS
+  // asked for all three passport pages, her new Syrian booklet has only two,
+  // and the gate kept the request open forever.
+  it('does not block a NEW Syrian passport on a page it does not have', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['passport_cover', 'passport_inside', 'passport_additional'],
+        nationality: 'Syria',
+        documents: {
+          passportPages: {
+            cover: acceptedRef,
+            insidePages: {
+              ...acceptedRef,
+              // Issue date printed on the data page = the new booklet.
+              extracted_data: { passport_issue_date: '19.07.2026' },
+            },
+          },
+        },
+      })
+    ).toEqual([]);
+  });
+
+  it('accepts the applicant declaring the Syrian additional page absent', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['passport_additional'],
+        nationality: 'Syrian',
+        documents: { passportPages: { additionalPageNotApplicable: true } },
+      })
+    ).toEqual([]);
+  });
+
+  it('still demands the additional page from an OLD Syrian passport', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['passport_additional'],
+        nationality: 'Syria',
+        documents: { passportPages: { insidePages: acceptedRef } },
+      })
+    ).toEqual(['passport_additional']);
+  });
+
+  it('never lets an Indian passport off its address page', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['passport_additional'],
+        nationality: 'India',
+        documents: {
+          passportPages: {
+            additionalPageNotApplicable: true,
+            insidePages: { ...acceptedRef, extracted_data: { passport_issue_date: '19.07.2026' } },
+          },
+        },
+      })
+    ).toEqual(['passport_additional']);
+  });
+
+  it('fails closed when no nationality is supplied', () => {
+    expect(
+      missingRequestedDocuments({
+        requested_documents: ['passport_additional'],
+        documents: { passportPages: { additionalPageNotApplicable: true } },
+      })
+    ).toEqual(['passport_additional']);
+  });
+
   it('empty or null requested_documents yields no missing keys', () => {
     expect(missingRequestedDocuments({ requested_documents: [], documents: {} })).toEqual([]);
     expect(missingRequestedDocuments({ requested_documents: null, documents: null })).toEqual([]);

@@ -54,6 +54,66 @@ export function passportAdditionalPageVariant(
 }
 
 /**
+ * Does the passport DATA page already carry the issue details?
+ *
+ * This is the whole reason a Syrian passport is asked for a second page. The
+ * OLD Syrian booklet prints only names, birth details and the MRZ on the data
+ * page; date/place of issue, expiry and the national number live on the page
+ * next to the photo. The NEW booklet (renewals from 2026) prints all of them
+ * on the data page itself and has NO such second page — asking for it strands
+ * the applicant forever.
+ *
+ * The discriminator is the ISSUE date: it is printed on the new data page and
+ * on neither the old data page nor its MRZ (the MRZ carries expiry, so expiry
+ * alone would say "new" for both booklets).
+ */
+export function passportDataPageCarriesIssueDetails(
+  dataPageExtraction: Record<string, unknown> | null | undefined
+): boolean {
+  const issue = dataPageExtraction?.passport_issue_date;
+  return typeof issue === 'string' && issue.trim().length > 0;
+}
+
+/**
+ * Which additional-page variant this applicant must actually upload — the
+ * nationality rule above, narrowed by what the data page already gave us and
+ * by the applicant's own "my passport has no such page" declaration.
+ *
+ * India is unconditional: the address/family page is never part of the data
+ * page. Syria is conditional, for the reason in the docblock above.
+ *
+ * Returns null when no additional page is to be asked for. Both forms AND the
+ * server-side submit gate call this, so the client cannot skip a page the
+ * server still demands (and vice versa).
+ */
+export function passportAdditionalPageRequired(
+  nationality: string | null | undefined,
+  dataPageExtraction: Record<string, unknown> | null | undefined,
+  declaredNotApplicable?: boolean | null
+): PassportAdditionalPageVariant | null {
+  const variant = passportAdditionalPageVariant(nationality);
+  if (variant !== 'syria') return variant;
+  if (declaredNotApplicable) return null;
+  return passportDataPageCarriesIssueDetails(dataPageExtraction) ? null : 'syria';
+}
+
+/**
+ * Same question answered straight off a stored submission's documents blob —
+ * the shape the server gate and the portal sync both hold.
+ */
+export function passportAdditionalPageRequiredForDocs(
+  nationality: string | null | undefined,
+  docs: StaffDocumentReferences | null | undefined
+): PassportAdditionalPageVariant | null {
+  const pages = docs?.passportPages;
+  return passportAdditionalPageRequired(
+    nationality,
+    pages?.insidePages?.extracted_data ?? pages?.extracted_data,
+    pages?.additionalPageNotApplicable
+  );
+}
+
+/**
  * Detect whether the registered authority (from the portal's prefill data) is
  * DMCC. The portal may pass either short-form "DMCC" or the full name
  * "DMCC Free Zone Authority", so we match on substring, case-insensitive.

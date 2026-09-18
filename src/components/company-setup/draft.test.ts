@@ -10,6 +10,9 @@ import {
   emptyPerson,
   extractedDataOf,
   missingForPeopleStep,
+  companySetupAdditionalPageRequired,
+  passportDataPageCarriedIssueDetails,
+  PASSPORT_ISSUE_ON_DATA_PAGE_KEY,
   rekeyDocumentsAfterRemove,
   type PassportExtractionData,
 } from './draft';
@@ -444,5 +447,110 @@ describe('missingForPeopleStep', () => {
   it('falls back to a position label when the name is still empty', () => {
     const result = missingForPeopleStep([complete({ fullName: '  ' })], docs());
     expect(result[0]).toMatch(/^Person 1: full name\./);
+  });
+});
+
+/**
+ * A Syrian shareholder on the NEW booklet (renewals from 2026) has no second
+ * passport page to upload — the issue details are printed on the data page.
+ * Demanding one leaves the client unable to submit the intake form at all,
+ * and unlike a staff record nobody at TME can upload it for them.
+ *
+ * The discriminator is the ISSUE date on the data page: printed on the new
+ * booklet, and on neither the old data page nor its MRZ.
+ */
+describe('companySetupAdditionalPageRequired', () => {
+  const ref = (extra?: Record<string, string>): CompanySetupDocRef => ({
+    path: 'p',
+    filename: 'p',
+    uploadedAt: '',
+    ...(extra ? { extractedData: extra } : {}),
+  });
+  const newBooklet = ref({ [PASSPORT_ISSUE_ON_DATA_PAGE_KEY]: 'yes' });
+  const oldBooklet = ref({ firstName: 'Lougain' });
+  // Same shape as the missingForPeopleStep block above — a person who is
+  // complete except for whatever the test varies.
+  const person = (over: Partial<CompanySetupPerson> = {}): CompanySetupPerson => ({
+    fullName: 'Damir Novalic',
+    roles: { shareholder: true, generalManager: true, director: true, secretary: true },
+    shareholdingPct: 100,
+    nationality: 'German',
+    dateOfBirth: '1985-04-12',
+    religion: 'Christian',
+    currentOrPastEidVisa: 'none',
+    visa: { visaRequired: false },
+    ...over,
+  });
+
+  it('reads the marker the passport slot parks at extraction time', () => {
+    expect(passportDataPageCarriedIssueDetails(newBooklet)).toBe(true);
+    expect(passportDataPageCarriedIssueDetails(oldBooklet)).toBe(false);
+    expect(passportDataPageCarriedIssueDetails(undefined)).toBe(false);
+  });
+
+  it('still asks an OLD Syrian passport for its issue-details page', () => {
+    expect(
+      companySetupAdditionalPageRequired({ nationality: 'Syria' }, { passport: oldBooklet })
+    ).toBe('syria');
+    // No passport uploaded yet = nothing read = keep asking.
+    expect(companySetupAdditionalPageRequired({ nationality: 'Syrian' }, {})).toBe('syria');
+  });
+
+  it('does not ask a NEW Syrian passport for a page it does not have', () => {
+    expect(
+      companySetupAdditionalPageRequired({ nationality: 'Syria' }, { passport: newBooklet })
+    ).toBeNull();
+  });
+
+  it('honours the person declaring the page absent', () => {
+    expect(
+      companySetupAdditionalPageRequired(
+        { nationality: 'Syria', passportHasNoAdditionalPage: true },
+        { passport: oldBooklet }
+      )
+    ).toBeNull();
+  });
+
+  it('never lets an Indian passport skip its address page', () => {
+    // India's page carries parents/spouse/address — never on the data page.
+    expect(
+      companySetupAdditionalPageRequired(
+        { nationality: 'India', passportHasNoAdditionalPage: true },
+        { passport: newBooklet }
+      )
+    ).toBe('india');
+  });
+
+  it('asks nothing of a nationality with no additional page', () => {
+    expect(
+      companySetupAdditionalPageRequired({ nationality: 'Germany' }, { passport: oldBooklet })
+    ).toBeNull();
+    expect(companySetupAdditionalPageRequired(undefined, undefined)).toBeNull();
+  });
+
+  it('lets the people step pass a new-booklet Syrian with no second page', () => {
+    const syrian = person({ nationality: 'Syria' });
+    const withNewBooklet = {
+      '0': {
+        passport: newBooklet,
+        photo: { path: 'h', filename: 'h', uploadedAt: '' },
+        proof_of_address: { path: 'b', filename: 'b', uploadedAt: '' },
+      },
+    } as never;
+    expect(missingForPeopleStep([syrian], withNewBooklet)).toEqual([]);
+  });
+
+  it('still names the missing page for an old-booklet Syrian', () => {
+    const syrian = person({ nationality: 'Syria' });
+    const withOldBooklet = {
+      '0': {
+        passport: oldBooklet,
+        photo: { path: 'h', filename: 'h', uploadedAt: '' },
+        proof_of_address: { path: 'b', filename: 'b', uploadedAt: '' },
+      },
+    } as never;
+    expect(missingForPeopleStep([syrian], withOldBooklet)).toEqual([
+      'Damir Novalic: the additional passport page.',
+    ]);
   });
 });

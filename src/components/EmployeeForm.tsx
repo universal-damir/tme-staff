@@ -38,6 +38,7 @@ import {
   mergeStaffDocRefs,
   isPakistaniNationality as checkPakistaniNationality,
   passportAdditionalPageVariant as getPassportAdditionalPageVariant,
+  passportDataPageCarriesIssueDetails,
   isDetAuthority,
   visaDocumentRequirement,
   requiresArrivalDate,
@@ -409,6 +410,9 @@ export function EmployeeForm({
     cover?: PassportPageReference;
     insidePages?: PassportPageReference;
     additionalPage?: PassportPageReference;
+    /** Syria only — "my passport has no additional page". See
+     *  handleAdditionalPageNotApplicable. */
+    additionalPageNotApplicable?: boolean;
   }>(submission.documents?.passportPages || {});
 
   // Renewal passport confirmation
@@ -1021,12 +1025,25 @@ export function EmployeeForm({
   const isPhotoUploaded = !!(photoDoc?.validated);
   const isCoverUploaded = !!(passportPages.cover?.validated);
   const isInsidePagesUploaded = !!(passportPages.insidePages?.validated);
-  const isAdditionalPageUploaded = !!(passportPages.additionalPage?.validated);
   // 'india' | 'syria' | null — which additional-page flavour this passport
   // needs (copy, sample image, AI prompt, and extraction all key off it).
   const additionalPageVariant = getPassportAdditionalPageVariant(nationality);
+  // The applicant ticked "my passport has no such page" — Syria only.
+  const additionalPageNotApplicable = !!passportPages.additionalPageNotApplicable;
+  const isAdditionalPageUploaded =
+    !!(passportPages.additionalPage?.validated) || additionalPageNotApplicable;
+  // New-format Syrian booklet: date/place of issue, expiry and the national
+  // number are printed on the data page itself and there IS no second page.
+  // We can tell because the data-page extraction returned an issue date,
+  // which the old booklet prints nowhere on that page. Skip the whole
+  // section silently — asking for a page that does not exist strands the
+  // applicant (and the TME reminder that chases them) forever.
+  const additionalPageAutoSkipped =
+    additionalPageVariant === 'syria' &&
+    passportDataPageCarriesIssueDetails(passportPages.insidePages?.extracted_data);
   const isPakistaniNationality = checkPakistaniNationality(nationality);
-  const requiresAdditionalPage = !!additionalPageVariant && isInsidePagesUploaded && passportDataReady;
+  const requiresAdditionalPage =
+    !!additionalPageVariant && !additionalPageAutoSkipped && isInsidePagesUploaded && passportDataReady;
   // Variant-specific copy for the additional-page section. India: last page
   // with family details + address (auto-extracted into the form). Syria: the
   // issue-details page next to the photo page (date/place of issue, national
@@ -1706,6 +1723,16 @@ export function EmployeeForm({
         extracted_data: extracted as Record<string, unknown>,
       };
       const updatedPagesWithData = { ...passportPagesRef.current, insidePages: updatedInsidePage };
+      // Auto-detect: a Syrian data page that already carries the issue date is
+      // the new booklet, which has no additional page at all. Record it on the
+      // submission so the portal stops expecting one too — without this the
+      // page is skipped here but the portal row still reads "2 of 3".
+      if (
+        getPassportAdditionalPageVariant(nationality) === 'syria' &&
+        passportDataPageCarriesIssueDetails(extracted as Record<string, unknown>)
+      ) {
+        updatedPagesWithData.additionalPageNotApplicable = true;
+      }
       setPassportPages(updatedPagesWithData);
       passportPagesRef.current = updatedPagesWithData;
       await saveDocRefs(buildDocRefs({ passportPages: updatedPagesWithData }));
@@ -1985,6 +2012,27 @@ export function EmployeeForm({
     setAdditionalManualReviewConfirmed(false);
     const updatedPages = { ...passportPagesRef.current };
     delete updatedPages.additionalPage;
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+  };
+
+  /**
+   * "My passport does not have this page" — Syria only. The escape hatch for
+   * a new-format booklet whose data page we could not read (so the auto-skip
+   * above did not fire). Ticking it drops any page already uploaded, so the
+   * declaration and the file can never contradict each other.
+   */
+  const handleAdditionalPageNotApplicable = async (checked: boolean) => {
+    const updatedPages = { ...passportPagesRef.current };
+    if (checked) {
+      delete updatedPages.additionalPage;
+      updatedPages.additionalPageNotApplicable = true;
+      setAdditionalPageUI({ preview: null, validating: false, error: null, file: null });
+      setAdditionalManualReviewConfirmed(false);
+    } else {
+      delete updatedPages.additionalPageNotApplicable;
+    }
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
@@ -3342,34 +3390,64 @@ export function EmployeeForm({
                   </div>
                 )}
 
-                <UploadSlot
-                  label=""
-                  description={additionalPageCopy.slotDescription}
-                  expectedType="INSIDE_PAGES"
-                  accept="application/pdf,image/jpeg,image/png"
-                  file={additionalPageUI.file}
-                  preview={additionalPageUI.preview || undefined}
-                  validated={!!passportPages.additionalPage?.validated}
-                  validating={additionalPageUI.validating}
-                  needsReview={!!passportPages.additionalPage?.needsReview}
-                  error={additionalPageUI.error || undefined}
-                  onUpload={additionalPageScan.intercepted}
-                  onRemove={handleAdditionalPageRemove}
-                />
-                {additionalPageScan.scannerModal}
+                {!additionalPageNotApplicable && (
+                  <>
+                    <UploadSlot
+                      label=""
+                      description={additionalPageCopy.slotDescription}
+                      expectedType="INSIDE_PAGES"
+                      accept="application/pdf,image/jpeg,image/png"
+                      file={additionalPageUI.file}
+                      preview={additionalPageUI.preview || undefined}
+                      validated={!!passportPages.additionalPage?.validated}
+                      validating={additionalPageUI.validating}
+                      needsReview={!!passportPages.additionalPage?.needsReview}
+                      error={additionalPageUI.error || undefined}
+                      onUpload={additionalPageScan.intercepted}
+                      onRemove={handleAdditionalPageRemove}
+                    />
+                    {additionalPageScan.scannerModal}
+                  </>
+                )}
 
-                {isAdditionalPageUploaded && !passportPages.additionalPage?.needsReview && (
+                {/* Syria only: the new booklet (renewals from 2026) has no
+                    second page at all. The auto-skip above catches it when we
+                    could read the data page; this tick is what an applicant
+                    whose data page did not extract can say for themselves.
+                    India is never offered it — the address page always
+                    exists. */}
+                {additionalPageVariant === 'syria' && !isReview && (
+                  <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 flex-shrink-0"
+                      checked={additionalPageNotApplicable}
+                      onChange={(e) => handleAdditionalPageNotApplicable(e.target.checked)}
+                    />
+                    <span>
+                      My passport does not have this page — the date and place of issue, expiry
+                      date and national number are printed on my photo page.
+                    </span>
+                  </label>
+                )}
+
+                {additionalPageNotApplicable ? (
+                  <div className="flex items-center gap-2 text-green-600 text-sm">
+                    <CheckCircle className="w-4 h-4" />
+                    Understood — no additional page is needed for this passport.
+                  </div>
+                ) : isAdditionalPageUploaded && !passportPages.additionalPage?.needsReview ? (
                   <div className="flex items-center gap-2 text-green-600 text-sm">
                     <CheckCircle className="w-4 h-4" />
                     {additionalPageCopy.successNote}
                   </div>
-                )}
+                ) : null}
 
                 {/* Manual-review affordance — same pattern as cover/inside.
                     Appears after MANUAL_REVIEW_THRESHOLD AI rejections so a
                     user with an unusual layout (handwritten, photocopy,
                     addendum sheet) isn't permanently blocked. */}
-                {shouldOfferManualReview(additionalRejectionCount) && additionalPageUI.file && !passportPages.additionalPage?.validated && (
+                {!additionalPageNotApplicable && shouldOfferManualReview(additionalRejectionCount) && additionalPageUI.file && !passportPages.additionalPage?.validated && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
                     <p className="text-sm" style={{ color: TME_COLORS.primary }}>
                       <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your passport&apos;s additional page, you can submit it for manual review.

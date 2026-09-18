@@ -31,6 +31,7 @@ import {
   shouldOfferManualReview,
   buildManualReviewPageRef,
   passportAdditionalPageVariant,
+  passportDataPageCarriesIssueDetails,
   isPakistaniNationality,
   initialIsInUae,
 } from '@/lib/staff-form-logic';
@@ -542,6 +543,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     cover?: PassportPageReference;
     insidePages?: PassportPageReference;
     additionalPage?: PassportPageReference;
+    /** Syria only — "this passport has no additional page". See
+     *  handleAdditionalPageNotApplicable. */
+    additionalPageNotApplicable?: boolean;
   }>(submission.documents?.passportPages || {});
   // First registrations only: surfaced when the final-submit re-check finds
   // the certificate section incomplete (it can regress as late as Review —
@@ -857,8 +861,18 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   const isPhotoUploaded = !!photoDoc?.validated;
   const isCoverUploaded = !!passportPages.cover?.validated;
   const isInsidePagesUploaded = !!passportPages.insidePages?.validated;
-  const isAdditionalPageUploaded = !!passportPages.additionalPage?.validated;
-  const requiresAdditionalPage = !!additionalPageVariant && isInsidePagesUploaded && passportDataReady;
+  // The sponsor ticked "this passport has no additional page" — Syria only.
+  const additionalPageNotApplicable = !!passportPages.additionalPageNotApplicable;
+  const isAdditionalPageUploaded =
+    !!passportPages.additionalPage?.validated || additionalPageNotApplicable;
+  // New-format Syrian booklet: issue details sit on the data page and there
+  // is no second page to upload. Detected from the data-page extraction
+  // returning an issue date — see passportDataPageCarriesIssueDetails.
+  const additionalPageAutoSkipped =
+    additionalPageVariant === 'syria' &&
+    passportDataPageCarriesIssueDetails(passportPages.insidePages?.extracted_data);
+  const requiresAdditionalPage =
+    !!additionalPageVariant && !additionalPageAutoSkipped && isInsidePagesUploaded && passportDataReady;
   const additionalPageCopy = additionalPageVariant === 'syria'
     ? {
         title: 'Syrian Passport — Additional Page',
@@ -1326,10 +1340,19 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setExtractingPassport(false);
     if (extracted) {
       handlePassportExtracted(extracted);
-      const updatedPagesWithData = {
+      const updatedPagesWithData: typeof passportPagesRef.current = {
         ...passportPagesRef.current,
         insidePages: { ...passportPagesRef.current.insidePages!, extracted_data: extracted },
       };
+      // Auto-detect: a Syrian data page that already carries the issue date is
+      // the new booklet, which has no additional page at all. Record it on the
+      // submission so the portal stops expecting one too.
+      if (
+        passportAdditionalPageVariant(nationality) === 'syria' &&
+        passportDataPageCarriesIssueDetails(extracted)
+      ) {
+        updatedPagesWithData.additionalPageNotApplicable = true;
+      }
       setPassportPages(updatedPagesWithData);
       passportPagesRef.current = updatedPagesWithData;
       await saveDocRefs(buildDocRefs({ passportPages: updatedPagesWithData }));
@@ -1571,6 +1594,27 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setAdditionalManualReviewConfirmed(false);
     const updatedPages = { ...passportPagesRef.current };
     delete updatedPages.additionalPage;
+    setPassportPages(updatedPages);
+    passportPagesRef.current = updatedPages;
+    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+  };
+
+  /**
+   * "This passport does not have this page" — Syria only. Escape hatch for a
+   * new-format booklet whose data page could not be read. Ticking it drops any
+   * page already uploaded so the declaration and the file cannot contradict
+   * each other.
+   */
+  const handleAdditionalPageNotApplicable = async (checked: boolean) => {
+    const updatedPages = { ...passportPagesRef.current };
+    if (checked) {
+      delete updatedPages.additionalPage;
+      updatedPages.additionalPageNotApplicable = true;
+      setAdditionalPageUI({ preview: null, validating: false, error: null, file: null });
+      setAdditionalManualReviewConfirmed(false);
+    } else {
+      delete updatedPages.additionalPageNotApplicable;
+    }
     setPassportPages(updatedPages);
     passportPagesRef.current = updatedPages;
     await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
@@ -2312,28 +2356,55 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   </div>
                 )}
 
-                <UploadSlot
-                  label=""
-                  description={additionalPageCopy.slotDescription}
-                  expectedType="INSIDE_PAGES"
-                  accept="application/pdf,image/jpeg,image/png"
-                  file={additionalPageUI.file}
-                  preview={additionalPageUI.preview || undefined}
-                  validated={!!passportPages.additionalPage?.validated}
-                  validating={additionalPageUI.validating}
-                  needsReview={!!passportPages.additionalPage?.needsReview}
-                  error={additionalPageUI.error || undefined}
-                  onUpload={additionalPageScan.intercepted}
-                  onRemove={handleAdditionalPageRemove}
-                />
-                {additionalPageScan.scannerModal}
+                {!additionalPageNotApplicable && (
+                  <>
+                    <UploadSlot
+                      label=""
+                      description={additionalPageCopy.slotDescription}
+                      expectedType="INSIDE_PAGES"
+                      accept="application/pdf,image/jpeg,image/png"
+                      file={additionalPageUI.file}
+                      preview={additionalPageUI.preview || undefined}
+                      validated={!!passportPages.additionalPage?.validated}
+                      validating={additionalPageUI.validating}
+                      needsReview={!!passportPages.additionalPage?.needsReview}
+                      error={additionalPageUI.error || undefined}
+                      onUpload={additionalPageScan.intercepted}
+                      onRemove={handleAdditionalPageRemove}
+                    />
+                    {additionalPageScan.scannerModal}
+                  </>
+                )}
 
-                {isAdditionalPageUploaded && !passportPages.additionalPage?.needsReview && (
+                {/* Syria only: the new booklet (renewals from 2026) has no
+                    second page at all. India is never offered this — the
+                    address page always exists. */}
+                {additionalPageVariant === 'syria' && !isReview && (
+                  <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 flex-shrink-0"
+                      checked={additionalPageNotApplicable}
+                      onChange={(e) => handleAdditionalPageNotApplicable(e.target.checked)}
+                    />
+                    <span>
+                      This passport does not have this page — the date and place of issue, expiry
+                      date and national number are printed on the photo page.
+                    </span>
+                  </label>
+                )}
+
+                {additionalPageNotApplicable ? (
+                  <div className="flex items-center gap-2 text-green-600 text-sm">
+                    <CheckCircle className="w-4 h-4" />
+                    Understood — no additional page is needed for this passport.
+                  </div>
+                ) : isAdditionalPageUploaded && !passportPages.additionalPage?.needsReview ? (
                   <div className="flex items-center gap-2 text-green-600 text-sm">
                     <CheckCircle className="w-4 h-4" />
                     {additionalPageCopy.successNote}
                   </div>
-                )}
+                ) : null}
 
                 {renderManualReview(
                   `I confirm this is the ${additionalPageCopy.manualNoun}. I understand a TME team member will verify it manually.`,
@@ -2341,7 +2412,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   setAdditionalManualReviewConfirmed,
                   handleAdditionalManualReview,
                   additionalManualReviewSubmitting,
-                  shouldOfferManualReview(additionalRejectionCount) && !!additionalPageUI.file && !passportPages.additionalPage?.validated,
+                  !additionalPageNotApplicable && shouldOfferManualReview(additionalRejectionCount) && !!additionalPageUI.file && !passportPages.additionalPage?.validated,
                 )}
               </div>
             </FormSection>

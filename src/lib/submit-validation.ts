@@ -23,6 +23,7 @@ import {
   sponsorshipTypeFromSponsor,
   sponsorDocsRequired,
   passportAdditionalPageVariant,
+  passportAdditionalPageRequiredForDocs,
   isPakistaniNationality,
 } from '@/lib/staff-form-logic';
 import { isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
@@ -143,9 +144,11 @@ export function missingRequiredDocuments(row: {
   // Additional page (Indian address page / Syrian issue-details page).
   // Keyed off a freshly uploaded data page — exactly the client condition
   // (requiresAdditionalPage) — so the renewal "passport unchanged" skip,
-  // where no pages are uploaded, skips this too.
+  // where no pages are uploaded, skips this too. RequiredForDocs (not the
+  // bare nationality check) so a new-format Syrian passport, which has no
+  // second page, is not asked for one it cannot produce.
   if (
-    passportAdditionalPageVariant(nationality) &&
+    passportAdditionalPageRequiredForDocs(nationality, docs) &&
     pages.insidePages?.path &&
     !pages.additionalPage?.path
   ) {
@@ -278,10 +281,23 @@ export function isVisaStatusRequestedKey(key: string): boolean {
 export function missingRequestedDocuments(row: {
   requested_documents?: string[] | null;
   documents?: StaffDocumentReferences | null;
+  /** Applicant's nationality — decides whether `passport_additional` is a
+   *  page that exists at all. Absent = treat the page as required (the old
+   *  fail-closed behaviour). */
+  nationality?: string | null;
 }): string[] {
   const requested = row.requested_documents ?? [];
   const docs = row.documents ?? {};
   const pages = docs.passportPages ?? {};
+  // A new-format Syrian passport has no additional page to upload — demanding
+  // it strands the request forever. Same rule the form renders with, so the
+  // gate can never demand a page the form never showed. Narrow on purpose:
+  // only Syria, and only when the rule says the page is gone. Every other
+  // nationality (India above all) stays fail-closed.
+  const syrianWithoutAdditionalPage =
+    row.nationality !== undefined &&
+    passportAdditionalPageVariant(row.nationality) === 'syria' &&
+    passportAdditionalPageRequiredForDocs(row.nationality, docs) === null;
 
   const accepted = (
     doc: { path?: string; validated?: boolean; needsReview?: boolean } | undefined
@@ -307,6 +323,8 @@ export function missingRequestedDocuments(row: {
         if (!accepted(pages.insidePages)) missing.push(key);
         break;
       case 'passport_additional':
+        // Skip entirely when this passport has no such page (see above).
+        if (syrianWithoutAdditionalPage) break;
         if (!accepted(pages.additionalPage)) missing.push(key);
         break;
       case 'eid_front':
@@ -504,8 +522,13 @@ function dependentRequirements(
   }
   // Keyed off a FRESHLY uploaded data page (exactly the client condition), so
   // the renewal skip — where no pages are uploaded — skips this too.
+  // RequiredForDocs, not the bare nationality check: a new-format Syrian
+  // passport has no second page to upload.
   if (
-    passportAdditionalPageVariant(typeof data.nationality === 'string' ? data.nationality : null) &&
+    passportAdditionalPageRequiredForDocs(
+      typeof data.nationality === 'string' ? data.nationality : null,
+      docs
+    ) &&
     pages.insidePages?.path &&
     !pages.additionalPage?.path
   ) {

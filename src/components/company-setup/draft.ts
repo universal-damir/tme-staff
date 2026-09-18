@@ -18,11 +18,15 @@ import {
   type CompanySetupDocuments,
   type CompanySetupLicenseType,
   type CompanySetupPerson,
+  type CompanySetupPersonDocuments,
   type CompanySetupPrefillData,
   type CompanySetupSubmittedData,
 } from '@/types/company-setup';
 import { resolveExtractedNationality } from '@/lib/country-utils';
-import { passportAdditionalPageVariant } from '@/lib/staff-form-logic';
+import {
+  passportAdditionalPageVariant,
+  type PassportAdditionalPageVariant,
+} from '@/lib/staff-form-logic';
 
 export interface DraftCompany extends Omit<CompanySetupCompanyData, 'licenseType'> {
   licenseType?: CompanySetupLicenseType;
@@ -200,7 +204,7 @@ export function missingForPeopleStep(
 
     const docs = documents[String(index)] ?? {};
     if (!docs.passport?.path) need.push('the passport data page');
-    if (passportAdditionalPageVariant(person.nationality) && !docs.passport_additional?.path) {
+    if (companySetupAdditionalPageRequired(person, docs) && !docs.passport_additional?.path) {
       need.push('the additional passport page');
     }
     if (!docs.photo?.path) need.push('the portrait photo');
@@ -319,6 +323,51 @@ export const STATEMENT_ADDRESS_KEY = 'addressOnDocument';
 export function statementAddressOf(ref: CompanySetupDocRef | undefined): string | undefined {
   const value = ref?.extractedData?.[STATEMENT_ADDRESS_KEY];
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Key under which the PASSPORT slot parks "the data page already carried the
+ * issue details" — same bookkeeping trick as STATEMENT_ADDRESS_KEY above, and
+ * dropped by the portal sync in the same way.
+ *
+ * Why it exists: a Syrian passport is asked for a second page ONLY to get the
+ * date and place of issue and the national number. The NEW booklet (renewals
+ * from 2026) prints them on the data page and has no second page at all. The
+ * discriminator is the ISSUE date — printed on the new data page and on
+ * neither the old data page nor its MRZ. We cannot read it back off the person
+ * (those fields are fill-only, and the client may have typed the date
+ * themselves), so the answer is recorded here at extraction time.
+ */
+export const PASSPORT_ISSUE_ON_DATA_PAGE_KEY = 'issueDetailsOnDataPage';
+
+/** Did the passport extraction find an issue date on the data page itself? */
+export function passportDataPageCarriedIssueDetails(
+  ref: CompanySetupDocRef | undefined
+): boolean {
+  return ref?.extractedData?.[PASSPORT_ISSUE_ON_DATA_PAGE_KEY] === 'yes';
+}
+
+/**
+ * Which additional passport page THIS person must actually upload.
+ *
+ * India is unconditional — the address / family-details page is never part of
+ * the data page. Syria is conditional, for the reason in the docblock above:
+ * skipped when the data page already gave us the issue details, or when the
+ * person ticked "my passport has no such page" (the escape hatch for when
+ * extraction could not read the data page).
+ *
+ * The documents step, the step gate, the submit button AND the server-side
+ * submit gate all call this, so the form can never show a slot the server
+ * does not want, or hide one it still demands.
+ */
+export function companySetupAdditionalPageRequired(
+  person: Pick<CompanySetupPerson, 'nationality' | 'passportHasNoAdditionalPage'> | undefined,
+  docs: CompanySetupPersonDocuments | undefined
+): PassportAdditionalPageVariant | null {
+  const variant = passportAdditionalPageVariant(person?.nationality);
+  if (variant !== 'syria') return variant;
+  if (person?.passportHasNoAdditionalPage) return null;
+  return passportDataPageCarriedIssueDetails(docs?.passport) ? null : 'syria';
 }
 
 /** The `data` shape of the extract-passport API response (see passport-extraction.ts). */

@@ -18,12 +18,12 @@ import {
   rekeyDocumentsAfterRemove,
   roleTotals,
   missingForPeopleStep,
+  companySetupAdditionalPageRequired,
   isoToDisplayDate,
   type CompanySetupDraft,
   type DraftCompany,
 } from './draft';
 import { validateCompanyName } from '@/lib/company-setup-name-validation';
-import { passportAdditionalPageVariant } from '@/lib/staff-form-logic';
 import { Input, PhoneInput } from '@/components/ui';
 import {
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
@@ -489,8 +489,10 @@ export function CompanySetupForm({
   const documentsOk = draft.persons.every((person, index) => {
     const docs = documents[String(index)] ?? {};
     if (!docs.passport?.path || !docs.photo?.path || !docs.proof_of_address?.path) return false;
-    // Indian / Syrian passports carry a second required page.
-    if (passportAdditionalPageVariant(person.nationality) && !docs.passport_additional?.path) {
+    // Indian / Syrian passports carry a second required page — except the new
+    // Syrian booklet, which has none. Same rule the documents step renders
+    // with, so the button can never sit grey over a slot that is not shown.
+    if (companySetupAdditionalPageRequired(person, docs) && !docs.passport_additional?.path) {
       return false;
     }
     if (person.currentOrPastEidVisa === 'current') {

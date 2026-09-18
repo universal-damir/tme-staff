@@ -92,6 +92,16 @@ export interface CompanySetupPerson {
   passportNumber?: string;
   passportIssueDate?: string;    // ISO YYYY-MM-DD
   passportExpiryDate?: string;   // ISO YYYY-MM-DD
+  /**
+   * Syria only: this person's passport has no additional page. The NEW Syrian
+   * booklet (renewals from 2026) prints date/place of issue, expiry and the
+   * national number on the data page and carries no second page, so asking for
+   * one leaves the client unable to submit the form at all — and unlike a
+   * staff record, nobody at TME can upload it on their behalf. Set by the tick
+   * in the documents step; the auto-detect on the data page usually settles it
+   * first. See companySetupAdditionalPageRequired().
+   */
+  passportHasNoAdditionalPage?: boolean;
   gender?: 'male' | 'female';
   placeOfBirth?: string;
   educationalQualification?: string;
