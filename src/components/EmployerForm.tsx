@@ -124,7 +124,7 @@ const TIME_PERIOD_UNIT_OPTIONS = [
   { value: 'months', label: 'Month(s)' },
 ];
 
-export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: EmployerFormProps) {
+export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, employerToken }: EmployerFormProps) {
   const { professions: jobTitleOptions, loading: jobTitlesLoading } = useMohreProfessions();
   const [signature, setSignature] = useState<string | null>(null);
   const [signatureError, setSignatureError] = useState<string | null>(null);
@@ -171,7 +171,12 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
     setValue,
     formState: { errors },
   } = useForm<EmployerFormData>({
-    defaultValues: submission.employer_data || {
+    // Order: defaults < portal prefill < saved answers. Saved answers win (a
+    // recalled form reopens with everything the employer entered), while
+    // prefill-only keys (payroll reference, registered_authority, ...) that
+    // the saved data never carried still survive. The signature always
+    // starts empty: a recalled form must be signed again.
+    defaultValues: {
       salary_currency: 'AED',
       annual_leave_type: 'calendar',
       notice_period_unit: 'months',
@@ -189,7 +194,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
       // overrides defaults, but saved data overrides prefill. Dates normalized
       // to dd.mm.yyyy (see normalizedPrefill above).
       ...normalizedPrefill,
-    },
+      ...(submission.employer_data ?? {}),
+    } as EmployerFormData,
   });
 
   const jobTitleVisa = watch('job_title_visa');
@@ -733,7 +739,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
                 if (result) {
                   setJobOfferLetterDoc(result);
                   const currentDocs: StaffDocumentReferences = submission.documents || {};
-                  await updateDocumentReferences(submission.id, { ...currentDocs, job_offer_letter: result });
+                  await updateDocumentReferences(submission.id, { ...currentDocs, job_offer_letter: result }, null, employerToken);
                 }
                 return result;
               }}
@@ -741,7 +747,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal }: 
                 setJobOfferLetterDoc(undefined);
                 const currentDocs: StaffDocumentReferences = submission.documents || {};
                 const { job_offer_letter: _, ...rest } = currentDocs;
-                await updateDocumentReferences(submission.id, rest as StaffDocumentReferences);
+                await updateDocumentReferences(submission.id, rest as StaffDocumentReferences, null, employerToken);
               }}
             />
           </div>

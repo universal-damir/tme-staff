@@ -84,6 +84,28 @@ export function assertSubmittable(row: { status: string | null } | null): Submit
 }
 
 /**
+ * Reject submits made at the wrong step of the flow. The employer submit
+ * must only run while the row is on the employer step: a re-POST after the
+ * employer signed would otherwise overwrite the signed employer data and
+ * signature. The employee submit must only run on the employee step (a
+ * recall moves the row back to 'employer').
+ */
+export function assertStep(
+  row: { current_step: string | null } | null,
+  expected: 'employer' | 'employee',
+): SubmittabilityCheck {
+  if (!row) return { ok: false, status: 404, error: 'Onboarding submission not found' };
+  if (row.current_step !== expected) {
+    return { ok: false, status: 409, error: 'This form is not at the right step. Please reload the page.' };
+  }
+  return { ok: true };
+}
+
+/** Shown to the employee when the employer took the form back. */
+export const RECALLED_MESSAGE =
+  'This form was withdrawn by your employer to make a correction. You will receive a new email with a new link.';
+
+/**
  * Server-side required-documents gate for `/api/submit-employee`.
  *
  * Until 2026-07 the ONLY completeness check lived in client-side JavaScript

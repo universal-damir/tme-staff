@@ -11,7 +11,11 @@
  * Returns:
  *   200 — `{ status: '...', current_step: '...', ... }` (scrubbed payload)
  *   404 — invalid UUID or row not found
+ *   200 — `{ view: 'employer_status', ... }` when the EMPLOYER opens their
+ *         own link (valid `?e=` employer token) after signing, while the
+ *         employee has not submitted yet (read-only status + Recall button)
  *   403 — employee step accessed without a valid token
+ *         (`status: 'recalled'` when the employer took the form back)
  *   410 — submission cancelled or past 14-day expiry
  */
 
@@ -19,6 +23,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   verifyOnboardingAccess,
   scrubOnboardingForBrowser,
+  employerTokenMatches,
+  canEmployerRecall,
 } from '@/lib/onboarding-token';
 import { getSupabaseAdmin, STORAGE_BUCKET } from '@/lib/supabase-server';
 
@@ -62,16 +68,47 @@ export async function GET(
   const { id } = await ctx.params;
   const url = new URL(req.url);
   const token = url.searchParams.get('token');
+  const employerToken = url.searchParams.get('e');
 
-  const result = await verifyOnboardingAccess(id, token, { expectedStep: 'auto' });
+  const result = await verifyOnboardingAccess(id, token, {
+    expectedStep: 'auto',
+    employerToken,
+  });
 
   if (!result.ok) {
+    // The employer opens their own link after signing: the row is on the
+    // employee step, so the employee gate refuses it. With a matching
+    // employer token we show a read-only status page instead (no form data,
+    // no tokens). A valid employee token wins because verify returned ok.
+    const row = result.row;
+    if (
+      row &&
+      (result.reason === 'token_required' ||
+        result.reason === 'token_invalid' ||
+        result.reason === 'recalled') &&
+      row.current_step === 'employee' &&
+      row.status === 'employer_completed' &&
+      employerTokenMatches(row, employerToken)
+    ) {
+      return NextResponse.json({
+        id,
+        view: 'employer_status',
+        status: 'employer_completed',
+        current_step: 'employee',
+        onboarding_type: row.onboarding_type,
+        staff_name: row.staff_name,
+        employer_signed_at: row.employer_signed_at,
+        can_recall: canEmployerRecall(row),
+      });
+    }
+
     const body: { status: string; reason?: string } = { status: 'denied' };
     if (result.reason === 'cancelled') body.status = 'cancelled';
     else if (result.reason === 'expired') body.status = 'expired';
     else if (result.reason === 'already_complete') body.status = 'complete';
     else if (result.reason === 'token_required') body.status = 'token_required';
     else if (result.reason === 'token_invalid') body.status = 'token_required';
+    else if (result.reason === 'recalled') body.status = 'recalled';
     else if (result.reason === 'invalid_id') body.status = 'not_found';
     else if (result.reason === 'not_found') body.status = 'not_found';
     return NextResponse.json(body, { status: result.status ?? 404 });

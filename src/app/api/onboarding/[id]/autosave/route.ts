@@ -45,7 +45,11 @@ export async function POST(
   });
 
   if (!access.ok) {
-    if (access.reason === 'token_required' || access.reason === 'token_invalid') {
+    if (
+      access.reason === 'token_required' ||
+      access.reason === 'token_invalid' ||
+      access.reason === 'recalled'
+    ) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
     if (access.reason === 'cancelled' || access.reason === 'expired' || access.reason === 'already_complete') {

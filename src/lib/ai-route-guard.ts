@@ -155,7 +155,11 @@ export async function guardAiRoute(req: NextRequest): Promise<AiGuardResult> {
   });
 
   if (!access.ok) {
-    if (access.reason === 'token_required' || access.reason === 'token_invalid') {
+    if (
+      access.reason === 'token_required' ||
+      access.reason === 'token_invalid' ||
+      access.reason === 'recalled'
+    ) {
       return { ok: false, status: 403, error: 'Unauthorized' };
     }
     if (access.reason === 'cancelled' || access.reason === 'expired' || access.reason === 'already_complete') {

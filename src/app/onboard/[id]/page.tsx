@@ -5,11 +5,18 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
 import { FormProgress } from '@/components/FormProgress';
 import { EmployerForm } from '@/components/EmployerForm';
+import { EmployerRecallStatus } from '@/components/EmployerRecallStatus';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { DocumentRequestForm } from '@/components/DocumentRequestForm';
 import { DependentForm } from '@/components/DependentForm';
-import type { StaffOnboardingSubmission, EmployerFormData, EmployeeFormData } from '@/types';
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Lock } from 'lucide-react';
+import type {
+  StaffOnboardingSubmission,
+  EmployerFormData,
+  EmployeeFormData,
+  EmployerStatusView,
+} from '@/types';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Lock, Info } from 'lucide-react';
+import { RECALLED_MESSAGE } from '@/lib/submit-validation';
 import { sponsorshipTypeFromSponsor } from '@/lib/staff-form-logic';
 
 type PageState =
@@ -25,7 +32,9 @@ type PageState =
   | 'cancelled'
   | 'expired'
   | 'already_complete'
-  | 'token_required';
+  | 'token_required'
+  | 'employer_status' // Employer opened their own link after signing (read-only + Recall)
+  | 'recalled'; // Employee opened a link the employer has withdrawn
 
 function RedirectTimer() {
   const [seconds, setSeconds] = useState(5);
@@ -69,6 +78,9 @@ function OnboardingPageInner() {
   const searchParams = useSearchParams();
   const id = params.id as string;
   const token = searchParams.get('token');
+  // Employer access token from the employer's email link. Authorises the
+  // employer status page, "Recall and correct" and the re-sign after recall.
+  const employerToken = searchParams.get('e');
 
   const [submission, setSubmission] = useState<StaffOnboardingSubmission | null>(null);
   const [pageState, setPageState] = useState<PageState>(
@@ -76,6 +88,10 @@ function OnboardingPageInner() {
   );
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [employerStatus, setEmployerStatus] = useState<EmployerStatusView | null>(null);
+  // Bumped after a successful recall to re-read the row (now back on the
+  // employer step, prefilled).
+  const [reloadKey, setReloadKey] = useState(0);
 
   // For same-person combined form
   const [employerData, setEmployerData] = useState<EmployerFormData | null>(null);
@@ -89,18 +105,20 @@ function OnboardingPageInner() {
 
     async function fetchSubmission() {
       try {
-        const url = token
-          ? `/api/onboarding/${id}?token=${encodeURIComponent(token)}`
-          : `/api/onboarding/${id}`;
+        const qs = new URLSearchParams();
+        if (token) qs.set('token', token);
+        if (employerToken) qs.set('e', employerToken);
+        const query = qs.toString();
+        const url = query ? `/api/onboarding/${id}?${query}` : `/api/onboarding/${id}`;
         const res = await fetch(url, { cache: 'no-store' });
-        const body = await res.json().catch(() => null) as { status?: string } | null;
+        const body = await res.json().catch(() => null) as { status?: string; view?: string } | null;
 
         if (res.status === 404) {
           setPageState('not_found');
           return;
         }
         if (res.status === 403) {
-          setPageState('token_required');
+          setPageState(body?.status === 'recalled' ? 'recalled' : 'token_required');
           return;
         }
         if (res.status === 410) {
@@ -112,6 +130,12 @@ function OnboardingPageInner() {
         if (!res.ok) {
           setError('Failed to load onboarding form');
           setPageState('error');
+          return;
+        }
+
+        if (body?.view === 'employer_status') {
+          setEmployerStatus(body as unknown as EmployerStatusView);
+          setPageState('employer_status');
           return;
         }
 
@@ -185,7 +209,7 @@ function OnboardingPageInner() {
     }
 
     fetchSubmission();
-  }, [id, token]);
+  }, [id, token, employerToken, reloadKey]);
 
   // Client IP is derived server-side from request headers (see
   // submit-validation.ts `getSignerIp` — P2-3 hardening). The previous
@@ -213,6 +237,7 @@ function OnboardingPageInner() {
               id,
               employerData: data,
               signature,
+              employerToken,
             }),
           });
 
@@ -243,13 +268,23 @@ function OnboardingPageInner() {
               id,
               employerData: data,
               signature,
+              employerToken,
             }),
           });
 
           if (response.ok) {
             setPageState('success');
           } else {
-            setError('Failed to save form. Please try again.');
+            // Show the server's plain-English reason (e.g. already signed,
+            // or the link is not the latest one) instead of a generic error.
+            let message = 'Failed to save form. Please try again.';
+            try {
+              const errBody = await response.json();
+              if (typeof errBody?.error === 'string' && errBody.error) message = errBody.error;
+            } catch {
+              // Non-JSON error body — keep the generic message.
+            }
+            setError(message);
           }
         }
       } catch (err) {
@@ -259,7 +294,7 @@ function OnboardingPageInner() {
         setIsSubmitting(false);
       }
     },
-    [submission, id]
+    [submission, id, employerToken]
   );
 
   // Handle employee form submission
@@ -287,6 +322,9 @@ function OnboardingPageInner() {
               ? (employerData || submission.employer_data)
               : undefined,
             employerSignature: submission.is_same_person ? submission.employer_signature_data : undefined,
+            // Employee access token from the invitation link — the server
+            // checks it so a withdrawn (recalled) link cannot submit.
+            token,
           }),
         });
 
@@ -298,6 +336,10 @@ function OnboardingPageInner() {
           let message = 'Failed to save form. Please try again.';
           try {
             const body = await response.json();
+            if (body?.code === 'recalled') {
+              setPageState('recalled');
+              return;
+            }
             if (typeof body?.error === 'string' && body.error) message = body.error;
           } catch {
             // Non-JSON error body — keep the generic message.
@@ -311,7 +353,7 @@ function OnboardingPageInner() {
         setIsSubmitting(false);
       }
     },
-    [submission, id, employerData]
+    [submission, id, employerData, token]
   );
 
   // Partner/Investor track (DET company shareholders) — employer stage is
@@ -403,6 +445,38 @@ function OnboardingPageInner() {
             This form has already been submitted. Thank you for completing
             the process.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Employer opened their own link after signing: read-only status + Recall
+  if (pageState === 'employer_status' && employerStatus) {
+    return (
+      <EmployerRecallStatus
+        view={employerStatus}
+        linkToken={id}
+        employerToken={employerToken}
+        onRecalled={() => {
+          setEmployerStatus(null);
+          setSubmission(null);
+          setPageState('loading');
+          setReloadKey((k) => k + 1);
+        }}
+      />
+    );
+  }
+
+  // Employee opened a link the employer has withdrawn to make a correction
+  if (pageState === 'recalled') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-yellow-100 mx-auto mb-6 flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8 text-yellow-500" />
+          </div>
+          <h1 className="text-xl font-bold text-gray-900 mb-4">Form withdrawn</h1>
+          <p className="text-gray-600">{RECALLED_MESSAGE}</p>
         </div>
       </div>
     );
@@ -571,12 +645,26 @@ function OnboardingPageInner() {
         {/* Forms */}
         <div className="space-y-8">
           {/* Employer Form - Show in employer state or combined mode before employee */}
+          {pageState === 'employer' && submission.employer_recalled && (
+            <div
+              className="p-4 rounded-lg flex items-start gap-3 border-2"
+              style={{ backgroundColor: '#F3F5FA', borderColor: TME_COLORS.primary }}
+            >
+              <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+              <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                You took this form back to correct it. Your previous answers are filled in. Check
+                them, make your changes and sign again. We will then send{' '}
+                {(submission.staff_name ?? '').trim() || 'the employee'} a new email with a new link.
+              </p>
+            </div>
+          )}
           {(pageState === 'employer' || (pageState === 'combined' && !showEmployeeSection)) && (
             <EmployerForm
               submission={submission}
               onSubmit={handleEmployerSubmit}
               isSubmitting={isSubmitting}
               isRenewal={isRenewal}
+              employerToken={employerToken}
             />
           )}
 

@@ -338,3 +338,21 @@ export async function topEdgeLooksClipped(imageDataUrl: string): Promise<boolean
     img.src = imageDataUrl;
   });
 }
+
+/**
+ * Format an ISO timestamp as dd.mm.yy in Dubai time (UTC+4), e.g. '12.12.25'.
+ * Returns '' for empty or invalid input.
+ */
+export function formatDubaiDateShort(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Dubai',
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('day')}.${get('month')}.${get('year')}`;
+}

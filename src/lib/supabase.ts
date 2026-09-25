@@ -160,12 +160,13 @@ export async function updateDocumentReferences(
   id: string,
   documents: StaffDocumentReferences,
   token?: string | null,
+  employerToken?: string | null,
 ): Promise<boolean> {
   try {
     const res = await fetch(`/api/onboarding/${encodeURIComponent(id)}/documents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: token ?? null, documents }),
+      body: JSON.stringify({ token: token ?? null, employerToken: employerToken ?? null, documents }),
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');

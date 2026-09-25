@@ -14,14 +14,19 @@ import {
   sanitizeFreeText,
 } from '@/lib/submit-validation';
 import { foldPayloadToEnglish } from '@/lib/english-only';
-import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
+import {
+  resolveSubmissionIdByLinkToken,
+  employerTokenMatches,
+} from '@/lib/onboarding-token';
+
+const ALREADY_SIGNED_MESSAGE = 'The employer part of this form has already been signed.';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id: linkToken, employerData, signature } = body;
+    const { id: linkToken, employerData, signature, employerToken } = body;
 
     if (!linkToken || !employerData || !signature) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -41,7 +46,7 @@ export async function POST(req: NextRequest) {
     // Look up the current status before issuing the UPDATE.
     const { data: existing, error: lookupError } = await supabase
       .from('staff_onboarding_submissions')
-      .select('status')
+      .select('status, current_step, employer_access_token, employer_recall_count')
       .eq('id', id)
       .maybeSingle();
 
@@ -53,6 +58,37 @@ export async function POST(req: NextRequest) {
     const guard = assertSubmittable(existing);
     if (!guard.ok) {
       return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
+    // Signed = final. Only a row on the employer step may take an employer
+    // submit; a re-POST after signing (current_step 'employee') used to
+    // overwrite the signed employer data + signature. To change a signed
+    // form the employer uses "Recall and correct", which moves the row back.
+    // Same-person rows submit here at current_step 'employer' too, so they
+    // still pass; Partner/Investor rows (born on the employee step) have no
+    // employer stage and are refused.
+    const row = existing as {
+      status: string;
+      current_step: string | null;
+      employer_access_token: string | null;
+      employer_recall_count: number | null;
+    };
+    if (row.current_step !== 'employer') {
+      return NextResponse.json({ error: ALREADY_SIGNED_MESSAGE }, { status: 409 });
+    }
+
+    // After a recall the employer re-signs from their own email link. The
+    // employee's (dead) link carries the same link_token, so the employer
+    // token must match here.
+    if (
+      (row.employer_recall_count ?? 0) > 0 &&
+      row.employer_access_token &&
+      !employerTokenMatches(row, typeof employerToken === 'string' ? employerToken : null)
+    ) {
+      return NextResponse.json(
+        { error: 'Please use the link from your latest email from TME Services.' },
+        { status: 403 },
+      );
     }
 
     // P2-3: derive signer IP from request headers, never from body.
@@ -73,7 +109,9 @@ export async function POST(req: NextRequest) {
     // RLS used to permit this update (anon_update policy); after the P0-3
     // hardening we route every write through service-role server endpoints
     // and drop that policy.
-    const { error } = await supabase
+    // Conditional on the employer step so two racing submits (or a submit
+    // racing anything else that moves the step) cannot both land.
+    const { data: updatedRows, error } = await supabase
       .from('staff_onboarding_submissions')
       .update({
         employer_data: cleanEmployerData,
@@ -84,11 +122,16 @@ export async function POST(req: NextRequest) {
         status: 'employer_completed',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('current_step', 'employer')
+      .select('id');
 
     if (error) {
       console.error('[submit-employer] Supabase update failed:', error);
       return NextResponse.json({ error: 'Failed to save form' }, { status: 500 });
+    }
+    if (!updatedRows || updatedRows.length === 0) {
+      return NextResponse.json({ error: ALREADY_SIGNED_MESSAGE }, { status: 409 });
     }
 
     // 2. Notify TME Portal (server-side — guaranteed to complete)

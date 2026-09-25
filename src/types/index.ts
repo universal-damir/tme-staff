@@ -637,6 +637,10 @@ export interface StaffOnboardingSubmission {
   // Access control
   employee_access_token?: string;
 
+  // True when the employer took the signed form back to correct it (set by
+  // the read route; the page shows a banner above the prefilled form).
+  employer_recalled?: boolean;
+
   // Status
   synced_to_tme: boolean;
   status: OnboardingStatus;
@@ -655,6 +659,24 @@ export interface EmployerFormProps {
   onSubmit: (data: EmployerFormData, signature: string) => Promise<void>;
   isSubmitting: boolean;
   isRenewal?: boolean;
+  // Employer access token from the employer's email link (`?e=`). Needed
+  // for document saves after a recall.
+  employerToken?: string | null;
+}
+
+/**
+ * Read-only status the employer sees when opening their own link after
+ * signing, while the employee has not submitted yet.
+ */
+export interface EmployerStatusView {
+  id: string;
+  view: 'employer_status';
+  status: 'employer_completed';
+  current_step: 'employee';
+  onboarding_type: OnboardingType;
+  staff_name: string | null;
+  employer_signed_at: string | null;
+  can_recall: boolean;
 }
 
 export interface EmployeeFormProps {

@@ -4,6 +4,9 @@ import {
   missingRequestedDocuments,
   missingDependentRequirements,
   missingDependentRenewalRequirements,
+  assertStep,
+  assertSubmittable,
+  RECALLED_MESSAGE,
 } from './submit-validation';
 
 /**
@@ -1028,5 +1031,44 @@ describe('missingDependentRenewalRequirements', () => {
         { ...completeDependentRenewalData, dependent_type: 'Father', parents_marital_status: undefined }
       )
     ).toEqual([]);
+  });
+});
+
+describe('assertStep', () => {
+  it('404 when the row is missing', () => {
+    expect(assertStep(null, 'employer')).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it('passes on the matching step', () => {
+    expect(assertStep({ current_step: 'employer' }, 'employer')).toEqual({ ok: true });
+    expect(assertStep({ current_step: 'employee' }, 'employee')).toEqual({ ok: true });
+  });
+
+  it('blocks an employer re-POST after the employer already signed', () => {
+    const res = assertStep({ current_step: 'employee' }, 'employer');
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(409);
+    expect(res.error).toBe('This form is not at the right step. Please reload the page.');
+  });
+
+  it('blocks an employee submit after a recall moved the row back', () => {
+    expect(assertStep({ current_step: 'employer' }, 'employee')).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it('blocks both steps on a completed row', () => {
+    expect(assertStep({ current_step: 'complete' }, 'employer').ok).toBe(false);
+    expect(assertStep({ current_step: 'complete' }, 'employee').ok).toBe(false);
+  });
+
+  it('assertSubmittable is unchanged (complete / cancelled only)', () => {
+    expect(assertSubmittable({ status: 'employer_completed' })).toEqual({ ok: true });
+    expect(assertSubmittable({ status: 'complete' })).toMatchObject({ ok: false, status: 410 });
+    expect(assertSubmittable({ status: 'cancelled' })).toMatchObject({ ok: false, status: 410 });
+  });
+
+  it('recalled message is plain English', () => {
+    expect(RECALLED_MESSAGE).toBe(
+      'This form was withdrawn by your employer to make a correction. You will receive a new email with a new link.',
+    );
   });
 });

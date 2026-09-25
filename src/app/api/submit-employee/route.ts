@@ -9,20 +9,28 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { signWebhookBody } from '@/lib/webhook-signature';
 import {
+  RECALLED_MESSAGE,
   assertSubmittable,
   getSignerIp,
   missingRequiredDocuments,
   sanitizeFreeText,
 } from '@/lib/submit-validation';
 import { foldPayloadToEnglish } from '@/lib/english-only';
-import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
+import {
+  resolveSubmissionIdByLinkToken,
+  constantTimeStringEqual,
+  ONBOARDING_TOKEN_REGEX,
+} from '@/lib/onboarding-token';
+
+const WRONG_STEP_MESSAGE = 'This form is not at the right step. Please reload the page.';
 
 const TME_PORTAL_URL = process.env.TME_PORTAL_URL || 'https://portal.tme-services.com';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id: linkToken, employeeData, signature, isSamePerson, employerData, employerSignature } = body;
+    // body.isSamePerson is ignored: the row's is_same_person decides (see below).
+    const { id: linkToken, employeeData, signature, employerData, employerSignature, token } = body;
 
     if (!linkToken || !employeeData || !signature) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -41,7 +49,7 @@ export async function POST(req: NextRequest) {
     // The extra columns feed the required-documents gate below.
     const { data: existing, error: lookupError } = await supabase
       .from('staff_onboarding_submissions')
-      .select('status, onboarding_type, sponsorship_type, employer_data, employee_data, documents, existing_documents, sponsor_noc_signature_data')
+      .select('status, current_step, is_same_person, employee_access_token, employer_recall_count, onboarding_type, sponsorship_type, employer_data, employee_data, documents, existing_documents, sponsor_noc_signature_data')
       .eq('id', id)
       .maybeSingle();
 
@@ -75,6 +83,38 @@ export async function POST(req: NextRequest) {
     const guard = assertSubmittable(existing);
     if (!guard.ok) {
       return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
+    // Step + token gate. The employee may only submit while the row is on
+    // the employee step, with the token from their CURRENT email link. An
+    // employer recall moves the row back to 'employer' and rotates the token,
+    // so an old link gets the clear "withdrawn" message instead of a generic
+    // failure. Same-person rows have no token (one human, one link).
+    const gate = existing as unknown as {
+      current_step: string | null;
+      is_same_person: boolean | null;
+      employee_access_token: string | null;
+      employer_recall_count: number | null;
+    };
+    const wasRecalled = (gate.employer_recall_count ?? 0) > 0;
+    if (gate.current_step !== 'employee') {
+      if (wasRecalled) {
+        return NextResponse.json({ error: RECALLED_MESSAGE, code: 'recalled' }, { status: 409 });
+      }
+      return NextResponse.json({ error: WRONG_STEP_MESSAGE }, { status: 409 });
+    }
+    const checkToken = !gate.is_same_person && !!gate.employee_access_token;
+    if (checkToken) {
+      const tokenOk =
+        typeof token === 'string' &&
+        ONBOARDING_TOKEN_REGEX.test(token) &&
+        constantTimeStringEqual(token, gate.employee_access_token as string);
+      if (!tokenOk) {
+        if (wasRecalled) {
+          return NextResponse.json({ error: RECALLED_MESSAGE, code: 'recalled' }, { status: 409 });
+        }
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      }
     }
 
     // Required-documents gate: the client form enforces this too, but only in
@@ -154,7 +194,11 @@ export async function POST(req: NextRequest) {
     ) {
       delete cleanEmployeeData.submission_device;
     }
-    const cleanEmployerData = isSamePerson && employerData
+    // Same-person comes from the ROW, never from the body. On a two-person
+    // form the employer part is signed and final: a caller holding only the
+    // employee link must not be able to rewrite it by claiming isSamePerson.
+    const samePerson = gate.is_same_person === true;
+    const cleanEmployerData = samePerson && employerData
       ? foldPayloadToEnglish(sanitizeFreeText(employerData)) as Record<string, unknown>
       : null;
 
@@ -174,7 +218,7 @@ export async function POST(req: NextRequest) {
     // 1. Save to Supabase
     let updateData: Record<string, unknown>;
 
-    if (isSamePerson && cleanEmployerData) {
+    if (samePerson && cleanEmployerData) {
       // Same-person mode — save both sections
       updateData = {
         employer_data: cleanEmployerData,
@@ -206,14 +250,37 @@ export async function POST(req: NextRequest) {
 
     // Service-role client (P0-3): writes go through the admin client so
     // anon RLS update policies can be dropped.
-    const { error } = await supabase
+    // Conditional on the employee step (and the token we just checked) so a
+    // recall landing at the same moment and this submit cannot both win.
+    let updateQuery = supabase
       .from('staff_onboarding_submissions')
       .update(updateData)
-      .eq('id', id);
+      .eq('id', id)
+      .eq('current_step', 'employee');
+    if (checkToken) {
+      updateQuery = updateQuery.eq('employee_access_token', gate.employee_access_token as string);
+    }
+    const { data: updatedRows, error } = await updateQuery.select('id');
 
     if (error) {
       console.error('[submit-employee] Supabase update failed:', error);
       return NextResponse.json({ error: 'Failed to save form' }, { status: 500 });
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      const { data: fresh } = await supabase
+        .from('staff_onboarding_submissions')
+        .select('status, current_step')
+        .eq('id', id)
+        .maybeSingle();
+      const f = fresh as { status?: string; current_step?: string } | null;
+      if (f?.current_step === 'employer') {
+        return NextResponse.json({ error: RECALLED_MESSAGE, code: 'recalled' }, { status: 409 });
+      }
+      if (f && (f.status === 'complete' || f.current_step === 'complete')) {
+        return NextResponse.json({ error: 'Onboarding already complete' }, { status: 410 });
+      }
+      return NextResponse.json({ error: 'Please reload the page and try again.' }, { status: 409 });
     }
 
     // 2. Notify TME Portal to trigger sync (server-side — guaranteed to complete)
