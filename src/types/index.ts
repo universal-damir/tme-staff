@@ -585,8 +585,10 @@ export interface StaffOnboardingSubmission {
   // `education_skipped` is another portal-set marker (renewals only): the
   // education step is only needed for "manager and above" visa professions,
   // so the portal flags everyone else and the form drops step 7 entirely.
+  // `renewal_kind` is a portal-set marker too: 'labour_card' means TME renews
+  // only the Employment ID, so the header reads "Staff Employment ID Renewal".
   prefill_employer_data:
-    | (Partial<EmployerFormData> & { visa_track?: string; education_skipped?: boolean })
+    | (Partial<EmployerFormData> & { visa_track?: string; education_skipped?: boolean; renewal_kind?: string })
     | null;
   prefill_employee_data: Partial<EmployeeFormData> | null;
   onboarding_type: OnboardingType;

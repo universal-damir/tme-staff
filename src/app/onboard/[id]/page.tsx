@@ -567,6 +567,9 @@ function OnboardingPageInner() {
   const headerSponsorshipType = headerSponsor
     ? sponsorshipTypeFromSponsor(headerSponsor)
     : (submission.sponsorship_type ?? 'company');
+  // The portal marks a labour-card renewal explicitly — it wins over the
+  // sponsor, which can still say Company on a dependent-visa holder.
+  const isEmploymentIdRenewal = submission.prefill_employer_data?.renewal_kind === 'labour_card';
   const isShowingEmployer = pageState === 'employer' || (pageState === 'combined' && !showEmployeeSection);
   // Widen the page only for the renewal employer step, where Salary Contract +
   // Payroll render side-by-side. Other steps (employee form, success states)
@@ -614,7 +617,7 @@ function OnboardingPageInner() {
               : isPartnerInvestorTrack
               ? (isRenewal ? 'Partner / Investor Visa Renewal' : 'Partner / Investor Visa Application')
               : isRenewal
-              ? (headerSponsorshipType === 'company'
+              ? (headerSponsorshipType === 'company' && !isEmploymentIdRenewal
                   ? 'Staff Visa Renewal'
                   : 'Staff Employment ID Renewal')
               : 'Staff Onboarding'}
