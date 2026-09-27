@@ -22,6 +22,12 @@ describe('company setup document slots', () => {
 });
 
 describe('documentsErrorForRow', () => {
+  it('accepts person keys up to 8 (9 persons: 6 shareholders + separate officers)', () => {
+    expect(
+      documentsErrorForRow({ '8': { passport: clientRef('8', 'passport') } }, ROW)
+    ).toBeNull();
+  });
+
   it('accepts client refs whose path matches their person key and slot', () => {
     const documents = {
       '0': { passport: clientRef('0', 'passport'), photo: clientRef('0', 'photo') },
@@ -100,6 +106,7 @@ describe('documentsErrorForRow', () => {
       )
     ).toMatch(/invalid path/);
     expect(documentsErrorForRow({ '9': {} }, ROW)).toMatch(/invalid person key/);
+    expect(documentsErrorForRow({ '10': {} }, ROW)).toMatch(/invalid person key/);
     expect(documentsErrorForRow({ '0': { selfie: clientRef('0', 'selfie') } }, ROW)).toMatch(
       /invalid document slot/
     );

@@ -119,6 +119,79 @@ function additionalPagePrompt(nationality?: string): string {
   return ADDITIONAL_PAGE_PROMPT;
 }
 
+/** Raw tool input of the data-page check (requireSpread). */
+export interface PassportDataPageObservations {
+  observation?: unknown;
+  pages_fully_visible?: unknown;
+  fold_visible?: unknown;
+  is_uae_passport?: unknown;
+  holder_photo_visible?: unknown;
+  mrz_visible?: unknown;
+  all_corners_visible?: unknown;
+  quality_issue?: unknown;
+  /** Reported by the model, deliberately IGNORED by the verdict. */
+  valid?: unknown;
+}
+
+export type PassportDataPageVerdict =
+  | { kind: 'accept' }
+  | { kind: 'reject'; reason: string }
+  | { kind: 'infra'; missing: string[] };
+
+/**
+ * A model that writes "None", "No issues", "N/A" or "The scan is clean" into
+ * quality_issue is telling us there is NO problem. Only real text counts.
+ */
+export function isRealQualityIssue(raw: unknown): boolean {
+  if (typeof raw !== 'string') return false;
+  const t = raw.trim().toLowerCase().replace(/[.!]+$/, '');
+  if (t === '') return false;
+  // "None - the scan is clean", "No issues, scan is flat": a no-problem lead-in.
+  if (/^(none|no (serious |visible |significant )?(quality )?(issues?|problems?))\s*[-,:;(]/.test(t)) return false;
+  return !/^(none|n\/a|na|nil|null|-+|no (serious |visible |significant )?(quality )?(issues?|problems?)( found| visible| detected)?|(the )?(scan|image) (is )?(clean|fine|good|ok))$/.test(t);
+}
+
+export const DATA_PAGE_REJECT_REASONS = {
+  notDataPage:
+    "This does not look like the passport data page. Please upload the page with the holder's photo and the two machine-readable lines at the bottom.",
+  singlePage:
+    'Only one passport page is visible. Please open the passport flat and scan the whole spread: the data page and the page facing it, with the fold between them.',
+  corners:
+    'Part of the passport is cut off. Please scan it again with all four corners inside the frame.',
+  quality:
+    'The scan is not clear enough (for example glare, blur, a strong angle or a busy background). Please scan the open passport flat on a plain background.',
+} as const;
+
+/**
+ * The data-page verdict, computed in code from the model's observations.
+ * Pure function: never reads the model's `valid`. Missing or mistyped
+ * observations mean the check did not really run, so the caller treats that
+ * as infrastructure (accept, flagged for review), never as a rejection.
+ */
+export function judgePassportDataPage(o: PassportDataPageObservations): PassportDataPageVerdict {
+  const booleans = ['fold_visible', 'is_uae_passport', 'holder_photo_visible', 'mrz_visible'] as const;
+  const missing: string[] = booleans.filter((k) => typeof o[k] !== 'boolean');
+  if (typeof o.pages_fully_visible !== 'number' || !Number.isFinite(o.pages_fully_visible)) {
+    missing.push('pages_fully_visible');
+  }
+  if (missing.length > 0) return { kind: 'infra', missing };
+
+  if (o.holder_photo_visible !== true || o.mrz_visible !== true) {
+    return { kind: 'reject', reason: DATA_PAGE_REJECT_REASONS.notDataPage };
+  }
+  const spreadOk = (o.pages_fully_visible as number) >= 2 && o.fold_visible === true;
+  if (!spreadOk && o.is_uae_passport !== true) {
+    return { kind: 'reject', reason: DATA_PAGE_REJECT_REASONS.singlePage };
+  }
+  if (o.all_corners_visible === false) {
+    return { kind: 'reject', reason: DATA_PAGE_REJECT_REASONS.corners };
+  }
+  if (isRealQualityIssue(o.quality_issue)) {
+    return { kind: 'reject', reason: DATA_PAGE_REJECT_REASONS.quality };
+  }
+  return { kind: 'accept' };
+}
+
 /**
  * Validate passport page using tool_use (prevents model refusals)
  */
@@ -179,6 +252,15 @@ export async function validatePassportPage(
           description:
             'true when this is confidently a UAE-issued passport (cover emblem, Arabic script, nationality field)',
         },
+        holder_photo_visible: {
+          type: 'boolean',
+          description: "true when the holder's portrait photo on the data page is visible",
+        },
+        mrz_visible: {
+          type: 'boolean',
+          description:
+            'true when the machine-readable lines (the two lines full of < characters at the bottom of the data page) are visible and readable',
+        },
       }
     : {};
 
@@ -208,7 +290,9 @@ export async function validatePassportPage(
 
   const requiredFields = [
     'observation',
-    ...(requireSpread ? ['pages_fully_visible', 'fold_visible', 'is_uae_passport'] : []),
+    ...(requireSpread
+      ? ['pages_fully_visible', 'fold_visible', 'is_uae_passport', 'holder_photo_visible', 'mrz_visible']
+      : []),
     'all_corners_visible',
     'quality_issue',
     'valid',
@@ -273,6 +357,29 @@ export async function validatePassportPage(
       is_uae_passport?: boolean;
     };
     console.log('[Passport Validation] Result:', result);
+
+    // Company-setup data page: the whole verdict is computed in CODE from the
+    // observations. The model's own `valid` is ignored here: Tina (27.09) had
+    // every clean German spread rejected because `valid` came back false (or
+    // missing) while every observation described a perfect scan, and the raw
+    // observation text was then shown to her as the "reason".
+    if (requireSpread) {
+      if (response.stop_reason === 'max_tokens') {
+        throw new Error('Passport check output was cut off (max_tokens)');
+      }
+      const judged = judgePassportDataPage(result);
+      if (judged.kind === 'infra') {
+        throw new Error(`Passport check returned incomplete observations: ${judged.missing.join(', ')}`);
+      }
+      return {
+        page_type: judged.kind === 'accept' ? expectedType || 'INSIDE_PAGES' : 'INVALID',
+        confidence: 90,
+        details: judged.kind === 'accept' ? 'Valid passport page' : judged.reason,
+        pages_fully_visible: result.pages_fully_visible as number,
+        fold_visible: result.fold_visible === true,
+        is_uae_passport: result.is_uae_passport === true,
+      };
+    }
 
     const qualityIssue = (result.quality_issue || '').trim();
     const hasQualityIssue =

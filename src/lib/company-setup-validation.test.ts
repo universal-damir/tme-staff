@@ -40,6 +40,15 @@ function makeSoloFounder(overrides: Partial<CompanySetupPerson> = {}): CompanySe
     religion: 'Christian',
     currentOrPastEidVisa: 'none',
     visa: { visaRequired: false },
+    educationalQualification: "Bachelor's Degree",
+    languagesSpoken: 'English, German',
+    maritalStatus: 'Single',
+    fatherFullName: 'Richard Doe',
+    motherFullName: 'Mary Doe',
+    email: 'john@example.com',
+    mobile: '+971501234567',
+    visitedOrResidedUAE: true,
+    otherEntityShareholder: false,
     ...overrides,
   };
 }
@@ -137,10 +146,54 @@ describe('validatePersons mandatory fields', () => {
     const result = validatePersons([
       makeSoloFounder({ religion: '', currentOrPastEidVisa: undefined }),
     ]);
-    expect(result.errors).toContain('John Michael Doe: please enter the religion.');
+    expect(result.errors).toContain('John Michael Doe: please select the religion.');
     expect(result.errors).toContain(
       'John Michael Doe: please answer the Emirates ID / UAE visa question.'
     );
+  });
+
+  it('treats a religion IFZA does not offer as not answered', () => {
+    const result = validatePersons([makeSoloFounder({ religion: 'Atheist/Non-religious' })]);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('John Michael Doe: please select the religion.');
+  });
+
+  it('requires the background, family, contact and UAE answers for every person', () => {
+    const result = validatePersons([
+      makeSoloFounder({
+        educationalQualification: '',
+        languagesSpoken: undefined,
+        maritalStatus: undefined,
+        fatherFullName: ' ',
+        motherFullName: undefined,
+        email: undefined,
+        mobile: '',
+        visitedOrResidedUAE: undefined,
+        otherEntityShareholder: undefined,
+      }),
+    ]);
+    expect(result.errors).toEqual([
+      'John Michael Doe: please enter the email address.',
+      'John Michael Doe: please select the educational qualification.',
+      'John Michael Doe: please select the languages spoken.',
+      'John Michael Doe: please select the marital status.',
+      "John Michael Doe: please enter the father's full name.",
+      "John Michael Doe: please enter the mother's full name.",
+      'John Michael Doe: please enter the mobile number.',
+      'John Michael Doe: please answer whether this person has visited or resided in the UAE.',
+      'John Michael Doe: please answer whether this person is a shareholder in any other entity.',
+    ]);
+  });
+
+  it('accepts "No" answers and leaves the employer details optional', () => {
+    const result = validatePersons([
+      makeSoloFounder({
+        visitedOrResidedUAE: false,
+        otherEntityShareholder: false,
+        previousEmployer: undefined,
+      }),
+    ]);
+    expect(result.valid).toBe(true);
   });
 
   it('rejects a shareholding above 100%', () => {
@@ -212,11 +265,25 @@ describe('validateCompanyData bounded numbers', () => {
     );
   });
 
-  it('requires a business description', () => {
-    expect(validateCompanyData(makeCompany({ businessDescription: '  ' })).valid).toBe(false);
-    expect(validateCompanyData(makeCompany({ businessDescription: undefined })).valid).toBe(
-      false
+  it('no longer requires the business description or the license type', () => {
+    expect(validateCompanyData(makeCompany({ businessDescription: '  ' })).valid).toBe(true);
+    expect(validateCompanyData(makeCompany({ businessDescription: undefined })).valid).toBe(true);
+    expect(validateCompanyData(makeCompany({ licenseType: undefined })).valid).toBe(true);
+  });
+
+  it('enforces the IFZA minimums when the share capital fields are filled in', () => {
+    expect(validateCompanyData(makeCompany({ shareCapitalAED: 9_999 })).errors).toContain(
+      'IFZA requires a minimum share capital of AED 10,000.'
     );
+    expect(validateCompanyData(makeCompany({ valuePerShareAED: 5 })).errors).toContain(
+      'The minimum value of each share is AED 10.'
+    );
+    expect(
+      validateCompanyData(
+        makeCompany({ shareCapitalAED: 10_000, valuePerShareAED: 10, numberOfShares: 1_000 })
+      ).valid
+    ).toBe(true);
+    // Still optional: blank fields pass.
     expect(validateCompanyData(makeCompany()).valid).toBe(true);
   });
 
@@ -255,5 +322,59 @@ describe('validateContact', () => {
       validateContact({ name: 'Anna Klein', email: 'anna@example.com', mobile: '+971501234567' })
         .valid
     ).toBe(true);
+  });
+});
+
+describe('validatePersons role limits', () => {
+  const partner = (i: number, pct: number, extra: Partial<CompanySetupPersonRoles> = {}) =>
+    makeSoloFounder({
+      fullName: `Partner ${i}`,
+      roles: makeRoles({ shareholder: true, ...extra }),
+      shareholdingPct: pct,
+    });
+  const officer = (name: string, roles: Partial<CompanySetupPersonRoles>) =>
+    makeSoloFounder({ fullName: name, roles: makeRoles(roles), shareholdingPct: undefined });
+
+  it('allows no General Manager and no Secretary', () => {
+    const result = validatePersons([partner(1, 100, { director: true })]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('rejects a 2nd General Manager and a 2nd Secretary', () => {
+    const result = validatePersons([
+      makeSoloFounder({ shareholdingPct: 50 }),
+      partner(2, 50, { generalManager: true, secretary: true }),
+    ]);
+    expect(result.errors).toContain('Only one person can be the General Manager.');
+    expect(result.errors).toContain('Only one person can be the Secretary.');
+  });
+
+  it('allows 6 shareholders plus a separate GM, Secretary and Director (9 persons)', () => {
+    const result = validatePersons([
+      partner(1, 50),
+      ...[2, 3, 4, 5, 6].map((i) => partner(i, 10)),
+      officer('Gina Manager', { generalManager: true }),
+      officer('Sam Secretary', { secretary: true }),
+      officer('Dan Director', { director: true }),
+    ]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('rejects a 7th shareholder and a missing shareholder', () => {
+    const seven = validatePersons([
+      partner(1, 40, { director: true }),
+      ...[2, 3, 4, 5, 6, 7].map((i) => partner(i, 10)),
+    ]);
+    expect(seven.errors).toContain('A company can have up to 6 shareholders.');
+    const none = validatePersons([officer('Dan Director', { director: true })]);
+    expect(none.errors).toContain('Please assign at least one person as Shareholder.');
+  });
+
+  it('rejects more than 9 persons', () => {
+    const result = validatePersons([
+      partner(1, 100, { director: true }),
+      ...Array.from({ length: 9 }, (_, i) => officer(`Director ${i + 1}`, { director: true })),
+    ]);
+    expect(result.errors).toContain('Please add no more than 9 persons.');
   });
 });

@@ -30,8 +30,11 @@ export interface CompanySetupActivity {
 export interface CompanySetupCompanyData {
   nameOptions: CompanySetupNameOption[]; // exactly 3, all rule-valid
   activities: CompanySetupActivity[];    // 1..10; 3 included in package, AED 2,000/yr per extra
-  licenseType: CompanySetupLicenseType;  // 'Both' adds AED 2,000/yr
-  businessDescription?: string;          // brief description of intended business
+  // No longer asked in the client form (tester feedback 27.09.26): staff may
+  // still set it in the portal editor. Optional so a submission without it
+  // passes validation and conversion.
+  licenseType?: CompanySetupLicenseType; // 'Both' adds AED 2,000/yr
+  businessDescription?: string;          // brief description of intended business (optional)
   shareCapitalAED?: number;
   valuePerShareAED?: number;
   numberOfShares?: number;
@@ -42,9 +45,9 @@ export interface CompanySetupCompanyData {
 
 export interface CompanySetupPersonRoles {
   shareholder: boolean;
-  generalManager: boolean; // exactly 1 across all persons
+  generalManager: boolean; // at most 1 across all persons (0 allowed)
   director: boolean;       // at least 1 across all persons
-  secretary: boolean;      // exactly 1 across all persons
+  secretary: boolean;      // at most 1 across all persons (0 allowed)
 }
 
 export interface CompanySetupPreviousEmployer {
@@ -238,9 +241,78 @@ export function composeFullName(parts: {
     .join(' ');
 }
 
+// Role limits (tester feedback 27.09.26, approved): at most 1 General Manager
+// and at most 1 Secretary (0 allowed), 1 to 6 Shareholders, at least 1
+// Director. One person can hold all roles. The shareholder cap counts people
+// with the Shareholder role, not all persons.
 export const COMPANY_SETUP_MAX_SHAREHOLDERS = 6;
+export const COMPANY_SETUP_MAX_GENERAL_MANAGERS = 1;
+export const COMPANY_SETUP_MAX_SECRETARIES = 1;
+// Hard cap on the persons list: 6 shareholders + a separate General Manager,
+// Secretary and Director.
+export const COMPANY_SETUP_MAX_PERSONS = 9;
+
+/**
+ * Why a role cannot be ticked for one person right now, or null when it can.
+ * Only ADDING a role is ever blocked (unticking always works): a 2nd General
+ * Manager, a 2nd Secretary or a 7th Shareholder. Used by the role buttons in
+ * the client form and the staff editor so they match validatePersons.
+ */
+export function companySetupRoleBlockedReason(
+  persons: ReadonlyArray<{ roles?: Partial<CompanySetupPersonRoles> }>,
+  index: number,
+  role: keyof CompanySetupPersonRoles
+): string | null {
+  if (persons[index]?.roles?.[role]) return null;
+  const others = persons.filter((p, i) => i !== index && p?.roles?.[role]).length;
+  if (role === 'generalManager' && others >= COMPANY_SETUP_MAX_GENERAL_MANAGERS) {
+    return 'Only one person can be the General Manager.';
+  }
+  if (role === 'secretary' && others >= COMPANY_SETUP_MAX_SECRETARIES) {
+    return 'Only one person can be the Secretary.';
+  }
+  if (role === 'shareholder' && others >= COMPANY_SETUP_MAX_SHAREHOLDERS) {
+    return `A company can have up to ${COMPANY_SETUP_MAX_SHAREHOLDERS} shareholders.`;
+  }
+  return null;
+}
 export const COMPANY_SETUP_MAX_ACTIVITIES = 10;
 export const COMPANY_SETUP_INCLUDED_ACTIVITIES = 3;
 export const COMPANY_SETUP_NAME_OPTIONS_REQUIRED = 3;
 export const COMPANY_SETUP_LINK_EXPIRES_HOURS = 720; // 30 days
 export const IFZA_BUSINESS_ACTIVITIES_URL = 'https://activities.ifza.com/';
+
+// IFZA share capital rules (shown on the Share Capital step). The fields stay
+// optional; when filled in they must meet these minimums.
+export const COMPANY_SETUP_MIN_SHARE_CAPITAL_AED = 10_000;
+export const COMPANY_SETUP_MIN_VALUE_PER_SHARE_AED = 10;
+
+/**
+ * Religion values IFZA does not offer. They stay in the shared staff lists
+ * (staff onboarding still uses them) but are removed from every company setup
+ * dropdown. A stored value from before is treated as "not answered yet".
+ */
+export const COMPANY_SETUP_EXCLUDED_RELIGIONS: readonly string[] = ['Atheist/Non-religious'];
+
+/** The religion list for a company setup dropdown: the app's list minus IFZA gaps. */
+export function companySetupReligionOptions<T extends string>(all: readonly T[]): T[] {
+  return all.filter((r) => !COMPANY_SETUP_EXCLUDED_RELIGIONS.includes(r));
+}
+
+/** A stored religion as the dropdown should show it: '' when blank or no longer offered. */
+export function companySetupReligionValue(value: string | undefined): string {
+  const v = (value ?? '').trim();
+  return v && !COMPANY_SETUP_EXCLUDED_RELIGIONS.includes(v) ? v : '';
+}
+
+/**
+ * Portrait photo + proof of address (bank statement) are needed for every
+ * shareholder, and for a company officer who wants a UAE visa. The visa is
+ * ticked on the Visa & Facility step, AFTER the documents step, so for an
+ * officer this only becomes true once that tick is set.
+ */
+export function companySetupNeedsPhotoAndAddress(
+  person: Pick<CompanySetupPerson, 'roles' | 'visa'> | undefined
+): boolean {
+  return !!person?.roles?.shareholder || !!person?.visa?.visaRequired;
+}

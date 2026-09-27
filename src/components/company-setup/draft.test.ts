@@ -10,6 +10,8 @@ import {
   emptyPerson,
   extractedDataOf,
   missingForPeopleStep,
+  missingForVisaStep,
+  shareCapitalErrors,
   companySetupAdditionalPageRequired,
   passportDataPageCarriedIssueDetails,
   PASSPORT_ISSUE_ON_DATA_PAGE_KEY,
@@ -403,6 +405,15 @@ describe('missingForPeopleStep', () => {
     religion: 'Christian',
     currentOrPastEidVisa: 'none',
     visa: { visaRequired: false },
+    educationalQualification: "Bachelor's Degree",
+    languagesSpoken: 'English, German',
+    maritalStatus: 'Single',
+    fatherFullName: 'Father Novalic',
+    motherFullName: 'Mother Novalic',
+    email: 'damir@example.com',
+    mobile: '+971501234567',
+    visitedOrResidedUAE: true,
+    otherEntityShareholder: false,
     ...over,
   });
   const docs = (over: Record<string, unknown> = {}) => ({
@@ -429,7 +440,7 @@ describe('missingForPeopleStep', () => {
       docs({ photo: undefined })
     );
     expect(result).toEqual([
-      'Damir Novalic: date of birth, religion and the portrait photo.',
+      'Damir Novalic: date of birth, religion and the passport photo.',
     ]);
   });
 
@@ -438,10 +449,91 @@ describe('missingForPeopleStep', () => {
       [complete({ roles: { shareholder: true, generalManager: false, director: false, secretary: false }, shareholdingPct: 60 })],
       docs()
     );
-    expect(result).toContain('Tick one person as General Manager.');
-    expect(result).toContain('Tick one person as Secretary.');
+    // General Manager and Secretary are optional (at most one each).
+    expect(result.some((r) => r.includes('General Manager'))).toBe(false);
+    expect(result.some((r) => r.includes('Secretary'))).toBe(false);
     expect(result).toContain('Tick at least one person as Director.');
     expect(result).toContain('The shareholding adds up to 60%. It must be exactly 100%.');
+  });
+
+  it('blocks a 2nd General Manager, a 2nd Secretary and a 7th shareholder', () => {
+    const two = missingForPeopleStep(
+      [
+        complete({ shareholdingPct: 50 }),
+        complete({ fullName: 'Jane Roe', email: 'jane@example.com', shareholdingPct: 50 }),
+      ],
+      docs()
+    );
+    expect(two).toContain('Only one person can be the General Manager.');
+    expect(two).toContain('Only one person can be the Secretary.');
+
+    const officer = { shareholder: false, generalManager: false, director: false, secretary: false };
+    const seven = Array.from({ length: 7 }, (_, i) =>
+      complete({
+        fullName: `Partner ${i + 1}`,
+        roles: { ...officer, shareholder: true, director: i === 0 },
+        shareholdingPct: i === 0 ? 40 : 10,
+      })
+    );
+    expect(missingForPeopleStep(seven, docs())).toContain(
+      'A company can have up to 6 shareholders.'
+    );
+  });
+
+  it('asks every person for the background, family, contact and UAE answers', () => {
+    const result = missingForPeopleStep(
+      [
+        complete({
+          educationalQualification: undefined,
+          languagesSpoken: '',
+          maritalStatus: undefined,
+          fatherFullName: undefined,
+          motherFullName: undefined,
+          email: 'not-an-email',
+          mobile: undefined,
+          visitedOrResidedUAE: undefined,
+          otherEntityShareholder: undefined,
+        }),
+      ],
+      docs()
+    );
+    expect(result).toEqual([
+      "Damir Novalic: educational qualification, languages spoken, marital status, father's full name, mother's full name, a valid email address, mobile number, the visited / resided in the UAE answer and the other entities answer.",
+    ]);
+  });
+
+  it('treats a stored religion IFZA does not offer as not answered', () => {
+    const result = missingForPeopleStep([complete({ religion: 'Atheist/Non-religious' })], docs());
+    expect(result).toEqual(['Damir Novalic: religion.']);
+  });
+
+  it('asks a company officer without a visa for the passport only', () => {
+    const officer = complete({
+      roles: { shareholder: false, generalManager: true, director: true, secretary: true },
+      shareholdingPct: undefined,
+    });
+    const shareholder = complete({
+      fullName: 'Tina Owner',
+      roles: { shareholder: true, generalManager: false, director: false, secretary: false },
+      shareholdingPct: 100,
+    });
+    const onlyPassport = {
+      '0': { passport: { path: 'p', filename: 'p', uploadedAt: '' } },
+      '1': {
+        passport: { path: 'q', filename: 'q', uploadedAt: '' },
+        photo: { path: 'h', filename: 'h', uploadedAt: '' },
+        proof_of_address: { path: 'b', filename: 'b', uploadedAt: '' },
+      },
+    } as never;
+    expect(missingForPeopleStep([officer, shareholder], onlyPassport)).toEqual([]);
+  });
+
+  it('asks a shareholder for the photo and the bank statement', () => {
+    const result = missingForPeopleStep(
+      [complete()],
+      { '0': { passport: { path: 'p', filename: 'p', uploadedAt: '' } } } as never
+    );
+    expect(result).toEqual(['Damir Novalic: the passport photo and the bank statement.']);
   });
 
   it('falls back to a position label when the name is still empty', () => {
@@ -479,6 +571,15 @@ describe('companySetupAdditionalPageRequired', () => {
     religion: 'Christian',
     currentOrPastEidVisa: 'none',
     visa: { visaRequired: false },
+    educationalQualification: "Bachelor's Degree",
+    languagesSpoken: 'English, German',
+    maritalStatus: 'Single',
+    fatherFullName: 'Father Novalic',
+    motherFullName: 'Mother Novalic',
+    email: 'damir@example.com',
+    mobile: '+971501234567',
+    visitedOrResidedUAE: true,
+    otherEntityShareholder: false,
     ...over,
   });
 
@@ -552,5 +653,57 @@ describe('companySetupAdditionalPageRequired', () => {
     expect(missingForPeopleStep([syrian], withOldBooklet)).toEqual([
       'Damir Novalic: the additional passport page.',
     ]);
+  });
+});
+
+describe('missingForVisaStep', () => {
+  const officer = (over: Partial<CompanySetupPerson> = {}): CompanySetupPerson => ({
+    fullName: 'Tina Officer',
+    roles: { shareholder: false, generalManager: true, director: true, secretary: true },
+    visa: { visaRequired: false },
+    ...over,
+  });
+  const passportOnly = { '0': { passport: { path: 'p', filename: 'p', uploadedAt: '' } } } as never;
+
+  it('asks nothing of an officer who does not want a visa', () => {
+    expect(missingForVisaStep([officer()], passportOnly)).toEqual([]);
+  });
+
+  it('sends an officer who ticks the visa back for the photo and the bank statement', () => {
+    const result = missingForVisaStep(
+      [officer({ visa: { visaRequired: true, jobTitle: 'Manager', basicMonthlySalaryAED: 10_000 } })],
+      passportOnly
+    );
+    expect(result).toEqual([
+      'Tina Officer: the passport photo and the bank statement (needed for a UAE visa). Please go back to People & Documents to upload them.',
+    ]);
+  });
+
+  it('still names the job title and salary', () => {
+    const result = missingForVisaStep(
+      [officer({ visa: { visaRequired: true } })],
+      {
+        '0': {
+          passport: { path: 'p', filename: 'p', uploadedAt: '' },
+          photo: { path: 'h', filename: 'h', uploadedAt: '' },
+          proof_of_address: { path: 'b', filename: 'b', uploadedAt: '' },
+        },
+      } as never
+    );
+    expect(result).toEqual(['Tina Officer: the job title and the basic monthly salary.']);
+  });
+});
+
+describe('shareCapitalErrors', () => {
+  it('accepts blank fields and values at the IFZA minimums', () => {
+    expect(shareCapitalErrors({})).toEqual({});
+    expect(shareCapitalErrors({ shareCapitalAED: 10_000, valuePerShareAED: 10 })).toEqual({});
+  });
+
+  it('flags a capital below AED 10,000 and a share below AED 10', () => {
+    expect(shareCapitalErrors({ shareCapitalAED: 5_000, valuePerShareAED: 1 })).toEqual({
+      capital: 'Minimum AED 10,000.',
+      perShare: 'Minimum AED 10 per share.',
+    });
   });
 });

@@ -44,7 +44,11 @@ import { compressImageForAI } from '@/lib/utils';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 import {
-  COMPANY_SETUP_MAX_SHAREHOLDERS,
+  COMPANY_SETUP_MAX_PERSONS,
+  companySetupNeedsPhotoAndAddress,
+  companySetupRoleBlockedReason,
+  companySetupReligionOptions,
+  companySetupReligionValue,
   composeFullName,
   type CompanySetupDocRef,
   type CompanySetupDocuments,
@@ -67,6 +71,8 @@ import {
   companySetupAdditionalPageRequired,
   isoToDisplayDate,
   displayToIsoDate,
+  missingPersonDetails,
+  missingPersonDocuments,
   roleTotals,
   type AdditionalPageExtractedFields,
   type AdditionalPageExtractionData,
@@ -125,7 +131,9 @@ const sortWithOtherLast = (items: readonly string[]) =>
   });
 
 const SORTED_NATIONALITIES = sortWithOtherLast(NATIONALITIES);
-const SORTED_RELIGIONS = sortWithOtherLast(RELIGIONS);
+// IFZA has no "Atheist/Non-religious": the shared list keeps it for staff
+// onboarding, the company setup dropdown drops it.
+const SORTED_RELIGIONS = companySetupReligionOptions(sortWithOtherLast(RELIGIONS));
 const SORTED_LANGUAGES = sortWithOtherLast(LANGUAGES);
 
 /** The contract stores languages as one comma-separated string; the picker
@@ -216,39 +224,17 @@ function ConstraintPill({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-/** Per-person completion: required fields + required documents all present. */
+/** Per-person completion: required fields + required documents all present.
+ *  Same helpers as the step gate and the "Still needed" list, so a person can
+ *  never show "Complete" and then fail the submit. */
 export function isPersonComplete(
   person: CompanySetupPerson,
   docs: CompanySetupPersonDocuments,
 ): boolean {
-  // nationality + date of birth are server-required at submit; keeping them
-  // out of this check made a person show "Complete" and then fail the submit.
-  if (
-    !person.fullName.trim() ||
-    !person.nationality ||
-    !person.dateOfBirth ||
-    !person.religion ||
-    !person.currentOrPastEidVisa
-  ) {
-    return false;
-  }
-  if (
-    person.roles.shareholder &&
-    !(typeof person.shareholdingPct === 'number' && person.shareholdingPct > 0)
-  ) {
-    return false;
-  }
-  if (!docs.passport?.path || !docs.photo?.path || !docs.proof_of_address?.path) return false;
-  // Indian / Syrian passports need their additional page too — except the new
-  // Syrian booklet, which has none (companySetupAdditionalPageRequired).
-  if (companySetupAdditionalPageRequired(person, docs) && !docs.passport_additional?.path) {
-    return false;
-  }
-  if (person.currentOrPastEidVisa === 'current') {
-    if (!docs.eid_front?.path || !docs.eid_back?.path || !docs.visa_document?.path) return false;
-  }
-  if (person.currentOrPastEidVisa === 'past' && !docs.previous_visa_document?.path) return false;
-  return true;
+  return (
+    missingPersonDetails(person).length === 0 &&
+    missingPersonDocuments(person, docs).length === 0
+  );
 }
 
 export function StepPeopleDocuments({
@@ -329,7 +315,7 @@ export function StepPeopleDocuments({
   };
 
   const addPerson = () => {
-    if (persons.length >= COMPANY_SETUP_MAX_SHAREHOLDERS) return;
+    if (persons.length >= COMPANY_SETUP_MAX_PERSONS) return;
     onChange([...persons, emptyPerson()]);
     setOpenIndex(persons.length);
   };
@@ -751,11 +737,26 @@ export function StepPeopleDocuments({
   // ---------- Render ----------
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-600">
-        Add every person involved in the company: shareholders, General Manager, Director and
-        Secretary (up to {COMPANY_SETUP_MAX_SHAREHOLDERS} persons; one person can hold several
-        roles). Start with the passport: we read the personal details from it for you.
-      </p>
+      <div className="text-sm text-gray-600 space-y-2">
+        <p>
+          <span className="font-medium text-gray-700">Shareholder</span> = owner of the company
+          <br />
+          <span className="font-medium text-gray-700">Company officer</span> = person holding a
+          role within the company (Manager, Director, Secretary)
+        </p>
+        <div>
+          <p>Every company can have:</p>
+          <ul className="list-disc pl-5 mt-1 space-y-0.5">
+            <li>A maximum of 1 Manager and Secretary</li>
+            <li>Up to 6 Shareholders</li>
+            <li>One person can hold all roles.</li>
+          </ul>
+        </div>
+        <p>
+          Please start by uploading the passport, as we will read the personal details from it
+          for you.
+        </p>
+      </div>
 
       {/* Live totals / constraints bar */}
       <div className="sticky top-[76px] z-30 bg-white rounded-xl border border-gray-100 shadow-sm p-3 flex flex-wrap items-center gap-2">
@@ -801,6 +802,9 @@ export function StepPeopleDocuments({
         // Staff-provided files render filled and read-only — the client is
         // asked to confirm them, never to re-upload them.
         const isStaffDoc = (slot: DocSlot) => docs[slot]?.source === 'staff';
+        // Photo + bank statement: shareholders always, officers only with a
+        // UAE visa (ticked on the next step).
+        const needsPhotoAndAddress = companySetupNeedsPhotoAndAddress(person);
         return (
           <div key={index} className="bg-white rounded-xl border border-gray-100 shadow-sm">
             {/* Card header */}
@@ -875,6 +879,7 @@ export function StepPeopleDocuments({
                     <div>
                       <UploadSlot
                         label="Passport: data page"
+                        required
                         description="Scan the whole spread: the data page and the page facing it."
                         expectedType="INSIDE_PAGES"
                         file={null}
@@ -906,6 +911,7 @@ export function StepPeopleDocuments({
                         <div>
                           <UploadSlot
                             label={ADDITIONAL_PAGE_COPY[additionalVariant].label}
+                            required
                             description={ADDITIONAL_PAGE_COPY[additionalVariant].description}
                             expectedType="ADDITIONAL_PAGE"
                             file={null}
@@ -971,7 +977,7 @@ export function StepPeopleDocuments({
                           }}
                         />
                         <span>
-                          This passport does not have an additional page — the date and place of
+                          This passport does not have an additional page: the date and place of
                           issue, expiry date and national number are printed on the photo page.
                         </span>
                       </label>
@@ -983,8 +989,13 @@ export function StepPeopleDocuments({
                         statement, which has nothing to do with it. */}
                     <div>
                       <UploadSlot
-                        label="Portrait photo (headshot)"
-                        description="Headshot, plain light background, no glasses."
+                        label="Digital passport photo"
+                        required={needsPhotoAndAddress}
+                        description={
+                          needsPhotoAndAddress
+                            ? 'Recent photo, plain light background, no glasses.'
+                            : 'Recent photo, plain light background, no glasses. Only needed if this person wants a UAE visa (you choose this on the next page).'
+                        }
                         file={null}
                         onUpload={(file) => handleAiUpload(index, 'photo', file, person)}
                         onRemove={() => removeAiDoc(index, 'photo')}
@@ -1169,13 +1180,24 @@ export function StepPeopleDocuments({
                   <div className="flex flex-wrap gap-2">
                     {ROLE_DEFS.map((role) => {
                       const active = person.roles[role.key];
+                      const blockedReason = companySetupRoleBlockedReason(
+                        persons,
+                        index,
+                        role.key
+                      );
                       return (
                         <button
                           key={role.key}
                           type="button"
+                          disabled={!!blockedReason}
+                          title={blockedReason ?? undefined}
                           onClick={() => updateRoles(index, role.key, !active)}
                           className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all duration-200 ${
-                            active ? 'text-white' : 'hover:bg-gray-50'
+                            active
+                              ? 'text-white'
+                              : blockedReason
+                                ? 'opacity-40 cursor-not-allowed'
+                                : 'hover:bg-gray-50'
                           }`}
                           style={
                             active
@@ -1194,6 +1216,14 @@ export function StepPeopleDocuments({
                       );
                     })}
                   </div>
+                  {(() => {
+                    const reasons = ROLE_DEFS.map((role) =>
+                      companySetupRoleBlockedReason(persons, index, role.key)
+                    ).filter((r): r is string => !!r);
+                    return reasons.length > 0 ? (
+                      <p className="text-xs text-gray-500 mt-2">{reasons.join(' ')}</p>
+                    ) : null;
+                  })()}
                   {person.roles.shareholder && (
                     <div className="max-w-[200px] mt-4">
                       <Input
@@ -1225,6 +1255,7 @@ export function StepPeopleDocuments({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <CustomDropdown
                     label="Educational qualification"
+                    required
                     value={person.educationalQualification ?? ''}
                     onChange={(val) => updatePerson(index, { educationalQualification: val })}
                     options={EDUCATIONAL_QUALIFICATIONS.map((q) => ({
@@ -1239,6 +1270,7 @@ export function StepPeopleDocuments({
                       outside the list typeable. */}
                   <MultiSelectDropdown
                     label="Languages spoken"
+                    required
                     value={splitLanguages(person.languagesSpoken)}
                     onChange={(val) => updatePerson(index, { languagesSpoken: val.join(', ') })}
                     options={SORTED_LANGUAGES.map((l) => ({
@@ -1252,7 +1284,8 @@ export function StepPeopleDocuments({
                   <CustomDropdown
                     label="Religion"
                     required
-                    value={person.religion ?? ''}
+                    // A stored value IFZA does not offer shows as "needs selection".
+                    value={companySetupReligionValue(person.religion)}
                     onChange={(val) => updatePerson(index, { religion: val })}
                     options={SORTED_RELIGIONS.map((r) => ({
                       value: r,
@@ -1262,6 +1295,7 @@ export function StepPeopleDocuments({
                   />
                   <CustomDropdown
                     label="Marital status"
+                    required
                     value={person.maritalStatus ?? ''}
                     onChange={(val) =>
                       // Leaving Married also drops the spouse name. The field
@@ -1288,12 +1322,14 @@ export function StepPeopleDocuments({
                   )}
                   <Input
                     label="Father's full name"
+                    required
                     value={person.fatherFullName ?? ''}
                     onChange={(e) => updatePerson(index, { fatherFullName: e.target.value })}
                     maxLength={120}
                   />
                   <Input
                     label="Mother's full name"
+                    required
                     value={person.motherFullName ?? ''}
                     onChange={(e) => updatePerson(index, { motherFullName: e.target.value })}
                     maxLength={120}
@@ -1301,6 +1337,7 @@ export function StepPeopleDocuments({
                   <Input
                     label="Email address"
                     type="email"
+                    required
                     value={person.email ?? ''}
                     onChange={(e) => updatePerson(index, { email: e.target.value })}
                     placeholder="name@example.com"
@@ -1308,6 +1345,7 @@ export function StepPeopleDocuments({
                   />
                   <PhoneInput
                     label="Mobile number"
+                    required
                     value={person.mobile || undefined}
                     onChange={(val) => updatePerson(index, { mobile: val ?? '' })}
                   />
@@ -1318,6 +1356,7 @@ export function StepPeopleDocuments({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <CustomDropdown
                     label="Has this person visited or resided in the UAE?"
+                    required
                     value={
                       person.visitedOrResidedUAE === undefined
                         ? ''
@@ -1407,6 +1446,7 @@ export function StepPeopleDocuments({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <CustomDropdown
                     label="Shareholder in any other entity worldwide?"
+                    required
                     value={
                       person.otherEntityShareholder === undefined
                         ? ''
@@ -1467,7 +1507,12 @@ export function StepPeopleDocuments({
                   <div className="mb-4">
                     <UploadSlot
                       label="Proof of address: BANK STATEMENT ONLY"
-                      description="Bank statement in your name, not older than 3 months. Current, savings or credit card."
+                      required={needsPhotoAndAddress}
+                      description={
+                        needsPhotoAndAddress
+                          ? 'Bank statement in your name, not older than 3 months. Current, savings or credit card.'
+                          : 'Bank statement in your name, not older than 3 months. Only needed if this person wants a UAE visa (you choose this on the next page).'
+                      }
                       file={null}
                       onUpload={(file) => handleAiUpload(index, 'proof_of_address', file, person)}
                       onRemove={() => removeAiDoc(index, 'proof_of_address')}
@@ -1602,7 +1647,12 @@ export function StepPeopleDocuments({
         );
       })}
 
-      {persons.length < COMPANY_SETUP_MAX_SHAREHOLDERS && (
+      {persons.length >= COMPANY_SETUP_MAX_PERSONS && (
+        <p className="text-xs text-gray-500">
+          You can add up to {COMPANY_SETUP_MAX_PERSONS} people.
+        </p>
+      )}
+      {persons.length < COMPANY_SETUP_MAX_PERSONS && (
         <button
           type="button"
           onClick={addPerson}

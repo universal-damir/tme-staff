@@ -13,10 +13,11 @@
  */
 
 import { getSupabaseAdmin } from './supabase-server';
-import type {
-  CompanySetupDocuments,
-  CompanySetupPrefillData,
-  CompanySetupSubmittedData,
+import {
+  COMPANY_SETUP_MAX_PERSONS,
+  type CompanySetupDocuments,
+  type CompanySetupPrefillData,
+  type CompanySetupSubmittedData,
 } from '@/types/company-setup';
 
 export const COMPANY_SETUP_UUID_REGEX =
@@ -153,7 +154,7 @@ export function isCompanySetupDocSlot(value: string): value is CompanySetupDocSl
 
 /**
  * Validate a client-supplied documents object against the row it claims to
- * belong to: person keys must be array indices 0..5, slots must be from the
+ * belong to: person keys must be array indices 0..8, slots must be from the
  * fixed vocabulary, and every ref path must live under this submission's own
  * storage folder (`<rowId>/...`) with no traversal — a forged path can never
  * point the portal sync at another submission's files.
@@ -163,7 +164,7 @@ export function isCompanySetupDocSlot(value: string): value is CompanySetupDocSl
  * as their proof of address and have the portal copy it into the wrong
  * shareholder document slot at conversion.
  *
- * The person segment is checked for shape (0..5) but NOT against the JSON key:
+ * The person segment is checked for shape (0..8) but NOT against the JSON key:
  * removing a person re-keys the remaining refs (person 2's documents become
  * person 1's) while the stored objects keep their original path, so a stale
  * index there is legitimate.
@@ -171,7 +172,13 @@ export function isCompanySetupDocSlot(value: string): value is CompanySetupDocSl
  * A staff-provided ref (`source: 'staff'`) lives in the portal's own
  * `<rowId>/staff/` namespace, written before the invite went out.
  */
-const CLIENT_PATH_PERSON_SEGMENT = /^[0-5]$/;
+/**
+ * A persons[] array index as a string ("0".."8" with COMPANY_SETUP_MAX_PERSONS
+ * = 9). Used for document keys, storage path segments and the upload field.
+ */
+export function isCompanySetupPersonIndex(value: string): boolean {
+  return /^\d{1,2}$/.test(value) && Number(value) < COMPANY_SETUP_MAX_PERSONS;
+}
 export function documentsErrorForRow(
   documents: unknown,
   rowId: string
@@ -181,7 +188,7 @@ export function documentsErrorForRow(
     return 'documents must be an object';
   }
   for (const [personKey, slots] of Object.entries(documents as Record<string, unknown>)) {
-    if (!/^[0-5]$/.test(personKey)) return `invalid person key "${personKey}"`;
+    if (!isCompanySetupPersonIndex(personKey)) return `invalid person key "${personKey}"`;
     if (slots == null) continue;
     if (typeof slots !== 'object' || Array.isArray(slots)) {
       return `documents["${personKey}"] must be an object`;
@@ -210,12 +217,12 @@ export function documentsErrorForRow(
         }
         continue;
       }
-      // Client upload: <rowId>/<0-5>/<slot>/<file>
+      // Client upload: <rowId>/<0-8>/<slot>/<file>
       const segments = path.split('/');
       if (
         segments.length < 4 ||
         segments[0] !== rowId ||
-        !CLIENT_PATH_PERSON_SEGMENT.test(segments[1]) ||
+        !isCompanySetupPersonIndex(segments[1]) ||
         segments[2] !== slot ||
         segments[3].length === 0
       ) {

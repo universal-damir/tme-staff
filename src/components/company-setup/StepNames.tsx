@@ -6,7 +6,10 @@ import { InfoNote } from './chrome';
 import type { DraftCompany } from './draft';
 import {
   validateCompanyName,
+  checkNameActivityFit,
+  exampleNameFromActivities,
   COMPANY_NAME_RULES,
+  NAME_ACTIVITY_RULE,
 } from '@/lib/company-setup-name-validation';
 import {
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
@@ -49,6 +52,11 @@ export function StepNames({
   const [suggestError, setSuggestError] = useState<string | null>(null);
 
   const names = company.nameOptions;
+  // The client's own activity wording: the names must reflect at least one.
+  const activityTexts = company.activities
+    .map((a) => a.description.trim())
+    .filter((d) => d.length > 0);
+  const ownExample = exampleNameFromActivities(activityTexts);
   const staffNames = prefill?.company?.nameOptions ?? [];
   const anyStaffSuggestion = staffNames.some((o) => (o?.name ?? '').trim().length > 0);
   const allFilled = names.every((o) => o.name.trim().length > 0);
@@ -132,6 +140,26 @@ export function StepNames({
         </ul>
       </div>
 
+      {/* Tester feedback: the activity rule needs an example, not only a line
+          in the checklist. Built from the client's own first activity when
+          possible, plus a fixed worked example. */}
+      <InfoNote title="Your name must show your business activity">
+        <p>{NAME_ACTIVITY_RULE}</p>
+        {ownExample && (
+          <p className="mt-1">
+            With your activities, a name such as <strong>&quot;{ownExample}&quot;</strong> works.
+          </p>
+        )}
+        <p className="mt-2">
+          Example: the activities &quot;Agricultural Research &amp; Consultancy&quot;, &quot;Flowers &amp;
+          Ornamental Plants Trading&quot; and &quot;Artificial Flowers &amp; Plants Trading&quot; give good
+          names such as &quot;Tina Agricultural Research &amp; Consultancy&quot;, &quot;Tinas Plants
+          Trading&quot;, &quot;Tinas Premium Plants Trading&quot;, &quot;Tina Plants Trading and
+          Consultants&quot; or &quot;GreenThumb Trading&quot;. A name such as &quot;Tina Design
+          Studio&quot; does not fit these activities.
+        </p>
+      </InfoNote>
+
       {anyStaffSuggestion && (
         <p className="text-sm text-gray-600 -mt-2">
           Your TME consultant suggested these names. You can change or clear any of them.
@@ -146,6 +174,12 @@ export function StepNames({
           const isDuplicate = duplicateOf !== undefined;
           const showsError = isDuplicate || (result !== null && !result.valid);
           const ai = aiIssues.find((i) => i.name === trimmed && i.issues.length > 0);
+          // Soft check only (never blocks): the activity word may be hidden in
+          // a word our simple matching does not recognise.
+          const activityFit =
+            result && result.valid && !isDuplicate
+              ? checkNameActivityFit(trimmed, activityTexts)
+              : null;
           const staffName = (staffNames[index]?.name ?? '').trim();
           const isStaffSuggestion = staffName.length > 0 && staffName === trimmed;
           return (
@@ -228,6 +262,21 @@ export function StepNames({
                     {warning}
                   </p>
                 ))}
+              {activityFit && !activityFit.hasActivityWord && (
+                <p className="mt-1 text-xs text-amber-700 flex items-start gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  This name does not seem to include one of your business activities. Please add
+                  an activity word (see the example above).
+                </p>
+              )}
+              {activityFit && activityFit.hasActivityWord && activityFit.unrelatedWords.length > 0 && (
+                <p className="mt-1 text-xs text-amber-700 flex items-start gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  {activityFit.unrelatedWords.map((w) => `"${w}"`).join(', ')}{' '}
+                  {activityFit.unrelatedWords.length === 1 ? 'does' : 'do'} not match your business
+                  activities. The authority may reject it.
+                </p>
+              )}
               {ai &&
                 ai.issues.map((issue, i) => (
                   <p key={`ai-${i}`} className="mt-1 text-xs text-amber-700 flex items-start gap-1">

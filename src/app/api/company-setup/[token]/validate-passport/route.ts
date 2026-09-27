@@ -59,20 +59,21 @@ export async function POST(
     const matches = result.page_type === pageType;
     let errorMessage: string | null = null;
     if (!matches) {
-      const reason = (result.details || '').trim();
       if (pageType === 'ADDITIONAL_PAGE') {
+        // The model's observation text is NEVER shown as the error.
         const variant = passportAdditionalPageVariant(nationalityStr);
         const pageName =
           variant === 'syria'
             ? 'the issue-details page (date and place of issue, expiry, national number)'
             : 'the address / family-details page (father, mother, spouse, address)';
-        errorMessage = reason
-          ? `We couldn't verify this page: ${reason}. Please upload ${pageName} of the passport.`
-          : `Please upload ${pageName} of the passport.`;
+        errorMessage = `We couldn't verify this page. Please upload ${pageName} of the passport.`;
       } else {
-        errorMessage = reason
-          ? `We couldn't verify this passport scan: ${reason}`
-          : `Please upload the passport spread open at the data page (holder photo + machine-readable lines), with all four corners visible.`;
+        // Data page: `details` is one of the code-written reasons from
+        // judgePassportDataPage (DATA_PAGE_REJECT_REASONS), never model text.
+        errorMessage = `We couldn't verify this passport scan. ${
+          result.details ||
+          'Please upload the passport spread open at the data page (holder photo and machine-readable lines), with all four corners visible.'
+        }`;
       }
     }
 

@@ -4,7 +4,7 @@ import React from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { CurrencyInput } from '@/components/ui';
 import { InfoNote } from './chrome';
-import { deriveNumberOfShares, type DraftCompany } from './draft';
+import { deriveNumberOfShares, shareCapitalErrors, type DraftCompany } from './draft';
 import {
   COMPANY_SETUP_MAX_SHARE_CAPITAL_AED,
   COMPANY_SETUP_MAX_VALUE_PER_SHARE_AED,
@@ -41,14 +41,15 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
   };
 
   const numberOfShares = deriveNumberOfShares(shareCapitalAED, valuePerShareAED);
+  const errors = shareCapitalErrors(company);
 
   return (
     <div className="space-y-6">
       <InfoNote title="Share capital">
-        The standard IFZA share capital is AED 10,000 or more (e.g. AED 10,000 as 10,000 shares of
-        AED 1 each, or 100 shares of AED 100 each). The share capital does not have to be paid
-        into a bank account for the license to be issued. If you are unsure, leave the fields
-        empty and your TME consultant will advise you.
+        IFZA requires a minimum share capital of AED 10,000. The minimum value of each share is AED
+        10. Most commonly, the share capital is divided into 100 shares (e.g. AED 10,000 as 100
+        shares of AED 100 each). If you are unsure how to structure it, feel free to leave these
+        fields blank and your TME consultant will guide you.
       </InfoNote>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -60,6 +61,7 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
           value={shareCapitalAED ?? ''}
           onChange={(v) => apply({ shareCapitalAED: v > 0 ? v : undefined })}
           placeholder="10,000"
+          error={errors.capital}
         />
         <CurrencyInput
           label="Value per share"
@@ -68,7 +70,8 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
           max={COMPANY_SETUP_MAX_VALUE_PER_SHARE_AED}
           value={valuePerShareAED ?? ''}
           onChange={(v) => apply({ valuePerShareAED: v > 0 ? v : undefined })}
-          placeholder="1"
+          placeholder="100"
+          error={errors.perShare}
         />
         <div>
           <label

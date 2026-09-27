@@ -2,22 +2,14 @@
 
 import React from 'react';
 import { TME_COLORS } from '@/lib/constants';
-import { CustomDropdown } from '@/components/ui';
 import { InfoNote } from './chrome';
 import type { DraftCompany } from './draft';
 import {
   COMPANY_SETUP_INCLUDED_ACTIVITIES,
   COMPANY_SETUP_MAX_ACTIVITIES,
   IFZA_BUSINESS_ACTIVITIES_URL,
-  type CompanySetupLicenseType,
 } from '@/types/company-setup';
 import { Plus, Trash2, ExternalLink } from 'lucide-react';
-
-const LICENSE_OPTIONS: { value: CompanySetupLicenseType; label: string }[] = [
-  { value: 'Commercial', label: 'Commercial' },
-  { value: 'Professional', label: 'Professional' },
-  { value: 'Both', label: 'Both (Commercial + Professional)' },
-];
 
 interface StepActivitiesProps {
   company: DraftCompany;
@@ -157,26 +149,13 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
         )}
       </div>
 
-      <div className="max-w-sm">
-        <CustomDropdown
-          label="License type"
-          required
-          value={company.licenseType ?? ''}
-          onChange={(val) => onChange({ licenseType: val as CompanySetupLicenseType })}
-          options={LICENSE_OPTIONS}
-          placeholder="Select…"
-        />
-        {company.licenseType === 'Both' && (
-          <p className="text-xs text-amber-700 mt-1">
-            Combining Commercial and Professional activities costs AED 2,000 per year.
-          </p>
-        )}
-      </div>
+      {/* License type is no longer asked here (tester feedback 27.09.26). The
+          data field stays optional in the contract so TME can still set it in
+          the portal editor. */}
 
       <div>
         <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
           Brief description of your intended business
-          <span className="text-red-500 ml-1">*</span>
         </label>
         <textarea
           value={company.businessDescription ?? ''}
@@ -188,9 +167,6 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
           onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
           onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
         />
-        <p className="text-xs text-gray-500 mt-1">
-          The authority asks what the company will actually do, so this cannot be left empty.
-        </p>
       </div>
     </div>
   );

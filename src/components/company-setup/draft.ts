@@ -2,14 +2,21 @@
  * Draft-state helpers for the Company Setup Intake form.
  *
  * The in-form draft keeps the EXACT contract shape (CompanySetupSubmittedData
- * minus confirmedAt, with licenseType still unset while the client works), so
+ * minus confirmedAt; licenseType is no longer asked in the client form), so
  * autosave/submit payloads are a straight pass-through and the portal reads a
  * consistent shape at every stage.
  */
 
 import {
+  COMPANY_SETUP_MAX_GENERAL_MANAGERS,
+  COMPANY_SETUP_MAX_PERSONS,
+  COMPANY_SETUP_MAX_SECRETARIES,
   COMPANY_SETUP_MAX_SHAREHOLDERS,
+  COMPANY_SETUP_MIN_SHARE_CAPITAL_AED,
+  COMPANY_SETUP_MIN_VALUE_PER_SHARE_AED,
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
+  companySetupNeedsPhotoAndAddress,
+  companySetupReligionValue,
   composeFullName,
   type CompanySetupActivity,
   type CompanySetupCompanyData,
@@ -172,6 +179,124 @@ export function roleTotals(persons: CompanySetupPerson[]): RoleTotals {
   return { shareholdingSum, shareholderCount, gmCount, directorCount, secretaryCount };
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isBlankText = (v: string | undefined): boolean => !v || !v.trim();
+
+/**
+ * The personal details still missing for one person, as short phrases for the
+ * "Still needed" list. Every entry here is required for EVERY person (tester
+ * feedback 27.09.26: easier to have them than to ask for them later). The
+ * same rules run server-side in validatePersons (company-setup-validation.ts).
+ * Employer name / address / position stay optional.
+ */
+export function missingPersonDetails(person: CompanySetupPerson): string[] {
+  const need: string[] = [];
+  if (!person.fullName.trim()) need.push('full name');
+  if (!person.nationality) need.push('nationality');
+  if (!person.dateOfBirth) need.push('date of birth');
+  if (
+    person.roles.shareholder &&
+    !(typeof person.shareholdingPct === 'number' && person.shareholdingPct > 0)
+  ) {
+    need.push('a shareholding percentage');
+  }
+  if (isBlankText(person.educationalQualification)) need.push('educational qualification');
+  if (isBlankText(person.languagesSpoken)) need.push('languages spoken');
+  // A stored value IFZA no longer offers counts as not answered.
+  if (!companySetupReligionValue(person.religion)) need.push('religion');
+  if (isBlankText(person.maritalStatus)) need.push('marital status');
+  if (isBlankText(person.fatherFullName)) need.push("father's full name");
+  if (isBlankText(person.motherFullName)) need.push("mother's full name");
+  if (isBlankText(person.email)) need.push('email address');
+  else if (!EMAIL_PATTERN.test(person.email!.trim())) need.push('a valid email address');
+  if (isBlankText(person.mobile)) need.push('mobile number');
+  if (typeof person.visitedOrResidedUAE !== 'boolean') need.push('the visited / resided in the UAE answer');
+  if (!person.currentOrPastEidVisa) need.push('the Emirates ID / visa answer');
+  if (typeof person.otherEntityShareholder !== 'boolean') {
+    need.push('the other entities answer');
+  }
+  return need;
+}
+
+/**
+ * The documents still missing for one person. Passport always; portrait photo
+ * and bank statement for shareholders and for anyone who wants a UAE visa
+ * (companySetupNeedsPhotoAndAddress). The submit route runs the same rule.
+ */
+export function missingPersonDocuments(
+  person: CompanySetupPerson,
+  docs: CompanySetupPersonDocuments
+): string[] {
+  const need: string[] = [];
+  if (!docs.passport?.path) need.push('the passport data page');
+  if (companySetupAdditionalPageRequired(person, docs) && !docs.passport_additional?.path) {
+    need.push('the additional passport page');
+  }
+  if (companySetupNeedsPhotoAndAddress(person)) {
+    if (!docs.photo?.path) need.push('the passport photo');
+    if (!docs.proof_of_address?.path) need.push('the bank statement');
+  }
+  if (person.currentOrPastEidVisa === 'current') {
+    if (!docs.eid_front?.path) need.push('the Emirates ID front');
+    if (!docs.eid_back?.path) need.push('the Emirates ID back');
+    if (!docs.visa_document?.path) need.push('the UAE visa copy');
+  }
+  if (person.currentOrPastEidVisa === 'past' && !docs.previous_visa_document?.path) {
+    need.push('the previous UAE visa copy');
+  }
+  return need;
+}
+
+/**
+ * Visa & Facility step: a company officer who ticks "needs a residence visa"
+ * now also needs the passport photo and bank statement, which are uploaded on
+ * the People & Documents step. Named here so the client knows to go back.
+ */
+export function missingForVisaStep(
+  persons: CompanySetupPerson[],
+  documents: CompanySetupDocuments
+): string[] {
+  const missing: string[] = [];
+  persons.forEach((person, index) => {
+    if (!person.visa.visaRequired) return;
+    const who = person.fullName.trim() || `Person ${index + 1}`;
+    const need: string[] = [];
+    if (!person.visa.jobTitle?.trim()) need.push('the job title');
+    if (
+      !(typeof person.visa.basicMonthlySalaryAED === 'number' && person.visa.basicMonthlySalaryAED > 0)
+    ) {
+      need.push('the basic monthly salary');
+    }
+    const docs = documents[String(index)] ?? {};
+    const docsNeed: string[] = [];
+    if (!docs.photo?.path) docsNeed.push('the passport photo');
+    if (!docs.proof_of_address?.path) docsNeed.push('the bank statement');
+    if (need.length > 0) missing.push(`${who}: ${listPhrase(need)}.`);
+    if (docsNeed.length > 0) {
+      missing.push(
+        `${who}: ${listPhrase(docsNeed)} (needed for a UAE visa). Please go back to People & Documents to upload ${docsNeed.length === 1 ? 'it' : 'them'}.`
+      );
+    }
+  });
+  return missing;
+}
+
+/** Share capital step: optional fields, but when filled in they meet the IFZA minimums. */
+export function shareCapitalErrors(company: Pick<DraftCompany, 'shareCapitalAED' | 'valuePerShareAED'>): {
+  capital?: string;
+  perShare?: string;
+} {
+  const out: { capital?: string; perShare?: string } = {};
+  const { shareCapitalAED: capital, valuePerShareAED: perShare } = company;
+  if (typeof capital === 'number' && capital > 0 && capital < COMPANY_SETUP_MIN_SHARE_CAPITAL_AED) {
+    out.capital = `Minimum AED ${COMPANY_SETUP_MIN_SHARE_CAPITAL_AED.toLocaleString('en-US')}.`;
+  }
+  if (typeof perShare === 'number' && perShare > 0 && perShare < COMPANY_SETUP_MIN_VALUE_PER_SHARE_AED) {
+    out.perShare = `Minimum AED ${COMPANY_SETUP_MIN_VALUE_PER_SHARE_AED} per share.`;
+  }
+  return out;
+}
+
 /**
  * Exactly what is still stopping the People & Documents step from continuing,
  * named person by person. A generic "every person needs a name, nationality,
@@ -189,53 +314,30 @@ export function missingForPeopleStep(
 
   persons.forEach((person, index) => {
     const who = person.fullName.trim() || `Person ${index + 1}`;
-    const need: string[] = [];
-    if (!person.fullName.trim()) need.push('full name');
-    if (!person.nationality) need.push('nationality');
-    if (!person.dateOfBirth) need.push('date of birth');
-    if (!person.religion) need.push('religion');
-    if (!person.currentOrPastEidVisa) need.push('the Emirates ID / visa answer');
-    if (
-      person.roles.shareholder &&
-      !(typeof person.shareholdingPct === 'number' && person.shareholdingPct > 0)
-    ) {
-      need.push('a shareholding percentage');
-    }
-
     const docs = documents[String(index)] ?? {};
-    if (!docs.passport?.path) need.push('the passport data page');
-    if (companySetupAdditionalPageRequired(person, docs) && !docs.passport_additional?.path) {
-      need.push('the additional passport page');
-    }
-    if (!docs.photo?.path) need.push('the portrait photo');
-    if (!docs.proof_of_address?.path) need.push('the bank statement');
-    if (person.currentOrPastEidVisa === 'current') {
-      if (!docs.eid_front?.path) need.push('the Emirates ID front');
-      if (!docs.eid_back?.path) need.push('the Emirates ID back');
-      if (!docs.visa_document?.path) need.push('the UAE visa copy');
-    }
-    if (person.currentOrPastEidVisa === 'past' && !docs.previous_visa_document?.path) {
-      need.push('the previous UAE visa copy');
-    }
-
+    const need = [...missingPersonDetails(person), ...missingPersonDocuments(person, docs)];
     if (need.length > 0) missing.push(`${who}: ${listPhrase(need)}.`);
   });
 
   const totals = roleTotals(persons);
-  if (totals.gmCount === 0) missing.push('Tick one person as General Manager.');
-  if (totals.gmCount > 1) missing.push('Only one person can be the General Manager.');
-  if (totals.secretaryCount === 0) missing.push('Tick one person as Secretary.');
-  if (totals.secretaryCount > 1) missing.push('Only one person can be the Secretary.');
+  if (totals.gmCount > COMPANY_SETUP_MAX_GENERAL_MANAGERS) {
+    missing.push('Only one person can be the General Manager.');
+  }
+  if (totals.secretaryCount > COMPANY_SETUP_MAX_SECRETARIES) {
+    missing.push('Only one person can be the Secretary.');
+  }
   if (totals.directorCount === 0) missing.push('Tick at least one person as Director.');
   if (totals.shareholderCount === 0) missing.push('Tick at least one person as Shareholder.');
-  else if (Math.abs(totals.shareholdingSum - 100) > 0.01) {
+  else if (totals.shareholderCount > COMPANY_SETUP_MAX_SHAREHOLDERS) {
+    missing.push(`A company can have up to ${COMPANY_SETUP_MAX_SHAREHOLDERS} shareholders.`);
+  } else if (Math.abs(totals.shareholdingSum - 100) > 0.01) {
     missing.push(
       `The shareholding adds up to ${totals.shareholdingSum}%. It must be exactly 100%.`
     );
   }
 
-  if (persons.length > COMPANY_SETUP_MAX_SHAREHOLDERS) {
-    missing.push(`Please add no more than ${COMPANY_SETUP_MAX_SHAREHOLDERS} people.`);
+  if (persons.length > COMPANY_SETUP_MAX_PERSONS) {
+    missing.push(`Please add no more than ${COMPANY_SETUP_MAX_PERSONS} people.`);
   }
   return missing;
 }

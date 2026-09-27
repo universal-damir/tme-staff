@@ -68,6 +68,8 @@ interface UploadSlotProps {
   warnings?: string[];
   /** Rendered under the warnings — e.g. the "Continue anyway" affordance. */
   footer?: React.ReactNode;
+  /** Show the red required asterisk after the label. Off by default. */
+  required?: boolean;
 }
 
 export function UploadSlot({
@@ -90,6 +92,7 @@ export function UploadSlot({
   messagesBeside = false,
   warnings,
   footer,
+  required = false,
 }: UploadSlotProps) {
   void _expectedType;
   void _file;
@@ -263,6 +266,7 @@ export function UploadSlot({
           style={{ color: TME_COLORS.primary }}
         >
           {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
         </label>
       )}
 

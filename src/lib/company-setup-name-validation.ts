@@ -20,6 +20,7 @@ export const COMPANY_NAME_RULES: string[] = [
   'The name cannot contain UAE-related names (for example "Dubai", "Emirates", "UAE", "Abu Dhabi", "Sharjah").',
   'The name cannot contain country or city names (for example "Germany", "London").',
   'Words that refer to political or well-known organizations (for example "FBI", "NATO") may be rejected by the authority.',
+  'At least one of your selected business activities must be reflected in the company name.',
   'All company names get the suffix FZCO.',
   'Final approval remains subject to authority approval.',
 ];
@@ -175,4 +176,154 @@ export function validateCompanyName(name: string): CompanyNameValidationResult {
     errors: uniqueErrors,
     warnings: uniqueWarnings,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Activity fit: does a name reflect the selected business activities?
+// ---------------------------------------------------------------------------
+// IFZA expects at least one licensed activity to show in the name, and a name
+// must not suggest a line of business the licence does not cover. Used to
+// filter AI suggestions (hard) and to warn on typed names (soft).
+//
+// A name word is one of three kinds:
+//  - ACTIVITY word: derived from the activity wording ("Plants" from
+//    "Flowers & Ornamental Plants Trading", "Consultants" from "Consultancy").
+//  - DESCRIPTOR word: a business-type word ("Design", "Studio", "Advisory")
+//    that is NOT derived from the activities. It claims a business the client
+//    did not choose, so the name does not fit.
+//  - Anything else: a brand or coined word ("Tina", "GreenThumb") or a neutral
+//    word ("Premium", "Global"). Allowed, but it does not count as an activity.
+
+/** The rule text shown on the names step (also in COMPANY_NAME_RULES). */
+export const NAME_ACTIVITY_RULE =
+  'At least one of your selected business activities must be reflected in the company name.';
+
+// Never count as an activity word, never flagged.
+const CONNECTOR_WORDS = new Set([
+  'and', 'the', 'for', 'with', 'other', 'all', 'any', 'including', 'related',
+  'general', 'activities', 'activity', 'fzco',
+]);
+
+// Neutral words that fit IFZA naming: allowed, but they do not reflect an activity.
+const NEUTRAL_WORDS = new Set([
+  'premium', 'global', 'group', 'international', 'prime', 'elite', 'first',
+]);
+
+// Business-type words an AI likes to add. Allowed only when derived from the
+// selected activities (e.g. "Trading" is fine when an activity says Trading).
+const DESCRIPTOR_WORDS = new Set([
+  'design', 'designs', 'designer', 'designers', 'studio', 'studios', 'atelier',
+  'advisory', 'advisors', 'advisers', 'consulting', 'consultancy', 'consultants',
+  'consultant', 'solutions', 'services', 'service', 'technologies', 'technology',
+  'tech', 'digital', 'media', 'marketing', 'logistics', 'ventures', 'holdings',
+  'holding', 'partners', 'management', 'creative', 'creations', 'labs', 'lab',
+  'systems', 'engineering', 'interiors', 'interior', 'events', 'properties',
+  'realty', 'capital', 'investments', 'investment', 'finance', 'financial',
+  'agency', 'works', 'innovations', 'industries', 'supplies', 'supply',
+  'imports', 'exports', 'import', 'export', 'trading', 'trade', 'traders',
+  'commerce', 'commercial', 'enterprises', 'concepts', 'projects', 'associates',
+  'research', 'health', 'wellness', 'beauty', 'fashion', 'foods', 'food',
+  'retail', 'store', 'shop', 'boutique', 'collective', 'crafts', 'academy',
+  'education', 'training', 'software', 'hospitality', 'travel', 'tours',
+  'transport', 'shipping', 'freight', 'construction', 'contracting',
+  'maintenance', 'cleaning', 'security', 'energy', 'electronics', 'motors',
+  'rentals', 'brokerage', 'brokers', 'accounting', 'audit', 'legal', 'tax',
+  'insurance', 'medical', 'pharma', 'analytics', 'data', 'cloud', 'network',
+  'networks', 'communications', 'telecom', 'productions', 'production', 'films',
+  'publishing', 'printing', 'packaging', 'manufacturing', 'development',
+  'developers', 'builders', 'strategy', 'strategies', 'branding', 'decor',
+  'landscaping', 'landscapes', 'architecture', 'architects',
+]);
+
+/** Letters-only words; splits "GreenThumb" into "Green", "Thumb". */
+function nameWords(text: string): string[] {
+  return (text || '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter((w) => w.length >= 2);
+}
+
+function singular(word: string): string {
+  if (word.length > 4 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
+  if (word.length > 3 && word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1);
+  return word;
+}
+
+/** Same word family: "trade"/"trading", "consultants"/"consultancy", "plant"/"plants". */
+function sameWordFamily(a: string, b: string): boolean {
+  const x = singular(a);
+  const y = singular(b);
+  if (x === y) return true;
+  let prefix = 0;
+  while (prefix < x.length && prefix < y.length && x[prefix] === y[prefix]) prefix++;
+  return prefix >= 4 && prefix >= 0.6 * Math.min(x.length, y.length);
+}
+
+/** The words of the activity descriptions that can reflect an activity in a name. */
+export function activityKeywords(activities: string[]): string[] {
+  const words = new Set<string>();
+  for (const activity of activities) {
+    for (const word of nameWords(activity)) {
+      if (word.length >= 3 && !CONNECTOR_WORDS.has(word)) words.add(word);
+    }
+  }
+  return Array.from(words);
+}
+
+export interface NameActivityFit {
+  /** true when the name reflects an activity and adds no unrelated business word. */
+  fits: boolean;
+  /** At least one word of the name comes from the activity wording. */
+  hasActivityWord: boolean;
+  /** Business-type words that do not come from the activities (e.g. "Design"). */
+  unrelatedWords: string[];
+}
+
+/**
+ * Checks a name against the selected activity descriptions. With no activity
+ * text there is nothing to check against, so the name fits.
+ */
+export function checkNameActivityFit(name: string, activities: string[]): NameActivityFit {
+  const keywords = activityKeywords(activities);
+  if (keywords.length === 0) return { fits: true, hasActivityWord: true, unrelatedWords: [] };
+
+  let hasActivityWord = false;
+  const unrelated: string[] = [];
+  const original = (name || '').replace(/([a-z])([A-Z])/g, '$1 $2').split(/[^A-Za-z]+/).filter(Boolean);
+  for (const word of nameWords(name)) {
+    if (CONNECTOR_WORDS.has(word)) continue;
+    const derived = keywords.some((k) => sameWordFamily(word, k));
+    if (derived && !NEUTRAL_WORDS.has(word)) {
+      hasActivityWord = true;
+      continue;
+    }
+    if (derived || NEUTRAL_WORDS.has(word)) continue;
+    if (DESCRIPTOR_WORDS.has(word) || DESCRIPTOR_WORDS.has(singular(word))) {
+      const shown = original.find((w) => w.toLowerCase() === word) ?? word;
+      if (!unrelated.includes(shown)) unrelated.push(shown);
+    }
+  }
+  return { fits: hasActivityWord && unrelated.length === 0, hasActivityWord, unrelatedWords: unrelated };
+}
+
+/**
+ * A short example name built from the first activity ("Horizon Plants Trading"),
+ * or null when no clean example can be made.
+ */
+export function exampleNameFromActivities(activities: string[], brand = 'Horizon'): string | null {
+  const first = (activities.find((a) => a && a.trim()) ?? '').trim();
+  if (!first) return null;
+  const words = first
+    .split(/[,(;/]/)[0]
+    .replace(/[^A-Za-z&\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4);
+  while (words.length > 0 && ['&', 'and', 'of', 'the', 'for'].includes(words[words.length - 1].toLowerCase())) {
+    words.pop();
+  }
+  if (words.length === 0) return null;
+  const example = `${brand} ${words.join(' ')}`;
+  return validateCompanyName(example).valid ? example : null;
 }

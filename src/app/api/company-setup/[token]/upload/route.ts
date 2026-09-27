@@ -4,6 +4,7 @@ import { getSupabaseAdmin, COMPANY_SETUP_BUCKET } from '@/lib/supabase-server';
 import {
   verifyCompanySetupAccess,
   isCompanySetupDocSlot,
+  isCompanySetupPersonIndex,
 } from '@/lib/company-setup-token';
 import { MAX_FILE_BYTES, detectExtFromMagic, mimeForExt } from '@/lib/file-validation';
 import { getClientIp, rateLimitCheck } from '@/lib/ai-route-guard';
@@ -14,7 +15,8 @@ export const runtime = 'nodejs';
 // Per-submission ceiling. The portal sync enforces the same 100MB budget when
 // it pulls the files across, so anything above this could never land anyway.
 const MAX_SUBMISSION_BYTES = 100 * 1024 * 1024;
-const MAX_SUBMISSION_FILES = 40;
+// Sized for up to 9 persons (COMPANY_SETUP_MAX_PERSONS) at the old 40-per-6 rate.
+const MAX_SUBMISSION_FILES = 60;
 
 interface UsageTally {
   bytes: number;
@@ -57,7 +59,7 @@ function getTally(rowId: string, recordedFiles: number): UsageTally {
 }
 
 // POST /api/company-setup/[token]/upload
-// Multipart: personIndex ("0".."5"), slot (fixed vocabulary), file.
+// Multipart: personIndex ("0".."8"), slot (fixed vocabulary), file.
 // Magic-byte validated, stored under an opaque name:
 //   {submissionId}/{personIndex}/{slot}/{uuid}{ext}
 // Clone of the /api/storage/upload conventions (size budget, magic bytes,
@@ -96,7 +98,7 @@ export async function POST(
   const slot = String(form.get('slot') ?? '');
   const file = form.get('file');
 
-  if (!/^[0-5]$/.test(personIndex)) {
+  if (!isCompanySetupPersonIndex(personIndex)) {
     return NextResponse.json({ error: 'invalid_person_index' }, { status: 400 });
   }
   if (!isCompanySetupDocSlot(slot)) {

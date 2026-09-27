@@ -8,7 +8,8 @@
  *   businessDescription?: string   (legacy alias: preferences)
  * }
  * Returns: { suggestions: string[] } (up to 5, every one passing the
- * deterministic IFZA rule check; failures are regenerated once).
+ * deterministic IFZA rule check and the activity-fit check; failures are
+ * regenerated once).
  *
  * The form shows the mandatory disclaimer next to the results:
  * "Final company name approval remains subject to authority approval."
@@ -17,7 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { guardCompanySetupAiRoute } from '@/lib/ai-route-guard';
 import { getAnthropicClient, withTimeout } from '@/lib/anthropic';
-import { validateCompanyName } from '@/lib/company-setup-name-validation';
+import { checkNameActivityFit, validateCompanyName } from '@/lib/company-setup-name-validation';
 
 export const runtime = 'nodejs';
 
@@ -70,9 +71,14 @@ function buildPrompt(
 Business activities (IFZA activity code in brackets where known):
 ${activities.map((a, i) => `${i + 1}. ${formatActivity(a)}`).join('\n')}
 ${licenseType ? `\nLicense type: ${licenseType}${licenseType === 'Both' ? ' (Commercial and Professional)' : ''}\n` : ''}${businessDescription ? `\nBusiness description: ${businessDescription}\n` : ''}
-Every suggestion must fit THESE activities — a reader should be able to guess the line of business from the name.
+Every suggestion must fit THESE activities: a reader should be able to guess the line of business from the name.
 
-Hard rules — every suggestion MUST satisfy all of them:
+Activity words (IMPORTANT, a name that breaks these is thrown away):
+- Every name MUST contain at least one word taken from the activity wording above, or a close form of it (for example "Plants" from "Ornamental Plants Trading", "Consultants" from "Consultancy").
+- Do NOT add business-type words that are not in the activities (for example "Design", "Studio", "Advisory", "Solutions", "Consulting", "Services", "Trading") unless that word or a close form of it appears in an activity.
+- Any other word must be a brand or coined word (for example a first name or "GreenThumb") or a neutral word: Premium, Global, Group, International.
+
+Hard rules, every suggestion MUST satisfy all of them:
 - The first word is at least 3 characters long.
 - The name does not start with a number.
 - No "Limited" or "Ltd", and no legal-form suffix at all (the authority appends "FZCO" itself).
@@ -180,12 +186,17 @@ export async function POST(
   try {
     const first = await askForNames(activities, licenseType, businessDescription, SUGGESTION_COUNT, []);
 
-    // Every suggestion must pass the deterministic rule check before it is
-    // shown to the client. One regeneration round for the failures.
+    // Every suggestion must pass the deterministic IFZA rule check AND reflect
+    // the selected activities without adding an unrelated business word
+    // ("Design", "Studio" for a plant trader) before it is shown to the
+    // client. One regeneration round for the failures.
+    const activityTexts = activities.map((a) => a.description);
+    const acceptable = (name: string) =>
+      validateCompanyName(name).valid && checkNameActivityFit(name, activityTexts).fits;
     const valid: string[] = [];
     const rejected: string[] = [];
     for (const name of first) {
-      if (validateCompanyName(name).valid && !valid.includes(name)) valid.push(name);
+      if (acceptable(name) && !valid.includes(name)) valid.push(name);
       else rejected.push(name);
     }
 
@@ -200,7 +211,7 @@ export async function POST(
         );
         for (const name of retry) {
           if (valid.length >= SUGGESTION_COUNT) break;
-          if (validateCompanyName(name).valid && !valid.includes(name)) valid.push(name);
+          if (acceptable(name) && !valid.includes(name)) valid.push(name);
         }
       } catch {
         // Best-effort second round — whatever passed the first round still ships.

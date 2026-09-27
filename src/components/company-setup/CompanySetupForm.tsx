@@ -18,7 +18,10 @@ import {
   rekeyDocumentsAfterRemove,
   roleTotals,
   missingForPeopleStep,
-  companySetupAdditionalPageRequired,
+  missingForVisaStep,
+  missingPersonDetails,
+  missingPersonDocuments,
+  shareCapitalErrors,
   isoToDisplayDate,
   type CompanySetupDraft,
   type DraftCompany,
@@ -27,6 +30,9 @@ import { validateCompanyName } from '@/lib/company-setup-name-validation';
 import { Input, PhoneInput } from '@/components/ui';
 import {
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
+  COMPANY_SETUP_MAX_GENERAL_MANAGERS,
+  COMPANY_SETUP_MAX_PERSONS,
+  COMPANY_SETUP_MAX_SECRETARIES,
   COMPANY_SETUP_MAX_SHAREHOLDERS,
   COMPANY_SETUP_MAX_ACTIVITIES,
   type CompanySetupContact,
@@ -69,7 +75,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const DOC_SLOT_LABELS: Record<string, string> = {
   passport: 'Passport: data page',
   passport_additional: 'Passport: additional page',
-  photo: 'Portrait photo',
+  photo: 'Passport photo',
   eid_front: 'Emirates ID (front)',
   eid_back: 'Emirates ID (back)',
   visa_document: 'Current UAE visa',
@@ -441,9 +447,13 @@ export function CompanySetupForm({
   const activitiesOk =
     draft.company.activities.length >= 1 &&
     draft.company.activities.length <= COMPANY_SETUP_MAX_ACTIVITIES &&
-    draft.company.activities.every((a) => a.description.trim().length > 0) &&
-    !!draft.company.licenseType &&
-    (draft.company.businessDescription ?? '').trim().length > 0;
+    draft.company.activities.every((a) => a.description.trim().length > 0);
+  // License type is no longer asked and the business description is optional
+  // (tester feedback 27.09.26).
+
+  // Optional fields, but when filled in they must meet the IFZA minimums.
+  const capitalErrors = shareCapitalErrors(draft.company);
+  const shareCapitalOk = !capitalErrors.capital && !capitalErrors.perShare;
 
   // Three name options, each valid AND different from the other two: the
   // authority reads them as first / second / third choice, so the same name
@@ -456,22 +466,16 @@ export function CompanySetupForm({
 
   const peopleOk =
     draft.persons.length >= 1 &&
-    draft.persons.length <= COMPANY_SETUP_MAX_SHAREHOLDERS &&
-    // nationality + date of birth are server-required at submit — gate them
-    // here too, so the asterisks in the form tell the truth and the client is
-    // never let through to a 422 they cannot see.
-    draft.persons.every(
-      (p) =>
-        p.fullName.trim().length > 0 &&
-        !!p.nationality &&
-        !!p.dateOfBirth &&
-        !!p.religion &&
-        !!p.currentOrPastEidVisa
-    ) &&
-    totals.gmCount === 1 &&
-    totals.secretaryCount === 1 &&
+    draft.persons.length <= COMPANY_SETUP_MAX_PERSONS &&
+    // Every server-required person field is gated here too (same list as
+    // validatePersons), so the asterisks in the form tell the truth and the
+    // client is never let through to a 422 they cannot see.
+    draft.persons.every((p) => missingPersonDetails(p).length === 0) &&
+    totals.gmCount <= COMPANY_SETUP_MAX_GENERAL_MANAGERS &&
+    totals.secretaryCount <= COMPANY_SETUP_MAX_SECRETARIES &&
     totals.directorCount >= 1 &&
     totals.shareholderCount >= 1 &&
+    totals.shareholderCount <= COMPANY_SETUP_MAX_SHAREHOLDERS &&
     Math.abs(totals.shareholdingSum - 100) <= 0.01 &&
     draft.persons.every(
       (p) =>
@@ -486,29 +490,20 @@ export function CompanySetupForm({
     [draft.persons, documents]
   );
 
-  const documentsOk = draft.persons.every((person, index) => {
-    const docs = documents[String(index)] ?? {};
-    if (!docs.passport?.path || !docs.photo?.path || !docs.proof_of_address?.path) return false;
-    // Indian / Syrian passports carry a second required page — except the new
-    // Syrian booklet, which has none. Same rule the documents step renders
-    // with, so the button can never sit grey over a slot that is not shown.
-    if (companySetupAdditionalPageRequired(person, docs) && !docs.passport_additional?.path) {
-      return false;
-    }
-    if (person.currentOrPastEidVisa === 'current') {
-      if (!docs.eid_front?.path || !docs.eid_back?.path || !docs.visa_document?.path) return false;
-    }
-    if (person.currentOrPastEidVisa === 'past' && !docs.previous_visa_document?.path) return false;
-    return true;
-  });
-
-  const visaFacilityOk = draft.persons.every(
-    (p) =>
-      !p.visa.visaRequired ||
-      (!!p.visa.jobTitle?.trim() &&
-        typeof p.visa.basicMonthlySalaryAED === 'number' &&
-        p.visa.basicMonthlySalaryAED > 0)
+  // Passport always; photo + bank statement for shareholders and for anyone
+  // who wants a UAE visa (the visa is ticked on the NEXT step, so an officer's
+  // photo/statement is enforced there). Same rule as the submit route.
+  const documentsOk = draft.persons.every(
+    (person, index) => missingPersonDocuments(person, documents[String(index)] ?? {}).length === 0
   );
+
+  // A company officer who ticks the visa here now also needs the passport
+  // photo and bank statement from the previous step.
+  const visaMissing = useMemo(
+    () => missingForVisaStep(draft.persons, documents),
+    [draft.persons, documents]
+  );
+  const visaFacilityOk = visaMissing.length === 0;
 
   // ---------- Navigation ----------
   const goToStep = (step: number) => {
@@ -578,6 +573,8 @@ export function CompanySetupForm({
 
   // ---------- Render ----------
   const contact = draft.contact;
+  // The greeting uses the first name only ("Dear Tina"), never the full name.
+  const firstName = contact.name.trim().split(/\s+/)[0] ?? '';
 
   return (
     <div className="max-w-5xl mx-auto space-y-4">
@@ -611,10 +608,11 @@ export function CompanySetupForm({
         >
           <div className="space-y-5">
             <p className="text-sm text-gray-600 leading-relaxed">
-              {contact.name.trim() ? `Dear ${contact.name.trim()}, welcome` : 'Welcome'} to the TME
-              Services company setup form for your new IFZA (International Free Zone Authority)
-              company. This form collects everything the authority needs to start the
-              incorporation. You can pause at any time, your progress is saved automatically.
+              {firstName ? `Dear ${firstName}, welcome` : 'Welcome'} to the TME Services company
+              setup form for your IFZA (International Free Zone Authority) company. This form
+              collects all details we need to submit to the authority as part of the
+              incorporation process. You can pause at any time, your progress is saved
+              automatically.
             </p>
 
             <div className="rounded-xl border border-gray-100 p-4">
@@ -663,13 +661,14 @@ export function CompanySetupForm({
 
             <div>
               <p className="text-sm font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-                What you will need, for every shareholder, manager, director and secretary
+                What you will need for each shareholder and company officer (manager, director and
+                secretary)
               </p>
               <ul className="space-y-2">
                 {[
                   'Passport copy: a proper flatbed scan of the data page spread (not a phone photo).',
-                  'A portrait photo (headshot): a recent digital photo on a plain light background, no glasses.',
-                  'Proof of address: a BANK STATEMENT not older than 3 months (no utility bills).',
+                  'A digital passport photo: a recent photo on a plain light background, no glasses. Only for shareholders, and for company officers who want a UAE visa.',
+                  'Proof of address: a BANK STATEMENT not older than 3 months (no utility bills). Only for shareholders, and for company officers who want a UAE visa.',
                   'Emirates ID and UAE visa copies, if the person currently holds or previously held them.',
                 ].map((item, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
@@ -744,13 +743,17 @@ export function CompanySetupForm({
           stepNumber={4}
         >
           <StepShareCapital company={draft.company} onChange={updateCompany} />
-          <StepNavButtons enabled onContinue={() => void continueFrom(4)} onBack={() => goToStep(3)} />
+          <StepNavButtons
+            enabled={shareCapitalOk}
+            onContinue={() => void continueFrom(4)}
+            onBack={() => goToStep(3)}
+          />
         </FormSection>
       )}
 
       {viewingStep === 5 && (
         <FormSection
-          title="People & Documents"
+          title="Shareholder & Company Officer Details"
           icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
           stepNumber={5}
         >
@@ -799,6 +802,20 @@ export function CompanySetupForm({
             onCompanyChange={updateCompany}
             onPersonsChange={updatePersons}
           />
+          {visaMissing.length > 0 && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-semibold text-amber-900 mb-1">
+                Still needed before you can continue:
+              </p>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {visaMissing.map((item, i) => (
+                  <li key={i} className="text-xs text-amber-800">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <StepNavButtons
             enabled={visaFacilityOk}
             onContinue={() => void continueFrom(6)}
@@ -908,6 +925,7 @@ function ReviewSummary({
               .map((a) => `${a.code ? `[${a.code}] ` : ''}${a.description}`)
               .join('; ')}
           />
+          {/* Not asked in the client form any more; shown only when TME pre-filled it. */}
           <SummaryRow label="License type" value={company.licenseType} />
           <SummaryRow label="Business description" value={company.businessDescription} />
           <SummaryRow

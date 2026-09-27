@@ -4,8 +4,14 @@
 // /api/company-setup/[token]/submit before a submission is accepted.
 
 import {
+  COMPANY_SETUP_EXCLUDED_RELIGIONS,
   COMPANY_SETUP_MAX_ACTIVITIES,
+  COMPANY_SETUP_MAX_GENERAL_MANAGERS,
+  COMPANY_SETUP_MAX_PERSONS,
+  COMPANY_SETUP_MAX_SECRETARIES,
   COMPANY_SETUP_MAX_SHAREHOLDERS,
+  COMPANY_SETUP_MIN_SHARE_CAPITAL_AED,
+  COMPANY_SETUP_MIN_VALUE_PER_SHARE_AED,
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
   type CompanySetupCompanyData,
   type CompanySetupPerson,
@@ -54,7 +60,7 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Company block: 3 rule-valid name options, 1..10 activities, license type, share capital sanity. */
+/** Company block: 3 rule-valid name options, 1..10 activities, share capital sanity. */
 export function validateCompanyData(
   company: CompanySetupCompanyData
 ): CompanySetupValidationResult {
@@ -106,16 +112,9 @@ export function validateCompanyData(
     }
   });
 
-  // License type is mandatory.
-  if (!company.licenseType) {
-    errors.push('Please choose a license type.');
-  }
-
-  // The business description is mandatory: the authority asks what the company
-  // will actually do, and it is what the name suggester is grounded in.
-  if (!company.businessDescription || !company.businessDescription.trim()) {
-    errors.push('Please add a brief description of your intended business.');
-  }
+  // License type and business description are OPTIONAL (tester feedback
+  // 27.09.26): the client form no longer asks for the license type, and the
+  // business description may be left empty.
 
   // Share capital numbers must be positive when provided.
   if (company.shareCapitalAED !== undefined && !isPositiveNumber(company.shareCapitalAED)) {
@@ -134,6 +133,23 @@ export function validateCompanyData(
   ) {
     errors.push(
       `The share capital cannot exceed AED ${COMPANY_SETUP_MAX_SHARE_CAPITAL_AED.toLocaleString('en-US')}.`
+    );
+  }
+  // IFZA minimums: AED 10,000 share capital, AED 10 per share (fields optional).
+  if (
+    isPositiveNumber(company.shareCapitalAED) &&
+    company.shareCapitalAED < COMPANY_SETUP_MIN_SHARE_CAPITAL_AED
+  ) {
+    errors.push(
+      `IFZA requires a minimum share capital of AED ${COMPANY_SETUP_MIN_SHARE_CAPITAL_AED.toLocaleString('en-US')}.`
+    );
+  }
+  if (
+    isPositiveNumber(company.valuePerShareAED) &&
+    company.valuePerShareAED < COMPANY_SETUP_MIN_VALUE_PER_SHARE_AED
+  ) {
+    errors.push(
+      `The minimum value of each share is AED ${COMPANY_SETUP_MIN_VALUE_PER_SHARE_AED}.`
     );
   }
   if (
@@ -173,7 +189,10 @@ export function validateCompanyData(
   return { valid: errors.length === 0, errors, warnings };
 }
 
-/** Persons block: role rules (1 GM, 1 secretary, >=1 director), shareholding sums to 100. */
+/**
+ * Persons block: role rules (at most 1 GM, at most 1 secretary, 1 to 6
+ * shareholders, >=1 director), shareholding sums to 100.
+ */
 export function validatePersons(
   persons: CompanySetupPerson[]
 ): CompanySetupValidationResult {
@@ -184,8 +203,8 @@ export function validatePersons(
   if (list.length < 1) {
     errors.push('Please add at least one person.');
   }
-  if (list.length > COMPANY_SETUP_MAX_SHAREHOLDERS) {
-    errors.push(`Please add no more than ${COMPANY_SETUP_MAX_SHAREHOLDERS} persons.`);
+  if (list.length > COMPANY_SETUP_MAX_PERSONS) {
+    errors.push(`Please add no more than ${COMPANY_SETUP_MAX_PERSONS} persons.`);
   }
 
   list.forEach((person, index) => {
@@ -193,7 +212,9 @@ export function validatePersons(
     if (!person?.fullName || !person.fullName.trim()) {
       errors.push(`Person ${index + 1} needs a full name (as written in the passport).`);
     }
-    if (person?.email && !EMAIL_PATTERN.test(person.email.trim())) {
+    if (!person?.email || !person.email.trim()) {
+      errors.push(`${label}: please enter the email address.`);
+    } else if (!EMAIL_PATTERN.test(person.email.trim())) {
       errors.push(`${label}: please enter a valid email address.`);
     }
     if (person?.roles?.shareholder && !isPositiveNumber(person.shareholdingPct)) {
@@ -212,11 +233,45 @@ export function validatePersons(
     } else if (!isValidIsoDate(person.dateOfBirth) || person.dateOfBirth >= todayIso()) {
       errors.push(`${label}: the date of birth is not a valid date.`);
     }
-    if (!person?.religion || !person.religion.trim()) {
-      errors.push(`${label}: please enter the religion.`);
+    // A value IFZA no longer offers (e.g. "Atheist/Non-religious") counts as
+    // not answered: the client has to pick one from the list.
+    if (
+      !person?.religion ||
+      !person.religion.trim() ||
+      COMPANY_SETUP_EXCLUDED_RELIGIONS.includes(person.religion.trim())
+    ) {
+      errors.push(`${label}: please select the religion.`);
     }
     if (!person?.currentOrPastEidVisa) {
       errors.push(`${label}: please answer the Emirates ID / UAE visa question.`);
+    }
+    // Required for every person (tester feedback 27.09.26): whether the person
+    // will apply for a visa is not known yet, and it is easier to have these
+    // than to ask for them later. Employer details stay optional.
+    const blank = (v: string | undefined) => !v || !v.trim();
+    if (blank(person?.educationalQualification)) {
+      errors.push(`${label}: please select the educational qualification.`);
+    }
+    if (blank(person?.languagesSpoken)) {
+      errors.push(`${label}: please select the languages spoken.`);
+    }
+    if (blank(person?.maritalStatus)) {
+      errors.push(`${label}: please select the marital status.`);
+    }
+    if (blank(person?.fatherFullName)) {
+      errors.push(`${label}: please enter the father's full name.`);
+    }
+    if (blank(person?.motherFullName)) {
+      errors.push(`${label}: please enter the mother's full name.`);
+    }
+    if (blank(person?.mobile)) {
+      errors.push(`${label}: please enter the mobile number.`);
+    }
+    if (typeof person?.visitedOrResidedUAE !== 'boolean') {
+      errors.push(`${label}: please answer whether this person has visited or resided in the UAE.`);
+    }
+    if (typeof person?.otherEntityShareholder !== 'boolean') {
+      errors.push(`${label}: please answer whether this person is a shareholder in any other entity.`);
     }
     if (person?.visa?.visaRequired) {
       if (!person.visa.jobTitle || !person.visa.jobTitle.trim()) {
@@ -254,21 +309,13 @@ export function validatePersons(
   });
 
   const generalManagers = list.filter((p) => p?.roles?.generalManager).length;
-  if (generalManagers !== 1) {
-    errors.push(
-      generalManagers === 0
-        ? 'Please assign one person as General Manager.'
-        : 'Only one person can be the General Manager.'
-    );
+  if (generalManagers > COMPANY_SETUP_MAX_GENERAL_MANAGERS) {
+    errors.push('Only one person can be the General Manager.');
   }
 
   const secretaries = list.filter((p) => p?.roles?.secretary).length;
-  if (secretaries !== 1) {
-    errors.push(
-      secretaries === 0
-        ? 'Please assign one person as Secretary.'
-        : 'Only one person can be the Secretary.'
-    );
+  if (secretaries > COMPANY_SETUP_MAX_SECRETARIES) {
+    errors.push('Only one person can be the Secretary.');
   }
 
   const directors = list.filter((p) => p?.roles?.director).length;
@@ -276,8 +323,15 @@ export function validatePersons(
     errors.push('Please assign at least one person as Director.');
   }
 
-  // Shareholding of all shareholders must total exactly 100 (tolerance 0.01).
   const shareholders = list.filter((p) => p?.roles?.shareholder);
+  if (list.length > 0 && shareholders.length < 1) {
+    errors.push('Please assign at least one person as Shareholder.');
+  }
+  if (shareholders.length > COMPANY_SETUP_MAX_SHAREHOLDERS) {
+    errors.push(`A company can have up to ${COMPANY_SETUP_MAX_SHAREHOLDERS} shareholders.`);
+  }
+
+  // Shareholding of all shareholders must total exactly 100 (tolerance 0.01).
   if (shareholders.length > 0) {
     const total = shareholders.reduce(
       (sum, p) => sum + (isPositiveNumber(p.shareholdingPct) ? p.shareholdingPct : 0),

@@ -8,6 +8,7 @@ import { sanitizeFreeText } from '@/lib/submit-validation';
 import { foldPayloadToEnglish } from '@/lib/english-only';
 import { validateSubmission } from '@/lib/company-setup-validation';
 import { companySetupAdditionalPageRequired } from '@/components/company-setup/draft';
+import { companySetupNeedsPhotoAndAddress } from '@/types/company-setup';
 import type {
   CompanySetupDocuments,
   CompanySetupPerson,
@@ -24,7 +25,8 @@ const MAX_SUBMIT_BYTES = 256 * 1024;
  * the server is the authority — a stale client state or hand-crafted POST must
  * never reach status='submitted' with missing documents.
  *
- * Per person: passport + photo + proof of address ALWAYS.
+ * Per person: passport ALWAYS. Photo + proof of address for shareholders and
+ * for anyone who wants a UAE visa (companySetupNeedsPhotoAndAddress).
  * Indian / Syrian nationals additionally need the passport's additional page.
  * EID/visa set depends on currentOrPastEidVisa:
  *   'current' -> eid_front + eid_back + visa_document
@@ -51,8 +53,10 @@ function missingPersonDocuments(
           : `${label}: passport address / family-details page`
       );
     }
-    if (!docs.photo?.path) missing.push(`${label}: portrait photo`);
-    if (!docs.proof_of_address?.path) missing.push(`${label}: proof of address (bank statement)`);
+    if (companySetupNeedsPhotoAndAddress(person)) {
+      if (!docs.photo?.path) missing.push(`${label}: passport photo`);
+      if (!docs.proof_of_address?.path) missing.push(`${label}: proof of address (bank statement)`);
+    }
     if (person?.currentOrPastEidVisa === 'current') {
       if (!docs.eid_front?.path) missing.push(`${label}: Emirates ID (front)`);
       if (!docs.eid_back?.path) missing.push(`${label}: Emirates ID (back)`);
@@ -78,7 +82,8 @@ function requiredDocumentPaths(
   const paths: string[] = [];
   persons.forEach((person, index) => {
     const docs: CompanySetupPersonDocuments = documents[String(index)] ?? {};
-    const slots: Array<keyof CompanySetupPersonDocuments> = ['passport', 'photo', 'proof_of_address'];
+    const slots: Array<keyof CompanySetupPersonDocuments> = ['passport'];
+    if (companySetupNeedsPhotoAndAddress(person)) slots.push('photo', 'proof_of_address');
     if (companySetupAdditionalPageRequired(person, docs)) slots.push('passport_additional');
     if (person?.currentOrPastEidVisa === 'current') {
       slots.push('eid_front', 'eid_back', 'visa_document');
@@ -169,9 +174,9 @@ export async function POST(
     documents = row.documents ?? {};
   }
 
-  // Full rule gate: exactly 3 rule-valid names, 1..10 activities, 1..6
-  // persons, exactly one GM, exactly one secretary, >=1 director,
-  // shareholders total 100%.
+  // Full rule gate: exactly 3 rule-valid names, 1..10 activities, 1..9
+  // persons (COMPANY_SETUP_MAX_PERSONS), at most one GM, at most one
+  // secretary, >=1 director, 1..6 shareholders totalling 100%.
   const validation = validateSubmission(submittedData);
 
   // Required documents per person.
