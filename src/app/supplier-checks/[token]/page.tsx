@@ -33,6 +33,7 @@ import {
   sharedRoles,
   validateAnswers,
 } from '@/lib/supplier-policy-validation';
+import { DEMO_INTAKE, isDemoToken } from './demo';
 
 type PageState =
   | 'loading'
@@ -542,6 +543,15 @@ function RoleCard({
     onChange(role, samePerson(person, candidate) ? { ...EMPTY_PERSON } : { ...EMPTY_PERSON, ...candidate });
   };
   const set = (field: PersonField) => (value: string) => onChange(role, { ...person, [field]: value });
+  // "Someone else" reads as selected whenever the fields hold nobody from the
+  // list (empty or typed by hand). Pressing it clears the fields and puts the
+  // cursor in Full name, so it is clear the list is not the only choice.
+  const listed = [...copyFrom.map((other) => people[other]), ...officers.map((o) => ({ ...EMPTY_PERSON, ...o }))];
+  const someoneElse = !listed.some((candidate) => samePerson(person, candidate));
+  const pickSomeoneElse = () => {
+    if (!someoneElse) onChange(role, { ...EMPTY_PERSON });
+    setTimeout(() => document.getElementById(fieldId(role, 'name'))?.focus(), 0);
+  };
 
   return (
     <div
@@ -595,6 +605,13 @@ function RoleCard({
                 onClick={() => pick(officer)}
               />
             ))}
+            <PersonOption
+              label="Someone else"
+              detail="Type the name, position and email below"
+              pressed={someoneElse}
+              disabled={disabled}
+              onClick={pickSomeoneElse}
+            />
           </div>
         </div>
       ) : (
@@ -776,12 +793,17 @@ export default function SupplierPolicyIntakePage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/supplier-checks/${token}`);
-        if (cancelled) return;
-        if (res.status === 404) return setState('not_found');
-        if (res.status === 410) return setState('closed');
-        if (!res.ok) return setState('error');
-        const json: IntakeData = await res.json();
+        let json: IntakeData;
+        if (isDemoToken(token)) {
+          json = DEMO_INTAKE;
+        } else {
+          const res = await fetch(`/api/supplier-checks/${token}`);
+          if (cancelled) return;
+          if (res.status === 404) return setState('not_found');
+          if (res.status === 410) return setState('closed');
+          if (!res.ok) return setState('error');
+          json = await res.json();
+        }
         setData(json);
         setPeople(initialPeople(json));
         if (json.submitted) {
@@ -841,6 +863,10 @@ export default function SupplierPolicyIntakePage() {
       return;
     }
     setSubmitting(true);
+    if (isDemoToken(token)) {
+      setState('success');
+      return;
+    }
     try {
       const res = await fetch(`/api/supplier-checks/${token}/submit`, {
         method: 'POST',
