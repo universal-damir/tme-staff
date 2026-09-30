@@ -147,11 +147,14 @@ function person(value: unknown): SvpPerson {
  * caller runs sanitizeFreeText + foldPayloadToEnglish on the result, then
  * validateAnswers.
  *
- * `priceAgreed` is copied as the literal the client sent; the route refuses
- * anything but `true` before it stores the answers.
+ * `priceAgreed` and `dutyAcknowledged` are copied as the literal the client
+ * sent; the route refuses anything but `true` before it stores the answers.
  */
-export function pickSubmittedAnswers(body: unknown): Omit<SvpPolicyAnswers, 'priceAgreed'> & {
+export function pickSubmittedAnswers(
+  body: unknown
+): Omit<SvpPolicyAnswers, 'priceAgreed' | 'dutyAcknowledged'> & {
   priceAgreed: boolean;
+  dutyAcknowledged: boolean;
 } {
   const b = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
   const note = str(b.note);
@@ -164,6 +167,7 @@ export function pickSubmittedAnswers(body: unknown): Omit<SvpPolicyAnswers, 'pri
     // The office text is set by the portal; a free text sent alongside is dropped.
     recordsLocation: isOffice ? '' : str(b.recordsLocation),
     priceAgreed: b.priceAgreed === true,
+    dutyAcknowledged: b.dutyAcknowledged === true,
     ...(note ? { note } : {}),
   };
 }

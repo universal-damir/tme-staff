@@ -125,6 +125,7 @@ describe('pickSubmittedAnswers', () => {
       recordsLocationIsRegisteredOffice: false,
       recordsLocation: 'Warehouse',
       priceAgreed: true,
+      dutyAcknowledged: false,
     });
   });
 
@@ -136,5 +137,7 @@ describe('pickSubmittedAnswers', () => {
   it('treats anything but literal true as not agreed', () => {
     expect(pickSubmittedAnswers({ priceAgreed: 'true' }).priceAgreed).toBe(false);
     expect(pickSubmittedAnswers(null).priceAgreed).toBe(false);
+    expect(pickSubmittedAnswers({ dutyAcknowledged: 'true' }).dutyAcknowledged).toBe(false);
+    expect(pickSubmittedAnswers({ dutyAcknowledged: true }).dutyAcknowledged).toBe(true);
   });
 });

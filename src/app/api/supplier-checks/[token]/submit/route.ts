@@ -57,7 +57,12 @@ export async function POST(
     return NextResponse.json({ error: 'price_not_agreed' }, { status: 400 });
   }
 
-  const answers: SvpPolicyAnswers = { ...picked, priceAgreed: true };
+  // Second tick box: TME does not check the suppliers (policy section 8).
+  if (picked.dutyAcknowledged !== true) {
+    return NextResponse.json({ error: 'duty_not_acknowledged' }, { status: 400 });
+  }
+
+  const answers: SvpPolicyAnswers = { ...picked, priceAgreed: true, dutyAcknowledged: true };
   const messages = validateAnswers(answers, { requirePriceAgreed: true });
   if (messages.length > 0) {
     return NextResponse.json({ error: 'invalid_answers', messages }, { status: 400 });

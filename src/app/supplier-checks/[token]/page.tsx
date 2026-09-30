@@ -1,10 +1,22 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
-import { Input } from '@/components/ui';
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Info, Users } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  CheckCircle,
+  Clock,
+  FileText,
+  Loader2,
+  Mail,
+  PenLine,
+  UserCheck,
+  Users,
+  XCircle,
+} from 'lucide-react';
 import {
   SVP_LIMITS,
   SVP_ROLE_KEYS,
@@ -16,6 +28,7 @@ import {
 import {
   SVP_ROLE_LABELS,
   describeRoleVariant,
+  normaliseName,
   roleVariant,
   sharedRoles,
   validateAnswers,
@@ -40,8 +53,14 @@ interface IntakeData {
 }
 
 type People = Record<SvpRoleKey, SvpPerson>;
+type PersonField = keyof SvpPerson;
 
 const EMPTY_PERSON: SvpPerson = { name: '', position: '', email: '' };
+
+const NAVY = TME_COLORS.primary;
+const GOLD = TME_COLORS.secondary;
+const NAVY_TINT = 'rgba(36,63,123,0.06)';
+const ERROR_TINT = 'rgba(239,68,68,0.06)';
 
 // What each role does, in the words of the policy (template v1.3, section 5).
 const ROLE_HINTS: Record<SvpRoleKey, string> = {
@@ -53,7 +72,7 @@ const ROLE_HINTS: Record<SvpRoleKey, string> = {
     'Owns the policy and checks at least once a year that it is followed. The Supervisor signs the policy.',
 };
 
-// "Same person as ..." offers only the roles above this one, so the buttons
+// "Same person as ..." offers only the roles above this one, so the options
 // read top-down: Reviewer copies the Implementer, Supervisor copies either.
 const COPY_FROM: Record<SvpRoleKey, SvpRoleKey[]> = {
   implementer: [],
@@ -68,19 +87,101 @@ function formatAed(value: number): string {
   });
 }
 
+/** dd.mm.yy in Dubai time, or null for a missing / broken date. */
+function formatShortDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Dubai',
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('day')}.${get('month')}.${get('year')}`;
+}
+
 function joinWords(words: string[]): string {
   if (words.length <= 1) return words.join('');
   return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 
-// NOTE: Shell, Header, Section and RoleCard are defined at MODULE scope (not
-// inside the page component). Defining them inline would give them a new
-// identity on every render, so React would remount the subtree on each
-// keystroke and the inputs would lose focus after one character.
-function Shell({ children }: { children: React.ReactNode }) {
+/** Two people match when name, position and email are the same (name loosely). */
+function samePerson(a: SvpPerson, b: SvpPerson): boolean {
+  const n = normaliseName(a.name);
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
+    n !== '' &&
+    n === normaliseName(b.name) &&
+    a.position.trim().toLowerCase() === (b.position || '').trim().toLowerCase() &&
+    a.email.trim().toLowerCase() === (b.email || '').trim().toLowerCase()
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Problems -> fields
+// ---------------------------------------------------------------------------
+// validateAnswers (shared with the portal, do not change its wording here)
+// returns plain sentences that start with the field they belong to, e.g.
+// "Supervisor: the email is missing." We map each one to the input it is about,
+// so the message can sit next to the field and the summary can link to it.
+
+function fieldId(role: SvpRoleKey, field: PersonField): string {
+  return `svp-${role}-${field}`;
+}
+
+const RECORDS_LOCATION_ID = 'svp-records-location';
+const NOTE_ID = 'svp-note';
+const PRICE_ID = 'svp-price-agreed';
+const DUTY_ID = 'svp-duty-acknowledged';
+
+interface FieldProblem {
+  /** The full sentence, shown in the summary at the top. */
+  message: string;
+  /** The input it belongs to, or null when it has no single field. */
+  target: string | null;
+  /** The sentence without its "Role:" prefix, shown next to the field. */
+  inline: string;
+}
+
+function capitalise(text: string): string {
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
+function mapProblem(message: string): FieldProblem {
+  const colon = message.indexOf(':');
+  const prefix = colon > 0 ? message.slice(0, colon).trim() : '';
+  const rest = colon > 0 ? message.slice(colon + 1).trim() : message;
+  const inline = capitalise(rest);
+
+  const role = SVP_ROLE_KEYS.find((r) => SVP_ROLE_LABELS[r] === prefix);
+  if (role) {
+    const field: PersonField | null = /^the name/i.test(rest)
+      ? 'name'
+      : /^the position/i.test(rest)
+        ? 'position'
+        : /^the email/i.test(rest)
+          ? 'email'
+          : null;
+    return { message, target: field ? fieldId(role, field) : null, inline };
+  }
+  if (prefix === 'Records location') return { message, target: RECORDS_LOCATION_ID, inline };
+  if (prefix === 'Note') return { message, target: NOTE_ID, inline };
+  if (prefix === 'Price') return { message, target: PRICE_ID, inline };
+  return { message, target: null, inline: message };
+}
+
+// NOTE: every sub-component below is defined at MODULE scope (not inside the
+// page component). Defining them inline would give them a new identity on
+// every render, so React would remount the subtree on each keystroke and the
+// inputs would lose focus after one character.
+
+function Shell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
+  return (
+    <div className="min-h-screen flex items-start sm:items-center justify-center px-4 py-6 sm:py-10">
+      <div
+        className={`w-full ${wide ? 'max-w-[1100px]' : 'max-w-2xl'} bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-8 lg:p-10`}
+      >
         {children}
       </div>
     </div>
@@ -89,14 +190,14 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function Header({ companyName }: { companyName?: string | null }) {
   return (
-    <div className="mb-8">
+    <div className="mb-6">
       <div
         className="text-xs font-semibold tracking-wide uppercase mb-2"
-        style={{ color: TME_COLORS.secondary }}
+        style={{ color: GOLD }}
       >
         TME Services, VAT
       </div>
-      <h1 className="text-2xl font-bold" style={{ color: TME_COLORS.primary }}>
+      <h1 className="text-2xl sm:text-3xl font-bold" style={{ color: NAVY }}>
         Supplier Verification Policy
       </h1>
       {companyName && <p className="text-gray-600 mt-1">{companyName}</p>}
@@ -104,7 +205,7 @@ function Header({ companyName }: { companyName?: string | null }) {
   );
 }
 
-function Section({
+function Step({
   number,
   title,
   hint,
@@ -112,48 +213,297 @@ function Section({
 }: {
   number: number;
   title: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const headingId = `svp-step-${number}`;
   return (
-    <section className="mb-8">
-      <h2 className="text-base font-semibold mb-1" style={{ color: TME_COLORS.primary }}>
-        {number}. {title}
-      </h2>
-      {hint && <p className="text-xs text-gray-500 mb-3 leading-relaxed">{hint}</p>}
-      {!hint && <div className="mb-3" />}
+    <section aria-labelledby={headingId} className="pt-8 mt-8 border-t border-gray-100">
+      <div className="flex items-start gap-3 mb-4">
+        <span
+          aria-hidden="true"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
+          style={{ backgroundColor: NAVY }}
+        >
+          {number}
+        </span>
+        <div className="min-w-0">
+          <h2 id={headingId} className="text-lg font-semibold leading-8" style={{ color: NAVY }}>
+            <span className="sr-only">Step {number}: </span>
+            {title}
+          </h2>
+          {hint && <p className="text-sm text-gray-500 leading-relaxed max-w-3xl">{hint}</p>}
+        </div>
+      </div>
       {children}
     </section>
   );
 }
 
-function ReadOnlyRow({ label, value }: { label: string; value: string | null | undefined }) {
+/** Label, hint, error and input in the GOV.UK order: label, hint, error, field. */
+function Field({
+  id,
+  label,
+  optional,
+  hint,
+  error,
+  split = false,
+  headClassName = '',
+  children,
+}: {
+  id: string;
+  label: string;
+  optional?: boolean;
+  hint?: string;
+  error?: string;
+  /**
+   * Render the label block and the input as two SIBLINGS (no wrapper), so a
+   * parent CSS subgrid can put each in its own row and line the inputs up
+   * across cards even when one hint wraps to two lines.
+   */
+  split?: boolean;
+  headClassName?: string;
+  children: (describedBy: string | undefined) => React.ReactNode;
+}) {
+  const hintId = hint ? `${id}-hint` : '';
+  const errorId = error ? `${id}-error` : '';
+  const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined;
+  const bar = error ? 'border-l-4 pl-3 -ml-1' : '';
+  const barStyle = error ? { borderColor: TME_COLORS.error } : undefined;
+  const head = (
+    <>
+      <label htmlFor={id} className="block text-sm font-medium" style={{ color: NAVY }}>
+        {label}
+        {optional && <span className="font-normal text-gray-500"> (optional)</span>}
+      </label>
+      {hint && (
+        <p id={hintId} className="text-xs text-gray-500 mt-0.5">
+          {hint}
+        </p>
+      )}
+      {error && (
+        <p id={errorId} className="text-sm font-medium mt-1" style={{ color: TME_COLORS.error }}>
+          <span className="sr-only">Error: </span>
+          {error}
+        </p>
+      )}
+    </>
+  );
+  if (split) {
+    return (
+      <>
+        <div className={`${bar} ${headClassName}`} style={barStyle}>
+          {head}
+        </div>
+        <div className={`${bar} pt-1`} style={barStyle}>
+          {children(describedBy)}
+        </div>
+      </>
+    );
+  }
   return (
-    <div className="flex flex-col sm:flex-row sm:gap-4 py-2 border-b border-gray-100 last:border-b-0">
-      <span className="text-sm text-gray-500 sm:w-40 shrink-0">{label}</span>
-      <span className="text-sm text-gray-800">{value && value.trim() ? value : 'Not on file'}</span>
+    <div className={`${bar} ${headClassName}`} style={barStyle}>
+      {head}
+      <div className="mt-1">{children(describedBy)}</div>
     </div>
   );
 }
 
-function ChipButton({
-  onClick,
-  children,
+function TextInput({
+  id,
+  value,
+  onChange,
+  maxLength,
   disabled,
+  type = 'text',
+  autoComplete,
+  hasError,
+  describedBy,
 }: {
-  onClick: () => void;
-  children: React.ReactNode;
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  maxLength: number;
   disabled?: boolean;
+  type?: string;
+  autoComplete?: string;
+  hasError?: boolean;
+  describedBy?: string;
+}) {
+  const rest = hasError ? TME_COLORS.error : TME_COLORS.border;
+  return (
+    <input
+      id={id}
+      type={type}
+      value={value}
+      maxLength={maxLength}
+      disabled={disabled}
+      autoComplete={autoComplete}
+      aria-invalid={hasError || undefined}
+      aria-describedby={describedBy}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full px-3 py-2 rounded-lg border-2 bg-white focus:outline-none transition-all duration-200 h-[42px] text-sm disabled:bg-gray-50"
+      style={{ borderColor: rest, fontFamily: 'Inter, sans-serif' }}
+      onFocus={(e) => (e.currentTarget.style.borderColor = NAVY)}
+      onBlur={(e) => (e.currentTarget.style.borderColor = rest)}
+    />
+  );
+}
+
+/** "100492437700003" -> "10049 24377 00003". Anything but exactly 15 digits is shown as it is. */
+function formatTrn(trn: string | null | undefined): string | null {
+  if (!trn) return null;
+  const digits = trn.replace(/\s+/g, '');
+  if (!/^\d{15}$/.test(digits)) return trn;
+  return `${digits.slice(0, 5)} ${digits.slice(5, 10)} ${digits.slice(10)}`;
+}
+
+/**
+ * The portal sends the periods as one sentence ("A, B, C and D", month names
+ * only). One period per line reads better; split on ", " and " and ".
+ */
+function splitVatPeriods(text: string | null | undefined): string[] {
+  if (!text || !text.trim()) return [];
+  return text
+    .split(/,\s+|\s+and\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
+function Fact({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string | string[] | null | undefined;
+  note?: string;
+}) {
+  const lines = (Array.isArray(value) ? value : value ? [value] : []).filter((v) => v && v.trim());
+  const has = lines.length > 0;
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</dt>
+      <dd className={`text-sm mt-0.5 break-words ${has ? 'text-gray-900 font-medium' : 'text-gray-400 italic'}`}>
+        {!has ? (
+          'Not on file'
+        ) : lines.length === 1 ? (
+          lines[0]
+        ) : (
+          <ul>
+            {lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
+      </dd>
+      {has && note && <dd className="text-xs text-gray-500 mt-1">{note}</dd>}
+    </div>
+  );
+}
+
+function TickBox({
+  id,
+  checked,
+  onChange,
+  disabled,
+  error,
+  children,
+}: {
+  id: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={error ? 'border-l-4 pl-3 -ml-1' : ''}
+      style={error ? { borderColor: TME_COLORS.error } : undefined}
+    >
+      {error && (
+        <p id={`${id}-error`} className="text-sm font-medium mb-1.5" style={{ color: TME_COLORS.error }}>
+          <span className="sr-only">Error: </span>
+          {error}
+        </p>
+      )}
+      <label
+        htmlFor={id}
+        className="flex items-start gap-3 rounded-lg border-2 p-3 cursor-pointer transition-colors"
+        style={{
+          borderColor: checked ? NAVY : error ? TME_COLORS.error : TME_COLORS.border,
+          backgroundColor: checked ? NAVY_TINT : '#ffffff',
+        }}
+      >
+        <input
+          id={id}
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          disabled={disabled}
+          aria-describedby={error ? `${id}-error` : undefined}
+          aria-invalid={!!error || undefined}
+          className="mt-0.5 w-5 h-5 shrink-0"
+          style={{ accentColor: NAVY }}
+        />
+        <span className="text-sm text-gray-800">{children}</span>
+      </label>
+    </div>
+  );
+}
+
+/**
+ * One "fill with this person" option. A real button with aria-pressed: it is
+ * pressed while the fields hold exactly this person, so typing in the fields
+ * un-presses it on its own. Pressing it again clears the fields.
+ */
+function PersonOption({
+  label,
+  detail,
+  pressed,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  detail?: string;
+  pressed: boolean;
+  disabled?: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      aria-pressed={pressed}
       disabled={disabled}
-      className="text-xs font-medium px-3 py-1.5 rounded-full border transition-colors hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-      style={{ borderColor: TME_COLORS.border, color: TME_COLORS.primary }}
+      onClick={onClick}
+      className="w-full flex items-center gap-3 text-left rounded-lg border-2 px-3 py-2 transition-colors duration-150 hover:shadow-sm focus:outline-none focus-visible:ring-4 disabled:opacity-50 disabled:cursor-not-allowed"
+      style={{
+        borderColor: pressed ? NAVY : TME_COLORS.border,
+        backgroundColor: pressed ? NAVY_TINT : '#ffffff',
+        // focus ring in TME gold
+        ['--tw-ring-color' as string]: 'rgba(210,188,153,0.7)',
+      }}
     >
-      {children}
+      <span
+        aria-hidden="true"
+        className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0"
+        style={{ borderColor: NAVY, backgroundColor: pressed ? NAVY : '#ffffff' }}
+      >
+        {pressed && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium break-words" style={{ color: NAVY }}>
+          {label}
+        </span>
+        {detail && <span className="block text-xs text-gray-500 break-words">{detail}</span>}
+      </span>
+      <span
+        className="text-xs font-semibold shrink-0"
+        style={{ color: pressed ? NAVY : '#6b7280' }}
+      >
+        {pressed ? 'Selected' : 'Use'}
+      </span>
     </button>
   );
 }
@@ -164,6 +514,7 @@ function RoleCard({
   people,
   officers,
   disabled,
+  errors,
   onChange,
 }: {
   role: SvpRoleKey;
@@ -171,90 +522,215 @@ function RoleCard({
   people: People;
   officers: SvpPerson[];
   disabled: boolean;
+  errors: Record<string, string>;
   onChange: (role: SvpRoleKey, next: SvpPerson) => void;
 }) {
   const label = SVP_ROLE_LABELS[role];
-  const copyFrom = COPY_FROM[role].filter((other) => people[other].name.trim());
-  return (
-    <div className="rounded-xl border p-4 mb-4" style={{ borderColor: TME_COLORS.border }}>
-      <p className="text-sm font-semibold" style={{ color: TME_COLORS.primary }}>
-        {label}
-      </p>
-      <p className="text-xs text-gray-500 mt-0.5 mb-3 leading-relaxed">{ROLE_HINTS[role]}</p>
+  // "Same person as X" only when X is someone NOT already offered as an
+  // officer (and not a repeat of an earlier copy option), so one person never
+  // shows up twice and at most one option reads as selected.
+  const copyFrom = COPY_FROM[role].filter(
+    (other, i, list) =>
+      people[other].name.trim() &&
+      !officers.some((o) => samePerson(people[other], { ...EMPTY_PERSON, ...o })) &&
+      !list.slice(0, i).some((earlier) => samePerson(people[earlier], people[other]))
+  );
+  const isSigner = role === 'supervisor';
+  const hasOptions = copyFrom.length > 0 || officers.length > 0;
+  const pick = (candidate: SvpPerson) => {
+    // Pressing a selected option again clears the fields (toggle).
+    onChange(role, samePerson(person, candidate) ? { ...EMPTY_PERSON } : { ...EMPTY_PERSON, ...candidate });
+  };
+  const set = (field: PersonField) => (value: string) => onChange(role, { ...person, [field]: value });
 
-      {(copyFrom.length > 0 || officers.length > 0) && (
-        <div className="flex flex-wrap gap-2 mb-3">
-          {copyFrom.map((other) => (
-            <ChipButton
-              key={`copy-${other}`}
-              disabled={disabled}
-              onClick={() => onChange(role, { ...people[other] })}
-            >
-              Same person as {SVP_ROLE_LABELS[other]}
-            </ChipButton>
-          ))}
-          {officers.map((officer, i) => (
-            <ChipButton
-              key={`officer-${i}`}
-              disabled={disabled}
-              onClick={() => onChange(role, { ...EMPTY_PERSON, ...officer })}
-            >
-              {officer.position ? `${officer.name} (${officer.position})` : officer.name}
-            </ChipButton>
-          ))}
+  return (
+    <div
+      // Desktop: the card spans the 9 rows of the parent grid and shares them
+      // (subgrid), so description, options, labels and inputs line up across
+      // the three cards. Mobile: a plain column.
+      className="rounded-xl border-2 p-4 sm:p-5 flex flex-col lg:grid lg:grid-rows-subgrid lg:row-span-9"
+      style={{ borderColor: isSigner ? GOLD : TME_COLORS.border }}
+      role="group"
+      aria-labelledby={`svp-role-${role}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h3 id={`svp-role-${role}`} className="text-base font-semibold" style={{ color: NAVY }}>
+          {label}
+        </h3>
+        {isSigner && (
+          <span
+            className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: 'rgba(210,188,153,0.3)', color: NAVY }}
+          >
+            <PenLine className="w-3 h-3" aria-hidden="true" />
+            Signs the policy
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-gray-500 mt-1 leading-relaxed">{ROLE_HINTS[role]}</p>
+
+      {hasOptions ? (
+        <div className="mt-4">
+          <p className="text-xs font-semibold text-gray-700 mb-1.5">
+            Choose a person, or type the details below
+          </p>
+          <div className="space-y-2">
+            {copyFrom.map((other) => (
+              <PersonOption
+                key={`copy-${other}`}
+                label={`Same person as ${SVP_ROLE_LABELS[other]}`}
+                detail={people[other].name}
+                pressed={samePerson(person, people[other])}
+                disabled={disabled}
+                onClick={() => pick(people[other])}
+              />
+            ))}
+            {officers.map((officer, i) => (
+              <PersonOption
+                key={`officer-${i}`}
+                label={officer.name}
+                detail={officer.position || undefined}
+                pressed={samePerson(person, { ...EMPTY_PERSON, ...officer })}
+                disabled={disabled}
+                onClick={() => pick(officer)}
+              />
+            ))}
+          </div>
         </div>
+      ) : (
+        <div aria-hidden="true" />
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Input
+        <Field
+          split
+          headClassName="mt-4"
+          id={fieldId(role, 'name')}
           label="Full name"
-          required
-          value={person.name}
-          maxLength={SVP_LIMITS.name}
-          disabled={disabled}
-          onChange={(e) => onChange(role, { ...person, name: e.target.value })}
-        />
-        <Input
+          hint="In English letters, for example Anna Smith"
+          error={errors[fieldId(role, 'name')]}
+        >
+          {(describedBy) => (
+            <TextInput
+              id={fieldId(role, 'name')}
+              value={person.name}
+              maxLength={SVP_LIMITS.name}
+              disabled={disabled}
+              autoComplete="off"
+              hasError={!!errors[fieldId(role, 'name')]}
+              describedBy={describedBy}
+              onChange={set('name')}
+            />
+          )}
+        </Field>
+        <Field
+          split
+          headClassName="mt-3"
+          id={fieldId(role, 'position')}
           label="Position"
-          required
-          value={person.position}
-          maxLength={SVP_LIMITS.position}
-          placeholder="For example: Manager"
-          disabled={disabled}
-          onChange={(e) => onChange(role, { ...person, position: e.target.value })}
-        />
-        <div className="sm:col-span-2">
-          <Input
-            label={role === 'supervisor' ? 'Email (the signing link goes here)' : 'Email (optional)'}
-            required={role === 'supervisor'}
-            type="email"
-            value={person.email}
-            maxLength={SVP_LIMITS.email}
-            disabled={disabled}
-            onChange={(e) => onChange(role, { ...person, email: e.target.value })}
-          />
-        </div>
-      </div>
+          hint="Job title, for example Finance Manager"
+          error={errors[fieldId(role, 'position')]}
+        >
+          {(describedBy) => (
+            <TextInput
+              id={fieldId(role, 'position')}
+              value={person.position}
+              maxLength={SVP_LIMITS.position}
+              disabled={disabled}
+              autoComplete="off"
+              hasError={!!errors[fieldId(role, 'position')]}
+              describedBy={describedBy}
+              onChange={set('position')}
+            />
+          )}
+        </Field>
+        <Field
+          split
+          headClassName="mt-3"
+          id={fieldId(role, 'email')}
+          label="Email"
+          optional={!isSigner}
+          hint={
+            isSigner
+              ? 'We send the policy to this address for signature'
+              : 'If you add it, we copy this person on the signing email'
+          }
+          error={errors[fieldId(role, 'email')]}
+        >
+          {(describedBy) => (
+            <TextInput
+              id={fieldId(role, 'email')}
+              type="email"
+              value={person.email}
+              maxLength={SVP_LIMITS.email}
+              disabled={disabled}
+              autoComplete="off"
+              hasError={!!errors[fieldId(role, 'email')]}
+              describedBy={describedBy}
+              onChange={set('email')}
+            />
+          )}
+        </Field>
     </div>
   );
 }
 
 function VariantNote({ people }: { people: People }) {
+  const SAME_PERSON_SIGN_OFFS =
+    'Because the same person checks their own work, Section 5.1 of the policy asks them to sign each supplier file twice, on different days: first when the documents are collected, then when the supplier is approved.';
   const variant = roleVariant(people);
   const shared = sharedRoles(people).map((r) => SVP_ROLE_LABELS[r]);
   const text =
     variant === 'three'
       ? 'Three different people hold the three roles.'
       : variant === 'one'
-        ? 'One person holds all three roles. The policy then asks for two dated sign-offs in each supplier file, made on different days: one when the documents are collected and one when the supplier is approved.'
-        : `${describeRoleVariant(variant)} (${joinWords(shared)}). The policy then asks for two dated sign-offs in each supplier file, made on different days.`;
+        ? `One person holds all three roles. ${SAME_PERSON_SIGN_OFFS}`
+        : `${describeRoleVariant(variant)} (${joinWords(shared)}). ${SAME_PERSON_SIGN_OFFS}`;
   return (
-    <div className="rounded-xl p-4 flex gap-3" style={{ backgroundColor: 'rgba(36,63,123,0.06)' }}>
-      <Users className="w-5 h-5 shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+    <div className="rounded-xl p-4 flex gap-3 mt-4" style={{ backgroundColor: NAVY_TINT }} aria-live="polite">
+      <Users className="w-5 h-5 shrink-0 mt-0.5" style={{ color: NAVY }} aria-hidden="true" />
       <p className="text-sm text-gray-700 leading-relaxed">{text}</p>
     </div>
   );
 }
+
+function RadioCard({
+  checked,
+  onChange,
+  disabled,
+  children,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <label
+      className="flex items-start gap-2.5 rounded-lg border-2 p-3 cursor-pointer transition-colors"
+      style={{
+        borderColor: checked ? NAVY : TME_COLORS.border,
+        backgroundColor: checked ? NAVY_TINT : '#ffffff',
+      }}
+    >
+      <input
+        type="radio"
+        name="records-location"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        className="mt-0.5 w-4 h-4 shrink-0"
+        style={{ accentColor: NAVY }}
+      />
+      <span className="text-sm text-gray-800">{children}</span>
+    </label>
+  );
+}
+
+const NEXT_STEPS: { icon: React.ElementType; text: string }[] = [
+  { icon: FileText, text: 'Our Tax team prepares your policy.' },
+  { icon: PenLine, text: 'The Supervisor gets the policy by email and signs it online.' },
+  { icon: Mail, text: 'You get the invoice in a separate email.' },
+];
 
 function initialPeople(data: IntakeData): People {
   const from = data.submitted ?? null;
@@ -286,10 +762,15 @@ export default function SupplierPolicyIntakePage() {
   const [location, setLocation] = useState('');
   const [note, setNote] = useState('');
   const [priceAgreed, setPriceAgreed] = useState(false);
+  const [dutyAcknowledged, setDutyAcknowledged] = useState(false);
+  const bothTicked = priceAgreed && dutyAcknowledged;
   const [showErrors, setShowErrors] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serverMessages, setServerMessages] = useState<string[]>([]);
+  // Bumped on every failed submit so the error summary takes focus again.
+  const [summaryFocus, setSummaryFocus] = useState(0);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -322,6 +803,10 @@ export default function SupplierPolicyIntakePage() {
     };
   }, [token]);
 
+  useEffect(() => {
+    if (summaryFocus > 0) summaryRef.current?.focus();
+  }, [summaryFocus]);
+
   const handlePersonChange = useCallback((role: SvpRoleKey, next: SvpPerson) => {
     setPeople((prev) => ({ ...prev, [role]: next }));
     setServerMessages([]);
@@ -350,13 +835,17 @@ export default function SupplierPolicyIntakePage() {
     setShowErrors(true);
     setError(null);
     setServerMessages([]);
-    if (problems.length > 0 || submitting) return;
+    if (submitting) return;
+    if (problems.length > 0) {
+      setSummaryFocus((n) => n + 1);
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch(`/api/supplier-checks/${token}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...answers, shownPriceAed: data?.priceAed ?? null }),
+        body: JSON.stringify({ ...answers, dutyAcknowledged, shownPriceAed: data?.priceAed ?? null }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -375,7 +864,9 @@ export default function SupplierPolicyIntakePage() {
         }
         if (j?.error === 'invalid_answers' && Array.isArray(j.messages)) {
           setServerMessages(j.messages as string[]);
-          setError('Please check the details below.');
+          setSummaryFocus((n) => n + 1);
+        } else if (j?.error === 'duty_not_acknowledged') {
+          setError('Please tick the box to confirm that checking suppliers stays with your company.');
         } else if (j?.error === 'price_not_agreed') {
           setError('Please tick the box to agree to the price before you submit.');
         } else {
@@ -389,13 +880,13 @@ export default function SupplierPolicyIntakePage() {
       setError('Submission failed. Please check your connection and try again.');
       setSubmitting(false);
     }
-  }, [answers, data, problems, submitting, token]);
+  }, [answers, data, dutyAcknowledged, problems, submitting, token]);
 
   if (state === 'loading') {
     return (
       <Shell>
-        <div className="flex flex-col items-center py-16 text-gray-500">
-          <Loader2 className="w-8 h-8 animate-spin mb-3" style={{ color: TME_COLORS.primary }} />
+        <div className="flex flex-col items-center py-16 text-gray-500" role="status">
+          <Loader2 className="w-8 h-8 animate-spin mb-3" style={{ color: NAVY }} aria-hidden="true" />
           Loading...
         </div>
       </Shell>
@@ -406,8 +897,8 @@ export default function SupplierPolicyIntakePage() {
     return (
       <Shell>
         <div className="flex flex-col items-center py-12 text-center">
-          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} aria-hidden="true" />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: NAVY }}>
             {state === 'error' ? 'Something went wrong' : 'This link is not valid'}
           </h2>
           <p className="text-gray-600">
@@ -424,8 +915,8 @@ export default function SupplierPolicyIntakePage() {
     return (
       <Shell>
         <div className="flex flex-col items-center py-12 text-center">
-          <AlertTriangle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.secondary }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+          <AlertTriangle className="w-12 h-12 mb-4" style={{ color: GOLD }} aria-hidden="true" />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: NAVY }}>
             This link is closed
           </h2>
           <p className="text-gray-600">
@@ -443,8 +934,8 @@ export default function SupplierPolicyIntakePage() {
       <Shell>
         <Header companyName={companyName} />
         <div className="flex flex-col items-center py-10 text-center">
-          <CheckCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.success }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+          <CheckCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.success }} aria-hidden="true" />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: NAVY }}>
             Thank you, we have received your details
           </h2>
           <p className="text-gray-600 max-w-md">
@@ -461,187 +952,311 @@ export default function SupplierPolicyIntakePage() {
   const prefill = data?.prefill ?? null;
   const officers = (prefill?.officers ?? []).filter((o) => o?.name?.trim());
   const price = data?.priceAed ?? null;
-  const visibleProblems = serverMessages.length > 0 ? serverMessages : showErrors ? problems : [];
+  const expires = formatShortDate(data?.expiresAt);
+  const visibleProblems = (serverMessages.length > 0 ? serverMessages : showErrors ? problems : []).map(
+    mapProblem
+  );
+  const fieldErrors: Record<string, string> = {};
+  for (const p of visibleProblems) {
+    if (p.target && !fieldErrors[p.target]) fieldErrors[p.target] = p.inline;
+  }
+
+  const focusField = (target: string) => (e: React.MouseEvent) => {
+    const el = document.getElementById(target);
+    if (!el) return;
+    e.preventDefault();
+    el.scrollIntoView({ block: 'center' });
+    el.focus();
+  };
 
   return (
-    <Shell>
+    <Shell wide>
       <Header companyName={companyName} />
-
-      <p className="text-gray-600 mb-8 text-sm leading-relaxed">
-        From 01.10.2026, FTA Decision No. 13 of 2026 requires every VAT registered business to
-        check its suppliers and purchases before it claims input VAT, and to have a written
-        supplier verification policy. We have prepared this policy for your company. Please
-        confirm the details below. It takes a few minutes.
-      </p>
-
-      <Section number={1} title="Your company" hint="From our records. If something is wrong, reply to our email.">
-        <div className="rounded-xl border px-4 py-1" style={{ borderColor: TME_COLORS.border }}>
-          <ReadOnlyRow label="Company" value={companyName} />
-          <ReadOnlyRow label="VAT number (TRN)" value={prefill?.trn} />
-          <ReadOnlyRow label="VAT periods" value={prefill?.vatPeriodsText} />
-        </div>
-      </Section>
-
-      <Section
-        number={2}
-        title="Who does the checks"
-        hint="The policy names three roles. One person may hold more than one role. We have filled in the manager we have on file; you can change the names."
-      >
-        {SVP_ROLE_KEYS.map((role) => (
-          <RoleCard
-            key={role}
-            role={role}
-            person={people[role]}
-            people={people}
-            officers={officers}
-            disabled={submitting}
-            onChange={handlePersonChange}
-          />
-        ))}
-        <VariantNote people={people} />
-      </Section>
-
-      <Section
-        number={3}
-        title="Where the records are kept"
-        hint="The supplier files, check forms and proof for each purchase. On paper or electronically."
-      >
-        <div className="space-y-2">
-          <label
-            className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
-            style={{ borderColor: atOffice ? TME_COLORS.primary : TME_COLORS.border }}
-          >
-            <input
-              type="radio"
-              name="records-location"
-              checked={atOffice}
-              onChange={() => setAtOffice(true)}
-              disabled={submitting}
-              className="mt-0.5 w-4 h-4 shrink-0"
-              style={{ accentColor: TME_COLORS.primary }}
-            />
-            <span className="text-sm text-gray-700">
-              Our registered office
-              {prefill?.registeredAddress ? `: ${prefill.registeredAddress}` : ''}
-            </span>
-          </label>
-          <label
-            className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
-            style={{ borderColor: !atOffice ? TME_COLORS.primary : TME_COLORS.border }}
-          >
-            <input
-              type="radio"
-              name="records-location"
-              checked={!atOffice}
-              onChange={() => setAtOffice(false)}
-              disabled={submitting}
-              className="mt-0.5 w-4 h-4 shrink-0"
-              style={{ accentColor: TME_COLORS.primary }}
-            />
-            <span className="text-sm text-gray-700">Another place</span>
-          </label>
-          {!atOffice && (
-            <Input
-              value={location}
-              maxLength={SVP_LIMITS.recordsLocation}
-              placeholder="For example: our warehouse in Al Quoz, or our cloud drive"
-              disabled={submitting}
-              onChange={(e) => setLocation(e.target.value)}
-            />
-          )}
-        </div>
-      </Section>
-
-      <Section number={4} title="Anything we should know (optional)">
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          maxLength={SVP_LIMITS.note}
-          rows={3}
-          disabled={submitting}
-          className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
-          onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-          onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
-        />
-      </Section>
-
-      <Section number={5} title="Price">
-        {price != null && (
-          <div
-            className="rounded-xl p-4 mb-3 flex gap-3"
-            style={{ backgroundColor: 'rgba(36,63,123,0.06)' }}
-          >
-            <Info className="w-5 h-5 shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-            <p className="text-sm text-gray-700">
-              Supplier Verification Policy on your company letterhead:{' '}
-              <strong style={{ color: TME_COLORS.primary }}>AED {formatAed(price)}</strong> plus 5%
-              VAT.
-            </p>
-          </div>
-        )}
-        <label
-          className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
-          style={{ borderColor: TME_COLORS.border }}
-        >
-          <input
-            type="checkbox"
-            checked={priceAgreed}
-            onChange={(e) => setPriceAgreed(e.target.checked)}
-            disabled={submitting}
-            className="mt-0.5 w-4 h-4 shrink-0"
-            style={{ accentColor: TME_COLORS.primary }}
-          />
-          <span className="text-sm text-gray-700">
-            {price != null ? (
-              <>
-                I agree to the price of{' '}
-                <strong style={{ color: TME_COLORS.primary }}>AED {formatAed(price)}</strong> (plus
-                VAT) for the Supplier Verification Policy. The invoice is sent together with the
-                policy.
-              </>
-            ) : (
-              <>
-                I agree to the price in the TME email for the Supplier Verification Policy. The
-                invoice is sent together with the policy.
-              </>
-            )}
-          </span>
-        </label>
-      </Section>
 
       {visibleProblems.length > 0 && (
         <div
-          className="mb-4 text-sm rounded-lg p-3"
-          style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: TME_COLORS.error }}
+          ref={summaryRef}
+          tabIndex={-1}
+          role="alert"
+          aria-labelledby="svp-error-summary-title"
+          className="mb-6 rounded-xl border-2 p-4 sm:p-5 focus:outline-none focus-visible:ring-4"
+          style={{
+            borderColor: TME_COLORS.error,
+            backgroundColor: ERROR_TINT,
+            ['--tw-ring-color' as string]: 'rgba(210,188,153,0.7)',
+          }}
         >
-          <p className="font-semibold mb-1">Please check:</p>
-          <ul className="list-disc pl-5 space-y-0.5">
-            {visibleProblems.map((m) => (
-              <li key={m}>{m}</li>
+          <h2 id="svp-error-summary-title" className="text-base font-semibold mb-2" style={{ color: NAVY }}>
+            There is a problem. Please check:
+          </h2>
+          <ul className="space-y-1 text-sm">
+            {visibleProblems.map((p) => (
+              <li key={p.message}>
+                {p.target ? (
+                  <a
+                    href={`#${p.target}`}
+                    onClick={focusField(p.target)}
+                    className="underline font-medium"
+                    style={{ color: TME_COLORS.error }}
+                  >
+                    {p.message}
+                  </a>
+                ) : (
+                  <span style={{ color: TME_COLORS.error }}>{p.message}</span>
+                )}
+              </li>
             ))}
           </ul>
         </div>
       )}
 
-      {error && visibleProblems.length === 0 && (
-        <div
-          className="mb-4 text-sm rounded-lg p-3"
-          style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: TME_COLORS.error }}
-        >
-          {error}
+      {/* Purpose first: what this is, why, how long, what you need. */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <p className="text-base text-gray-800 leading-relaxed">
+            From 01.10.2026, FTA Decision No. 13 of 2026 requires every VAT registered business to
+            check its suppliers and purchases before it claims input VAT, and to have a written
+            supplier verification policy.
+          </p>
+          <p className="text-base text-gray-800 leading-relaxed mt-3">
+            We have prepared this policy for your company. Please confirm who does the checks and
+            where the records are kept, then agree to the price.
+          </p>
         </div>
-      )}
+        <aside
+          className="rounded-xl p-4 space-y-3 text-sm"
+          style={{ backgroundColor: NAVY_TINT }}
+          aria-label="Before you start"
+        >
+          <div className="flex gap-2.5">
+            <Clock className="w-4 h-4 mt-0.5 shrink-0" style={{ color: NAVY }} aria-hidden="true" />
+            <span className="text-gray-700">It takes a few minutes.</span>
+          </div>
+          <div className="flex gap-2.5">
+            <UserCheck className="w-4 h-4 mt-0.5 shrink-0" style={{ color: NAVY }} aria-hidden="true" />
+            <span className="text-gray-700">
+              You need the names and positions of the people who do the checks, and the email of
+              the person who signs.
+            </span>
+          </div>
+          {expires && (
+            <div className="flex gap-2.5">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: NAVY }} aria-hidden="true" />
+              <span className="text-gray-700">This link works until {expires}.</span>
+            </div>
+          )}
+        </aside>
+      </div>
 
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={submitting}
-        className="w-full py-3 rounded-lg font-semibold text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        style={{ backgroundColor: TME_COLORS.primary }}
+      <Step number={1} title="Check your company details" hint="From our records. You cannot change them here. If something is wrong, reply to our email.">
+        <dl className="rounded-xl bg-gray-50 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Fact label="Company" value={companyName} />
+          <Fact label="VAT number (TRN)" value={formatTrn(prefill?.trn)} />
+          <Fact label="VAT periods" value={splitVatPeriods(prefill?.vatPeriodsText)} />
+          <Fact
+            label="Registered office"
+            value={prefill?.registeredAddress}
+            note="As on your Tax Registration Certificate"
+          />
+        </dl>
+      </Step>
+
+      <Step
+        number={2}
+        title="Tell us who does the checks"
+        hint="The policy names three roles. One person may hold more than one role. We filled in the manager we have on file. Choose another person or type over the details."
       >
-        {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-        {submitting ? 'Submitting...' : 'Confirm my policy details'}
-      </button>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-y-0">
+          {SVP_ROLE_KEYS.map((role) => (
+            <RoleCard
+              key={role}
+              role={role}
+              person={people[role]}
+              people={people}
+              officers={officers}
+              disabled={submitting}
+              errors={fieldErrors}
+              onChange={handlePersonChange}
+            />
+          ))}
+        </div>
+        <VariantNote people={people} />
+      </Step>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-10">
+        <Step
+          number={3}
+          title="Where are the records kept?"
+          hint="The supplier files, check forms and proof for each purchase. On paper or electronically."
+        >
+          <fieldset className="space-y-2">
+            <legend className="sr-only">Where the records are kept</legend>
+            <RadioCard checked={atOffice} onChange={() => setAtOffice(true)} disabled={submitting}>
+              {prefill?.registeredAddress || 'Our registered office'}
+              <span className="block text-xs text-gray-500 mt-0.5">
+                As on your Tax Registration Certificate
+              </span>
+            </RadioCard>
+            <RadioCard checked={!atOffice} onChange={() => setAtOffice(false)} disabled={submitting}>
+              Another place
+            </RadioCard>
+            {!atOffice && (
+              <div className="pt-2">
+                <Field
+                  id={RECORDS_LOCATION_ID}
+                  label="Where?"
+                  hint="For example our warehouse in Al Quoz, or our cloud drive"
+                  error={fieldErrors[RECORDS_LOCATION_ID]}
+                >
+                  {(describedBy) => (
+                    <TextInput
+                      id={RECORDS_LOCATION_ID}
+                      value={location}
+                      maxLength={SVP_LIMITS.recordsLocation}
+                      disabled={submitting}
+                      hasError={!!fieldErrors[RECORDS_LOCATION_ID]}
+                      describedBy={describedBy}
+                      onChange={setLocation}
+                    />
+                  )}
+                </Field>
+              </div>
+            )}
+          </fieldset>
+        </Step>
+
+        <Step number={4} title="Anything we should know?">
+          <Field id={NOTE_ID} label="Your note" optional error={fieldErrors[NOTE_ID]}>
+            {(describedBy) => (
+              <textarea
+                id={NOTE_ID}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                maxLength={SVP_LIMITS.note}
+                rows={4}
+                disabled={submitting}
+                aria-describedby={describedBy}
+                className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
+                onFocus={(e) => (e.currentTarget.style.borderColor = NAVY)}
+                onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+              />
+            )}
+          </Field>
+        </Step>
+      </div>
+
+      <Step number={5} title="Agree to the price and confirm">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div>
+            {price != null && (
+              <div className="rounded-xl p-4 mb-3" style={{ backgroundColor: NAVY_TINT }}>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Supplier Verification Policy on your company letterhead
+                </p>
+                <p className="mt-1">
+                  <span className="text-2xl font-bold" style={{ color: NAVY }}>
+                    AED {formatAed(price)}
+                  </span>{' '}
+                  <span className="text-sm text-gray-600">plus 5% VAT</span>
+                </p>
+              </div>
+            )}
+            <div className="space-y-3">
+              <TickBox
+                id={PRICE_ID}
+                checked={priceAgreed}
+                onChange={setPriceAgreed}
+                disabled={submitting}
+                error={fieldErrors[PRICE_ID]}
+              >
+                {price != null ? (
+                  <>
+                    I agree to the price of{' '}
+                    <strong style={{ color: NAVY }}>AED {formatAed(price)}</strong> (plus VAT) for
+                    the Supplier Verification Policy. You get the invoice in a separate email.
+                  </>
+                ) : (
+                  <>
+                    I agree to the price in the TME email for the Supplier Verification Policy. You
+                    get the invoice in a separate email.
+                  </>
+                )}
+              </TickBox>
+              <TickBox
+                id={DUTY_ID}
+                checked={dutyAcknowledged}
+                onChange={setDutyAcknowledged}
+                disabled={submitting}
+              >
+                I understand that TME Services does not check our suppliers or purchases and does
+                not keep these documents. Checking suppliers and keeping the documents stays with
+                our company.
+              </TickBox>
+            </div>
+          </div>
+
+          <div className="rounded-xl border-2 p-4" style={{ borderColor: TME_COLORS.border }}>
+            <h3 className="text-sm font-semibold mb-3" style={{ color: NAVY }}>
+              What happens next
+            </h3>
+            <ol className="space-y-3">
+              {NEXT_STEPS.map(({ icon: Icon, text }, i) => (
+                <li key={text} className="flex gap-3 text-sm text-gray-700">
+                  <span
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{ backgroundColor: 'rgba(210,188,153,0.3)', color: NAVY }}
+                    aria-hidden="true"
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="flex items-start gap-2">
+                    <Icon className="w-4 h-4 mt-0.5 shrink-0 text-gray-400" aria-hidden="true" />
+                    {text}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+
+        {error && (
+          <div
+            role="alert"
+            className="mt-6 text-sm rounded-lg p-3"
+            style={{ backgroundColor: ERROR_TINT, color: TME_COLORS.error }}
+          >
+            {error}
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting || !bothTicked}
+            aria-disabled={submitting || !bothTicked}
+            aria-describedby={!bothTicked ? 'svp-confirm-hint' : undefined}
+            className={`w-full sm:w-auto px-8 py-3.5 rounded-lg text-base font-semibold transition-all duration-200 focus:outline-none focus-visible:ring-4 flex items-center justify-center gap-2 ${
+              bothTicked
+                ? 'text-white hover:shadow-lg hover:brightness-110 disabled:opacity-60 disabled:cursor-wait'
+                : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+            }`}
+            style={{
+              ...(bothTicked ? { backgroundColor: NAVY } : {}),
+              ['--tw-ring-color' as string]: 'rgba(210,188,153,0.9)',
+            }}
+          >
+            {submitting && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+            {submitting ? 'Submitting...' : 'Confirm my policy details'}
+            {!submitting && <ArrowRight className="w-4 h-4" aria-hidden="true" />}
+          </button>
+          <p id="svp-confirm-hint" className="text-xs text-gray-500">
+            {bothTicked
+              ? 'You can only send this once. Please check the names first.'
+              : 'Tick both boxes to confirm.'}
+          </p>
+        </div>
+      </Step>
     </Shell>
   );
 }

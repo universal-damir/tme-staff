@@ -85,6 +85,7 @@ const good = {
   recordsLocationIsRegisteredOffice: true,
   recordsLocation: '',
   priceAgreed: true,
+  dutyAcknowledged: true,
 };
 
 const params = (token: string) => ({ params: Promise.resolve({ token }) });
@@ -152,6 +153,20 @@ describe('POST /api/supplier-checks/[token]/submit', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'price_not_agreed' });
     expect(store.rows[0].status).toBe('invited');
+  });
+
+  it('without the duty acknowledgement = 400 duty_not_acknowledged, nothing written', async () => {
+    for (const bad of [{ ...good, dutyAcknowledged: false }, { ...good, dutyAcknowledged: 'true' }]) {
+      const res = await post(bad);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'duty_not_acknowledged' });
+    }
+    const { dutyAcknowledged: _omit, ...withoutFlag } = good;
+    void _omit;
+    const res = await post(withoutFlag);
+    expect(res.status).toBe(400);
+    expect(store.rows[0].status).toBe('invited');
+    expect(store.updates).toHaveLength(0);
   });
 
   it('the price changed while the form was open = 409 price_changed, nothing written', async () => {
