@@ -13,7 +13,7 @@ import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/compo
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
-import { employerApplicantInUaeForSubmit, isDmccAuthority, pluralizePeriod } from '@/lib/staff-form-logic';
+import { CANCEL_COPY_INTRO, employerApplicantInUaeForSubmit, isDmccAuthority, pluralizePeriod } from '@/lib/staff-form-logic';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
 import { uploadDocument, updateDocumentReferences } from '@/lib/supabase';
 import type { StaffDocumentReferences } from '@/types';
@@ -154,6 +154,11 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
   // Job Offer Letter state (DMCC only)
   const [jobOfferLetterDoc, setJobOfferLetterDoc] = useState(submission.documents?.job_offer_letter);
 
+  // 'cancel_copy': a person TME already has on file (visa type change or a
+  // move inside the group). They are in the UAE, so the in-UAE question is
+  // not asked.
+  const isCancelCopy = submission.onboarding_type === 'cancel_copy';
+
   // UAE visa status — tri-state so "No" is a real answer, not the absence of one.
   // Prefill from saved data → prefill → null (unanswered).
   const savedApplicantInUAE =
@@ -236,7 +241,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
   }>({});
 
   const handleFormSubmit = async (data: EmployerFormData) => {
-    if (!isRenewal && applicantInUAE === null) {
+    if (!isRenewal && !isCancelCopy && applicantInUAE === null) {
       setApplicantInUAEError('Please indicate whether the applicant is currently in the UAE');
       return;
     }
@@ -263,11 +268,15 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
     // previously-saved value from a prior new-hire onboarding. A labour card
     // renewal with uae_presence_rule 'ask' leaves it unset instead: the
     // employee answers it on their part of the form.
-    const applicantInUaeForSubmit = employerApplicantInUaeForSubmit(
-      !!isRenewal,
-      submission.prefill_employer_data,
-      applicantInUAE
-    );
+    // 'cancel_copy': the person already holds a UAE visa through TME, so the
+    // question is not asked and the answer is Yes.
+    const applicantInUaeForSubmit = isCancelCopy
+      ? true
+      : employerApplicantInUaeForSubmit(
+          !!isRenewal,
+          submission.prefill_employer_data,
+          applicantInUAE
+        );
     await onSubmit({ ...data, applicant_in_uae: applicantInUaeForSubmit }, signature);
   };
 
@@ -341,6 +350,17 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
             <div className="w-8 h-8 border-4 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: TME_COLORS.primary }} />
             <p className="text-sm font-medium text-gray-500">Loading form data...</p>
           </div>
+        </div>
+      )}
+      {submission.onboarding_type === 'cancel_copy' && (
+        <div
+          className="p-4 rounded-lg flex items-start gap-3 border-2"
+          style={{ backgroundColor: '#F3F5FA', borderColor: TME_COLORS.primary }}
+        >
+          <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+          <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+            {CANCEL_COPY_INTRO}
+          </p>
         </div>
       )}
       {/* Position Details */}
@@ -760,9 +780,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
         </FormSection>
       )}
 
-      {/* UAE Visa Status — new-hire path only. On renewal the employee's
-          current visa situation is already known from the prior onboarding. */}
-      {!isRenewal && (
+      {/* UAE Visa Status — new-hire path only. On renewal and cancel_copy the
+          employee's current visa situation is already known. */}
+      {!isRenewal && !isCancelCopy && (
       <FormSection
         title="UAE Visa Status"
         icon={<Globe className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}

@@ -16,6 +16,7 @@ import {
   sanitizeFreeText,
 } from '@/lib/submit-validation';
 import { foldPayloadToEnglish } from '@/lib/english-only';
+import { isStaffOnboardingType } from '@/lib/staff-form-logic';
 import {
   resolveSubmissionIdByLinkToken,
   constantTimeStringEqual,
@@ -58,7 +59,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to load submission' }, { status: 500 });
     }
 
-    // This route finalizes staff onboardings and staff renewals ONLY — the
+    // This route finalizes staff onboardings, staff renewals and cancel_copy
+    // (visa type change / group-company move) ONLY — the
     // mirror image of the gates in submit-dependent and submit-document-request.
     // Without it a dependent / dependent_renewal / document_request row could
     // be finalized here against the *staff* gate (photo + passport only),
@@ -66,11 +68,7 @@ export async function POST(req: NextRequest) {
     // / missingRequestedDocuments entirely, and the completion webhook would
     // still fire. A null/absent onboarding_type is legacy staff onboarding and
     // stays allowed.
-    if (
-      existing?.onboarding_type &&
-      existing.onboarding_type !== 'new_hire' &&
-      existing.onboarding_type !== 'renewal'
-    ) {
+    if (existing && !isStaffOnboardingType(existing.onboarding_type)) {
       console.warn(
         `[submit-employee] Rejected foreign onboarding_type '${existing.onboarding_type}' for ${id}`,
       );

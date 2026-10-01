@@ -26,6 +26,7 @@
  */
 
 import { getSupabaseAdmin } from './supabase-server';
+import { isStaffOnboardingType } from './staff-form-logic';
 
 export const ONBOARDING_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ONBOARDING_TOKEN_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -157,7 +158,7 @@ export function canEmployerRecall(
   if (!row.employer_access_token) return false;
   if (row.is_same_person) return false;
   const type = row.onboarding_type;
-  if (type !== null && type !== undefined && type !== 'new_hire' && type !== 'renewal') return false;
+  if (!isStaffOnboardingType(type)) return false;
   if ((row.prefill_employer_data as { visa_track?: unknown } | null)?.visa_track === 'partner_investor') {
     return false;
   }
@@ -312,10 +313,7 @@ export function decideOnboardingAccess(
 export function isTwoPersonEmployerStep(
   row: Pick<OnboardingRow, 'current_step' | 'is_same_person' | 'onboarding_type'>,
 ): boolean {
-  const staffType =
-    row.onboarding_type == null ||
-    row.onboarding_type === 'new_hire' ||
-    row.onboarding_type === 'renewal';
+  const staffType = isStaffOnboardingType(row.onboarding_type);
   return staffType && !row.is_same_person && row.current_step === 'employer';
 }
 

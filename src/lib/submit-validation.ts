@@ -25,6 +25,7 @@ import {
   passportAdditionalPageVariant,
   passportAdditionalPageRequiredForDocs,
   isPakistaniNationality,
+  photoKeepAllowed,
 } from '@/lib/staff-form-logic';
 import { isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
 
@@ -121,7 +122,10 @@ export const RECALLED_MESSAGE =
  * sync additionally soft-flags anything unusual for human review):
  *  - Photo present AND (AI-validated OR explicitly submitted for manual
  *    review via the 2-strike fallback).
- *  - Passport cover + inside pages uploaded, UNLESS this is a renewal and
+ *  - Photo: on 'cancel_copy' the photo on file may be kept instead
+ *    (documents.photo_unchanged === true + existing_documents.photo.path).
+ *  - Passport cover + inside pages uploaded, UNLESS this is a renewal (or a
+ *    'cancel_copy' with passport_unchanged === true) and
  *    BOTH pages are already on file from the previous application (the
  *    "passport unchanged" skip). The persisted `passport_unchanged` flag is
  *    the explicit attestation, but the skip is accepted whenever both pages
@@ -146,8 +150,13 @@ export function missingRequiredDocuments(row: {
   const docs = row.documents ?? {};
 
   const photo = docs.photo;
+  // 'cancel_copy' may keep the photo on file: explicit attestation + a stored
+  // photo in existing_documents. A renewal never may (it needs a recent one).
+  const photoKept =
+    photoKeepAllowed(row.onboarding_type, row.existing_documents?.photo) &&
+    docs.photo_unchanged === true;
   if (!photo?.path) {
-    missing.push('ID photo');
+    if (!photoKept) missing.push('ID photo');
   } else if (!photo.validated && !photo.needsReview) {
     missing.push('ID photo (must pass validation or be submitted for manual review)');
   }
@@ -156,8 +165,14 @@ export function missingRequiredDocuments(row: {
   const pagesUploaded = !!(pages.cover?.path && pages.insidePages?.path);
   const existingCover = row.existing_documents?.passport_cover?.path;
   const existingInside = row.existing_documents?.passport_inside?.path;
+  // Renewal: accepted whenever both pages are on file (in-flight sessions from
+  // before the attestation existed). 'cancel_copy' is new, so it also needs
+  // the explicit passport_unchanged attestation.
   const renewalSkipAllowed =
-    row.onboarding_type === 'renewal' && !!existingCover && !!existingInside;
+    !!existingCover &&
+    !!existingInside &&
+    (row.onboarding_type === 'renewal' ||
+      (row.onboarding_type === 'cancel_copy' && docs.passport_unchanged === true));
   if (!pagesUploaded && !renewalSkipAllowed) {
     if (!pages.cover?.path) missing.push('Passport cover page');
     if (!pages.insidePages?.path) missing.push('Passport data page');

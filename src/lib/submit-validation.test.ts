@@ -96,6 +96,81 @@ describe('missingRequiredDocuments', () => {
     expect(missing).toContain('Passport cover page');
   });
 
+  describe('cancel_copy (visa type change / group-company move)', () => {
+    const onFile = {
+      passport_cover: { path: 'e/cover.pdf' },
+      passport_inside: { path: 'e/inside.pdf' },
+      photo: { path: 'e/photo.jpg' },
+    };
+
+    it('accepts kept passport + kept photo with both attestations', () => {
+      expect(
+        missingRequiredDocuments({
+          onboarding_type: 'cancel_copy',
+          documents: { passport_unchanged: true, photo_unchanged: true },
+          existing_documents: onFile,
+        })
+      ).toEqual([]);
+    });
+
+    it('needs the passport_unchanged attestation (unlike a legacy renewal)', () => {
+      const missing = missingRequiredDocuments({
+        onboarding_type: 'cancel_copy',
+        documents: { photo: validPhoto },
+        existing_documents: onFile,
+      });
+      expect(missing).toContain('Passport cover page');
+      expect(missing).toContain('Passport data page');
+    });
+
+    it('needs the photo_unchanged attestation and a stored photo on file', () => {
+      expect(
+        missingRequiredDocuments({
+          onboarding_type: 'cancel_copy',
+          documents: { passportPages },
+          existing_documents: onFile,
+        })
+      ).toContain('ID photo');
+      expect(
+        missingRequiredDocuments({
+          onboarding_type: 'cancel_copy',
+          documents: { passportPages, photo_unchanged: true },
+          existing_documents: { photo: { path: undefined } },
+        })
+      ).toContain('ID photo');
+    });
+
+    it('a renewal can never keep the photo on file', () => {
+      expect(
+        missingRequiredDocuments({
+          onboarding_type: 'renewal',
+          documents: { passportPages, photo_unchanged: true },
+          existing_documents: onFile,
+        })
+      ).toContain('ID photo');
+    });
+
+    it('a new hire can never keep the photo on file', () => {
+      expect(
+        missingRequiredDocuments({
+          onboarding_type: 'new_hire',
+          documents: { passportPages, photo_unchanged: true },
+          existing_documents: onFile,
+        })
+      ).toContain('ID photo');
+    });
+
+    it('a fresh upload still has to pass validation', () => {
+      expect(
+        missingRequiredDocuments({
+          onboarding_type: 'cancel_copy',
+          documents: { photo: failedPhoto, passportPages, photo_unchanged: true },
+          existing_documents: onFile,
+        })
+      ).toEqual(['ID photo (must pass validation or be submitted for manual review)']);
+    });
+  });
+
   it('requires the additional page for Indian and Syrian passports when pages are freshly uploaded', () => {
     for (const nationality of ['Indian', 'India', 'Syrian', 'Syria', 'SYRIAN ARAB REPUBLIC']) {
       const missing = missingRequiredDocuments(

@@ -30,6 +30,9 @@ import {
   isStaffStep4Empty,
   existingDocOnFile,
   renewalDocSatisfied,
+  isStaffOnboardingType,
+  usesDocumentsOnFile,
+  photoKeepAllowed,
 } from './staff-form-logic';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -702,5 +705,49 @@ describe('passport additional page', () => {
       })
     ).toBeNull();
     expect(passportAdditionalPageRequiredForDocs('Syria', null)).toBe('syria');
+  });
+});
+
+describe('cancel_copy onboarding type', () => {
+  it('is a staff onboarding type (two-stage form, submit-employee)', () => {
+    for (const t of [null, undefined, 'new_hire', 'renewal', 'cancel_copy']) {
+      expect(isStaffOnboardingType(t)).toBe(true);
+    }
+    for (const t of ['document_request', 'dependent', 'dependent_renewal', 'dependent_document_request', 'other']) {
+      expect(isStaffOnboardingType(t)).toBe(false);
+    }
+  });
+
+  it('shows documents on file like a renewal; new hire and others do not', () => {
+    expect(usesDocumentsOnFile('renewal')).toBe(true);
+    expect(usesDocumentsOnFile('cancel_copy')).toBe(true);
+    for (const t of [null, undefined, 'new_hire', 'document_request', 'dependent_renewal']) {
+      expect(usesDocumentsOnFile(t)).toBe(false);
+    }
+  });
+
+  it('only cancel_copy may keep the photo on file, and only with a stored path', () => {
+    expect(photoKeepAllowed('cancel_copy', { path: 'a/photo.jpg' })).toBe(true);
+    expect(photoKeepAllowed('cancel_copy', { path: '' })).toBe(false);
+    expect(photoKeepAllowed('cancel_copy', undefined)).toBe(false);
+    expect(photoKeepAllowed('renewal', { path: 'a/photo.jpg' })).toBe(false);
+    expect(photoKeepAllowed('new_hire', { path: 'a/photo.jpg' })).toBe(false);
+  });
+
+  it('visa / EID are not asked (step 4 dropped) unless family-sponsored', () => {
+    // EmployeeForm passes usesDocumentsOnFile(type) as isRenewal here.
+    const docsOnFile = usesDocumentsOnFile('cancel_copy');
+    const picker = showStaffVisaCategoryPicker({ isRenewal: docsOnFile, employerSaysInUae: true, forceVisaMandatory: false });
+    expect(picker).toBe(false);
+    expect(isStaffStep4Empty({ isRenewal: docsOnFile, showVisaCategoryPicker: picker })).toBe(true);
+    const familyPicker = showStaffVisaCategoryPicker({ isRenewal: docsOnFile, employerSaysInUae: true, forceVisaMandatory: true });
+    expect(familyPicker).toBe(true);
+    expect(existingDocOnFile(docsOnFile, { path: 'a/visa.pdf' })).toBe(true);
+  });
+
+  it('keeps the new-hire UAE presence rules (not locked inside)', () => {
+    // EmployeeForm passes isRenewal === (type === 'renewal'), false here.
+    expect(uaePresenceLocked(false, null)).toBe(false);
+    expect(employerApplicantInUaeForSubmit(false, null, false)).toBe(false);
   });
 });

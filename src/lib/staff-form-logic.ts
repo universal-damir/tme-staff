@@ -471,14 +471,51 @@ export function isStaffStep4Empty(args: { isRenewal: boolean; showVisaCategoryPi
 }
 
 /**
+ * Staff onboarding types: the two-stage employer + employee form finalized by
+ * /api/submit-employee. A null/absent type is a legacy staff onboarding.
+ */
+export function isStaffOnboardingType(type: string | null | undefined): boolean {
+  return type == null || type === 'new_hire' || type === 'renewal' || type === 'cancel_copy';
+}
+
+/**
+ * Flows where TME already holds the person's data and documents, so the form
+ * shows what is on file (existing_documents) and lets the employee keep it:
+ * a renewal, and a 'cancel_copy' (visa type change / move to another group
+ * company). Every other renewal-only rule (UAE presence lock, payroll view,
+ * hidden in-UAE question, ...) stays keyed on 'renewal' alone.
+ */
+export function usesDocumentsOnFile(type: string | null | undefined): boolean {
+  return type === 'renewal' || type === 'cancel_copy';
+}
+
+/** Intro shown to the employer and the employee on a 'cancel_copy' form. */
+export const CANCEL_COPY_INTRO =
+  'Please check and confirm the details. We already have them on file from before, so you only need to update anything that changed.';
+
+/**
+ * May the employee keep the photo on file instead of uploading a new one?
+ * Only on 'cancel_copy' (a renewal always needs a recent photo), and only when
+ * the portal sent a stored, displayable photo (legacy sha256-only entries
+ * never count).
+ */
+export function photoKeepAllowed(
+  type: string | null | undefined,
+  existingPhoto: { path?: string } | null | undefined
+): boolean {
+  return type === 'cancel_copy' && !!existingPhoto?.path;
+}
+
+/**
  * Is a document that is on file from the portal (existing_documents) usable
- * here? It needs a stored path, and only renewals show what is on file.
+ * here? It needs a stored path, and only flows that use documents on file
+ * (renewal, cancel_copy; see usesDocumentsOnFile) show what is on file.
  */
 export function existingDocOnFile(
-  isRenewal: boolean,
+  docsOnFileFlow: boolean,
   doc: { path?: string } | null | undefined
 ): boolean {
-  return isRenewal && !!doc?.path;
+  return docsOnFileFlow && !!doc?.path;
 }
 
 /**

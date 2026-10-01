@@ -93,6 +93,7 @@ describe('canEmployerRecall', () => {
   it('true for renewals and legacy null onboarding_type', () => {
     expect(canEmployerRecall(row({ onboarding_type: 'renewal' }))).toBe(true);
     expect(canEmployerRecall(row({ onboarding_type: null }))).toBe(true);
+    expect(canEmployerRecall(row({ onboarding_type: 'cancel_copy' }))).toBe(true);
   });
 
   it('false without an employer token', () => {

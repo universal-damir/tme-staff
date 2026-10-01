@@ -55,6 +55,9 @@ import {
   isStaffStep4Empty,
   existingDocOnFile,
   renewalDocSatisfied,
+  usesDocumentsOnFile,
+  photoKeepAllowed,
+  CANCEL_COPY_INTRO,
 } from '@/lib/staff-form-logic';
 import { buildNocText } from '@/lib/noc-letter';
 import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
@@ -423,6 +426,12 @@ export function EmployeeForm({
 
   // Renewal passport confirmation
   const isRenewal = submission.onboarding_type === 'renewal';
+  // 'cancel_copy': a person TME already has on file changes visa type or
+  // moves to another group company. Like a renewal it shows what is on file
+  // (passport, photo, visa / EID) and lets the employee keep it; every other
+  // rule (UAE presence, bank details, ...) is the new-hire one.
+  const isCancelCopy = submission.onboarding_type === 'cancel_copy';
+  const docsOnFileFlow = usesDocumentsOnFile(submission.onboarding_type);
   // Renewals lock the employee inside the UAE (question hidden), except a
   // labour card renewal whose authority lets them renew from abroad
   // (prefill_employer_data.uae_presence_rule === 'ask'): that one asks the
@@ -467,6 +476,20 @@ export function EmployeeForm({
   );
   const [passportConfirmed, setPassportConfirmed] = useState(false);
   const [passportChanged, setPassportChanged] = useState(false);
+
+  // 'cancel_copy' only: keep the photo on file (existing_documents.photo with
+  // a stored path) instead of uploading a new one. A kept photo is NEVER
+  // copied into submission.documents.photo; only the photo_unchanged
+  // attestation is saved. A renewal always needs a recent photo.
+  const canKeepPhoto = photoKeepAllowed(submission.onboarding_type, existingDocs?.photo);
+  const [photoOnFileConfirmed, setPhotoOnFileConfirmed] = useState(
+    submission.documents?.photo_unchanged === true
+  );
+  const [photoOnFileChanged, setPhotoOnFileChanged] = useState(
+    !!submission.documents?.photo || submission.documents?.photo_unchanged === false
+  );
+  const photoUnchangedRef = React.useRef<boolean | undefined>(submission.documents?.photo_unchanged);
+  const photoKept = canKeepPhoto && photoOnFileConfirmed && !photoOnFileChanged;
 
   // Education document uploads
   const [degreeDoc, setDegreeDoc] = useState(submission.documents?.degree_attested);
@@ -615,8 +638,8 @@ export function EmployeeForm({
   // only the visa_unchanged / eid_unchanged attestation is saved. "Changed"
   // is seeded from an earlier upload or an earlier "changed" answer so a
   // reload keeps showing the upload slot.
-  const existingVisaOnFile = existingDocOnFile(isRenewal, existingDocs?.visa);
-  const existingEidOnFile = existingDocOnFile(isRenewal, existingDocs?.eid_front);
+  const existingVisaOnFile = existingDocOnFile(docsOnFileFlow, existingDocs?.visa);
+  const existingEidOnFile = existingDocOnFile(docsOnFileFlow, existingDocs?.eid_front);
   const [visaOnFileConfirmed, setVisaOnFileConfirmed] = useState(
     submission.documents?.visa_unchanged === true
   );
@@ -845,8 +868,11 @@ export function EmployeeForm({
   // the `!isRenewal` guard the employer's locked in-UAE answer (always true on
   // renewal) would resurface it. Family-sponsored renewals still force it (they
   // carry a sponsor-held residence visa TME needs on file → forceVisaMandatory).
+  // 'cancel_copy' follows the renewal rule here: TME issued the visa the
+  // person holds now and a new visa / EID follows, so nothing is asked
+  // (visa / EID optional) except the family-sponsored override.
   const showVisaCategoryPicker = showStaffVisaCategoryPicker({
-    isRenewal,
+    isRenewal: docsOnFileFlow,
     employerSaysInUae: employerVisaInUAE,
     forceVisaMandatory,
   });
@@ -855,7 +881,7 @@ export function EmployeeForm({
   // visa, so pre-select it once (still editable) instead of making the
   // employee re-enter what TME already knows. Never overwrites an answer.
   React.useEffect(() => {
-    if (isRenewal && isFamilySponsored && existingVisaOnFile && !getValues('visa_category')) {
+    if (docsOnFileFlow && isFamilySponsored && existingVisaOnFile && !getValues('visa_category')) {
       setValue('visa_category', 'dependent_visa');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1074,7 +1100,7 @@ export function EmployeeForm({
   const [extractingPassport, setExtractingPassport] = useState(false);
 
   // --- Progressive reveal step computation ---
-  const isPhotoUploaded = !!(photoDoc?.validated);
+  const isPhotoUploaded = !!(photoDoc?.validated) || photoKept;
   const isCoverUploaded = !!(passportPages.cover?.validated);
   const isInsidePagesUploaded = !!(passportPages.insidePages?.validated);
   // 'india' | 'syria' | null — which additional-page flavour this passport
@@ -1177,7 +1203,7 @@ export function EmployeeForm({
   // mandatory family EID block below), so treat the answer as satisfied —
   // otherwise a family new-hire whose employer didn't flag applicant_in_uae
   // would be soft-locked at step 4 with no UI to answer.
-  const isPreviousUaeDocsAnswered = isRenewal || isFamilySponsored || hasPreviousUaeDocs !== null;
+  const isPreviousUaeDocsAnswered = docsOnFileFlow || isFamilySponsored || hasPreviousUaeDocs !== null;
   // Family-sponsored applicants MUST upload their own Visa + EID (front + back)
   // — the override forces the visa doc mandatory above; here we add the EID
   // requirement. This branch is keyed on isFamilySponsored (not !isRenewal) so
@@ -1243,7 +1269,7 @@ export function EmployeeForm({
   // signs the NOC after the employee has reviewed and signed. StepProgress +
   // displayedStepNumber derive the "Step X of Y" numbering from this array's
   // positions automatically.
-  const isStep4Empty = isStaffStep4Empty({ isRenewal, showVisaCategoryPicker });
+  const isStep4Empty = isStaffStep4Empty({ isRenewal: docsOnFileFlow, showVisaCategoryPicker });
   // Step 7 (Education & More) is dropped on the Partner/Investor track and on
   // education_skipped renewals: education/languages only matter for "manager
   // and above" work-permit professions; Bank Details is already hidden via
@@ -1376,7 +1402,7 @@ export function EmployeeForm({
   // On renewal, force a FRESH NOC signature: clear any prefilled value once on
   // mount so the sponsor must re-sign even though their metadata is prefilled.
   React.useEffect(() => {
-    if (isFamilySponsored && isRenewal) {
+    if (isFamilySponsored && docsOnFileFlow) {
       setSponsorSignature(null);
       setValue('sponsor_noc_signature', undefined);
       setValue('sponsor_noc_signed_at', undefined);
@@ -1388,12 +1414,13 @@ export function EmployeeForm({
     // Validate photo is uploaded AND accepted — either AI-validated or
     // explicitly submitted for manual review. A merely-existing photo that
     // failed validation must not slip through the final submit.
-    if (!photoDoc) {
-      setPhotoError('Please upload your photo');
+    // 'cancel_copy': a confirmed photo on file counts (photoKept).
+    if (!photoDoc && !photoKept) {
+      setPhotoError(canKeepPhoto ? 'Please confirm the photo on file or upload a new photo' : 'Please upload your photo');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    if (!photoDoc.validated && !photoDoc.needsReview) {
+    if (photoDoc && !photoDoc.validated && !photoDoc.needsReview) {
       setPhotoError('Your photo has not passed validation. Please upload a compliant photo, or submit it for manual review.');
       setViewingStep(1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1402,7 +1429,7 @@ export function EmployeeForm({
     setPhotoError(null);
 
     // Validate all passport pages are uploaded (skip for renewals where passport was confirmed unchanged)
-    const passportSkipped = isRenewal && hasExistingPassport && passportConfirmed && !passportChanged;
+    const passportSkipped = docsOnFileFlow && hasExistingPassport && passportConfirmed && !passportChanged;
     const pagesUploaded = passportPages.cover && passportPages.insidePages;
     if (!pagesUploaded && !passportSkipped) {
       setPassportError('Please upload both passport images');
@@ -1472,6 +1499,7 @@ export function EmployeeForm({
       photo: overrides?.photo ?? photoDocRef.current,
       passportPages: overrides?.passportPages ?? passportPagesRef.current,
       passport_unchanged: passportUnchangedRef.current,
+      photo_unchanged: photoUnchangedRef.current,
       visa_unchanged: visaUnchangedRef.current,
       eid_unchanged: eidUnchangedRef.current,
       degree_attested: degreeDocRef.current,
@@ -2854,6 +2882,17 @@ export function EmployeeForm({
           </div>
         </div>
       )}
+      {isCancelCopy && (
+        <div
+          className="p-4 rounded-lg flex items-start gap-3 border-2"
+          style={{ backgroundColor: '#F3F5FA', borderColor: TME_COLORS.primary }}
+        >
+          <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+          <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+            {CANCEL_COPY_INTRO}
+          </p>
+        </div>
+      )}
       {/* Step Progress */}
       <StepProgress
         currentStep={currentStep}
@@ -2881,11 +2920,70 @@ export function EmployeeForm({
           icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
           stepNumber={displayedStepNumber(1)}
         >
+          {canKeepPhoto && !photoOnFileChanged && !photoDoc && existingDocs?.photo && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">
+                This is the photo we have on file. You can keep it, or upload a new one.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ExistingDocPreview label="Photo (on file)" doc={existingDocs.photo} />
+              </div>
+              <div className="border-t border-gray-200 pt-4">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={photoOnFileConfirmed}
+                    onChange={(e) => {
+                      setPhotoOnFileConfirmed(e.target.checked);
+                      photoUnchangedRef.current = e.target.checked ? true : undefined;
+                      if (e.target.checked && photoError) setPhotoError(null);
+                      void saveDocRefs(buildDocRefs());
+                    }}
+                    className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#243F7B] focus:ring-[#243F7B]"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-gray-800">Keep this photo</span>
+                    <p className="text-xs text-gray-500 mt-0.5">It still looks like me and was taken in the last 6 months.</p>
+                  </div>
+                </label>
+              </div>
+              {photoError && <p className="text-sm text-red-600">{photoError}</p>}
+              <button
+                type="button"
+                onClick={() => {
+                  setPhotoOnFileChanged(true);
+                  setPhotoOnFileConfirmed(false);
+                  photoUnchangedRef.current = false;
+                  void saveDocRefs(buildDocRefs());
+                }}
+                className="text-sm text-red-600 hover:text-red-700 font-medium underline"
+              >
+                I want to upload a new photo
+              </button>
+            </div>
+          )}
+          {canKeepPhoto && photoOnFileChanged && !photoDoc && (
+            <button
+              type="button"
+              onClick={() => {
+                setPhotoOnFileChanged(false);
+                photoUnchangedRef.current = undefined;
+                void saveDocRefs(buildDocRefs());
+              }}
+              className="mb-3 text-sm font-medium underline"
+              style={{ color: TME_COLORS.primary }}
+            >
+              Use the photo on file instead
+            </button>
+          )}
+          {!(canKeepPhoto && !photoOnFileChanged && !photoDoc) && (
           <PhotoUpload
             hideGuidance={isReview}
             submissionId={submission.id}
             value={photoDoc}
-            existingPhoto={existingDocs?.photo}
+            // cancel_copy: the employee chose to replace the photo on file,
+            // so the renewal "same photo again" guard does not apply.
+            existingPhoto={isCancelCopy ? undefined : existingDocs?.photo}
             onUpload={handlePhotoUpload}
             onValidated={async (validated, validationErrors, aiRejected, flags) => {
               // Remember whether the CURRENT upload was judged a reuse of the
@@ -2919,6 +3017,7 @@ export function EmployeeForm({
             }}
             error={photoError || undefined}
           />
+          )}
 
           {shouldOfferManualReview(photoRejectionCount) && photoDoc && !photoDoc.validated && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
@@ -2951,7 +3050,7 @@ export function EmployeeForm({
           {isPhotoUploaded && viewingStep === 8 && (
             <div className="mt-4 flex items-center gap-2 text-green-600 text-sm">
               <CheckCircle className="w-4 h-4" />
-              ID Photo uploaded.
+              {photoKept ? 'Photo on file kept.' : 'ID Photo uploaded.'}
             </div>
           )}
           {viewingStep === 1 && (
@@ -2961,7 +3060,7 @@ export function EmployeeForm({
       </RevealSection>
 
       {/* Renewal: Existing Passport Confirmation (shown before passport upload steps) */}
-      {isRenewal && hasExistingPassport && (viewingStep === 2 || viewingStep === 8) && !passportChanged && (
+      {docsOnFileFlow && hasExistingPassport && (viewingStep === 2 || viewingStep === 8) && !passportChanged && (
         <div className="bg-white rounded-xl p-6 shadow-sm mb-6">
           <div className="flex items-center gap-3 mb-4">
             <Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />
@@ -3045,7 +3144,7 @@ export function EmployeeForm({
 
       {/* Step 2: Passport Cover */}
       <RevealSection
-        show={(viewingStep === 2 || viewingStep === 8) && (!isRenewal || !hasExistingPassport || passportChanged)}
+        show={(viewingStep === 2 || viewingStep === 8) && (!docsOnFileFlow || !hasExistingPassport || passportChanged)}
         onReveal={viewingStep !== 8 ? () => scrollToRef(passportCoverRef) : undefined}
       >
         <div ref={passportCoverRef}>
@@ -3152,7 +3251,7 @@ export function EmployeeForm({
 
       {/* Step 3: Inside Pages + Personal Details */}
       <RevealSection
-        show={(viewingStep === 3 || viewingStep === 8) && (!isRenewal || !hasExistingPassport || passportChanged)}
+        show={(viewingStep === 3 || viewingStep === 8) && (!docsOnFileFlow || !hasExistingPassport || passportChanged)}
         onReveal={viewingStep !== 8 ? () => scrollToRef(passportInsideRef) : undefined}
       >
         <div ref={passportInsideRef} className="space-y-6">
@@ -3834,7 +3933,7 @@ export function EmployeeForm({
               by the dedicated "Your Emirates ID" block below, so we don't
               render the optional previous-docs version (would duplicate the
               same eid_front/eid_back slots). */}
-          {!isRenewal && !isFamilySponsored && (
+          {!docsOnFileFlow && !isFamilySponsored && (
           <FormSection
             title="UAE Visa and Emirates ID"
             icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
@@ -5305,6 +5404,8 @@ export function EmployeeForm({
               >
                 {submission.onboarding_type === 'renewal'
                   ? 'Submit Renewal Form'
+                  : isCancelCopy
+                  ? 'Confirm Details'
                   : isPartnerInvestorTrack
                   ? 'Submit Application Form'
                   : 'Submit Onboarding Form'}
@@ -5373,6 +5474,8 @@ export function EmployeeForm({
               >
                 {submission.onboarding_type === 'renewal'
                   ? 'Submit Renewal Form'
+                  : isCancelCopy
+                  ? 'Confirm Details'
                   : isPartnerInvestorTrack
                   ? 'Submit Application Form'
                   : 'Submit Onboarding Form'}

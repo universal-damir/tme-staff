@@ -88,6 +88,9 @@ function OnboardingPageInner() {
   );
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Set from /api/submit-employer: false when the portal sent no employee
+  // invitation, so the thank-you text must not claim an email went out.
+  const [employeeNotified, setEmployeeNotified] = useState<boolean | undefined>(undefined);
   const [employerStatus, setEmployerStatus] = useState<EmployerStatusView | null>(null);
   // Bumped after a successful recall to re-read the row (now back on the
   // employer step, prefilled).
@@ -273,6 +276,14 @@ function OnboardingPageInner() {
           });
 
           if (response.ok) {
+            // false = the portal answered but no employee email went out
+            // (e.g. no employee email on record): TME sends the link instead.
+            try {
+              const okBody = await response.json();
+              setEmployeeNotified(okBody?.employeeNotified === false ? false : undefined);
+            } catch {
+              setEmployeeNotified(undefined);
+            }
             setPageState('success');
           } else {
             // Show the server's plain-English reason (e.g. already signed,
@@ -521,7 +532,9 @@ function OnboardingPageInner() {
               : submission?.is_same_person
               ? 'Your form has been submitted successfully.'
               : !isPartnerInvestorTrack && pageState === 'success' && submission?.current_step === 'employer'
-              ? 'The employer section has been completed. An email has been sent to the employee to complete their section.'
+              ? (employeeNotified === false
+                  ? 'The employer section has been completed. TME Services will send the employee their link.'
+                  : 'The employer section has been completed. An email has been sent to the employee to complete their section.')
               : 'Your form has been submitted successfully.'}
           </p>
           <p className="text-sm text-gray-400">You will be redirected shortly...</p>
@@ -620,6 +633,8 @@ function OnboardingPageInner() {
               ? (headerSponsorshipType === 'company' && !isEmploymentIdRenewal
                   ? 'Staff Visa Renewal'
                   : 'Staff Employment ID Renewal')
+              : submission.onboarding_type === 'cancel_copy'
+              ? 'Confirm Staff Details'
               : 'Staff Onboarding'}
           </h1>
           {isDependentDocumentRequest ? (

@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { signWebhookBody } from '@/lib/webhook-signature';
+import { portalNotifiedEmployee } from '@/lib/portal-notify';
 import {
   assertSubmittable,
   getSignerIp,
@@ -139,6 +140,10 @@ export async function POST(req: NextRequest) {
       ? cleanEmployerData.job_title_visa_custom
       : cleanEmployerData.job_title_visa;
 
+    // Whether the portal confirmed the employee invitation went out. Left
+    // undefined when the portal could not be reached or failed (5xx): the
+    // portal-side cron fallback still sends it, so the page keeps its text.
+    let employeeNotified: boolean | undefined;
     try {
       const apiSecret = process.env.STAFF_PORTAL_API_SECRET;
       if (!apiSecret) {
@@ -161,16 +166,20 @@ export async function POST(req: NextRequest) {
         }
       );
 
-      const notifyResult = await notifyResponse.json();
+      const notifyResult = await notifyResponse.json().catch(() => null);
       console.log('[submit-employer] Portal notification result:', notifyResult);
+      employeeNotified = portalNotifiedEmployee(notifyResponse.status, notifyResult);
     } catch (notifyError) {
       console.error('[submit-employer] Portal notification failed:', notifyError);
       // Don't fail — the data is saved, cron will pick it up as fallback
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json(
+      employeeNotified === undefined ? { success: true } : { success: true, employeeNotified }
+    );
   } catch (error) {
     console.error('[submit-employer] Error:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }
+

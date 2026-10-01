@@ -389,6 +389,10 @@ export interface StaffDocumentReferences {
   // stay ABSENT in that case; false = they said it changed and uploaded.
   visa_unchanged?: boolean;
   eid_unchanged?: boolean;
+  // 'cancel_copy' only: the employee kept the photo TME already has on file
+  // (existing_documents.photo, which needs a stored path). `photo` stays
+  // ABSENT in that case; false = they chose to upload a new one.
+  photo_unchanged?: boolean;
   eid?: {
     path: string;
     filename: string;
@@ -549,6 +553,12 @@ export type OnboardingStatus = 'pending' | 'employer_completed' | 'complete' | '
  *
  * Staff flows (the employee is the subject and the signer):
  *   new_hire | renewal   — two-stage employer + employee onboarding
+ *   cancel_copy          — two-stage, for a person TME already has on file
+ *                          who changes visa type or moves to another group
+ *                          company. Prefilled + existing_documents like a
+ *                          renewal; the rest behaves like new_hire
+ *                          (employer fields editable, bank not locked,
+ *                          in-UAE question asked).
  *   document_request     — single-stage re-upload of `requested_documents`
  *
  * Sponsor flows (an existing staff member fills the form FOR a dependent —
@@ -562,6 +572,7 @@ export type OnboardingStatus = 'pending' | 'employer_completed' | 'complete' | '
 export type OnboardingType =
   | 'new_hire'
   | 'renewal'
+  | 'cancel_copy'
   | 'document_request'
   | 'dependent'
   | 'dependent_renewal'
