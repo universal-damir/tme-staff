@@ -15,7 +15,6 @@ import { hasNonEnglish } from '@/lib/english-only';
 import {
   SVP_LIMITS,
   SVP_ROLE_KEYS,
-  type SvpCompanyChanges,
   type SvpPerson,
   type SvpPolicyAnswers,
   type SvpRoleKey,
@@ -122,24 +121,6 @@ export function validateAnswers(
     errors.push(`Note: longer than ${SVP_LIMITS.note} characters.`);
   }
 
-  const changes = a.companyChanges || {};
-  if (changes.trn !== undefined) {
-    const digits = changes.trn.replace(/[\s-]+/g, '');
-    if (!/^\d{15}$/.test(digits)) errors.push('VAT number: the TRN has 15 digits.');
-  }
-  if (changes.vatPeriods !== undefined) {
-    const v = changes.vatPeriods.trim();
-    if (!v) errors.push('VAT periods: say what your VAT periods are.');
-    else if (v.length > SVP_LIMITS.vatPeriods) errors.push(`VAT periods: longer than ${SVP_LIMITS.vatPeriods} characters.`);
-  }
-  if (changes.registeredAddress !== undefined) {
-    const v = changes.registeredAddress.trim();
-    if (!v) errors.push('Registered office: type the address.');
-    else if (v.length > SVP_LIMITS.registeredAddress) {
-      errors.push(`Registered office: longer than ${SVP_LIMITS.registeredAddress} characters.`);
-    }
-  }
-
   if (options.requirePriceAgreed && a.priceAgreed !== true) {
     errors.push('Price: please tick the box to agree to the price.');
   }
@@ -177,7 +158,6 @@ export function pickSubmittedAnswers(
 } {
   const b = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
   const note = str(b.note);
-  const companyChanges = pickCompanyChanges(b.companyChanges);
   const isOffice = b.recordsLocationIsRegisteredOffice === true;
   return {
     implementer: person(b.implementer),
@@ -189,17 +169,5 @@ export function pickSubmittedAnswers(
     priceAgreed: b.priceAgreed === true,
     dutyAcknowledged: b.dutyAcknowledged === true,
     ...(note ? { note } : {}),
-    ...(companyChanges ? { companyChanges } : {}),
   };
-}
-
-/** Only the three known keys, as strings; null when the client changed nothing. */
-function pickCompanyChanges(value: unknown): SvpCompanyChanges | null {
-  if (!value || typeof value !== 'object') return null;
-  const v = value as Record<string, unknown>;
-  const out: SvpCompanyChanges = {};
-  for (const key of ['trn', 'vatPeriods', 'registeredAddress'] as const) {
-    if (typeof v[key] === 'string') out[key] = (v[key] as string).trim();
-  }
-  return Object.keys(out).length > 0 ? out : null;
 }

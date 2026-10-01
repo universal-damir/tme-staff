@@ -36,21 +36,6 @@ export interface SvpPolicyAnswers {
    * unknown keys, so old rows (without it) and new rows both sync.
    */
   dutyAcknowledged?: true;
-  /**
-   * Company details the client says are different from our records (TRN,
-   * VAT periods, registered office). Only the changed ones are present; absent
-   * = the client confirmed what we have. The portal shows them to the VAT
-   * team, who fix the client record; the policy keeps reading the record.
-   */
-  companyChanges?: SvpCompanyChanges;
-}
-
-/** The client's corrections to the read-only company block. Plain text. */
-export interface SvpCompanyChanges {
-  trn?: string;
-  /** As a sentence: "February to April, May to July, ..." or the client's own words. */
-  vatPeriods?: string;
-  registeredAddress?: string;
 }
 
 /** Pushed to Supabase at mint; shown read-only or as defaults on the form. */
@@ -77,9 +62,6 @@ export const SVP_LIMITS = {
   email: 254,
   recordsLocation: 300,
   note: 1000,
-  trn: 40,
-  vatPeriods: 300,
-  registeredAddress: 300,
 } as const;
 
 /** Supabase svp_intake_submissions.status. */
