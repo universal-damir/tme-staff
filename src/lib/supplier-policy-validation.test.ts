@@ -141,3 +141,31 @@ describe('pickSubmittedAnswers', () => {
     expect(pickSubmittedAnswers({ dutyAcknowledged: true }).dutyAcknowledged).toBe(true);
   });
 });
+
+describe('company detail changes', () => {
+  it('keeps only the three known keys, trimmed', () => {
+    const picked = pickSubmittedAnswers({
+      companyChanges: { trn: ' 100000000000003 ', registeredAddress: 'Office 5', other: 'x', vatPeriods: 7 },
+    });
+    expect(picked.companyChanges).toEqual({ trn: '100000000000003', registeredAddress: 'Office 5' });
+  });
+
+  it('leaves the key out when nothing changed', () => {
+    expect(pickSubmittedAnswers({ companyChanges: {} }).companyChanges).toBeUndefined();
+    expect(pickSubmittedAnswers({}).companyChanges).toBeUndefined();
+  });
+
+  it('checks the TRN has 15 digits and the rest is not empty', () => {
+    const errs = validateAnswers({
+      ...answers(),
+      companyChanges: { trn: '10000 00000 0000', vatPeriods: ' ', registeredAddress: '' },
+    });
+    expect(errs).toContain('VAT number: the TRN has 15 digits.');
+    expect(errs).toContain('VAT periods: say what your VAT periods are.');
+    expect(errs).toContain('Registered office: type the address.');
+    const ok = validateAnswers(answers({ companyChanges: { trn: '10000 00000 00003' } }));
+    expect(ok.some((e) => e.startsWith('VAT number'))).toBe(false);
+    const letters = validateAnswers(answers({ companyChanges: { trn: '10000 00000 00003akjsdh' } }));
+    expect(letters).toContain('VAT number: the TRN has 15 digits.');
+  });
+});

@@ -20,6 +20,7 @@ import {
 import {
   SVP_LIMITS,
   SVP_ROLE_KEYS,
+  type SvpCompanyChanges,
   type SvpPerson,
   type SvpPolicyAnswers,
   type SvpPrefill,
@@ -135,6 +136,9 @@ const RECORDS_LOCATION_ID = 'svp-records-location';
 const NOTE_ID = 'svp-note';
 const PRICE_ID = 'svp-price-agreed';
 const DUTY_ID = 'svp-duty-acknowledged';
+const TRN_ID = 'svp-change-trn';
+const VAT_PERIODS_ID = 'svp-change-vat-periods';
+const ADDRESS_ID = 'svp-change-address';
 
 interface FieldProblem {
   /** The full sentence, shown in the summary at the top. */
@@ -169,6 +173,9 @@ function mapProblem(message: string): FieldProblem {
   if (prefix === 'Records location') return { message, target: RECORDS_LOCATION_ID, inline };
   if (prefix === 'Note') return { message, target: NOTE_ID, inline };
   if (prefix === 'Price') return { message, target: PRICE_ID, inline };
+  if (prefix === 'VAT number') return { message, target: TRN_ID, inline };
+  if (prefix === 'VAT periods') return { message, target: VAT_PERIODS_ID, inline };
+  if (prefix === 'Registered office') return { message, target: ADDRESS_ID, inline };
   return { message, target: null, inline: message };
 }
 
@@ -320,6 +327,7 @@ function TextInput({
   autoComplete,
   hasError,
   describedBy,
+  inputMode,
 }: {
   id: string;
   value: string;
@@ -328,6 +336,7 @@ function TextInput({
   disabled?: boolean;
   type?: string;
   autoComplete?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
   hasError?: boolean;
   describedBy?: string;
 }) {
@@ -340,6 +349,7 @@ function TextInput({
       maxLength={maxLength}
       disabled={disabled}
       autoComplete={autoComplete}
+      inputMode={inputMode}
       aria-invalid={hasError || undefined}
       aria-describedby={describedBy}
       onChange={(e) => onChange(e.target.value)}
@@ -371,14 +381,72 @@ function splitVatPeriods(text: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
+// ---------------------------------------------------------------------------
+// Company details the client can correct (rare: new TRN, new periods, moved)
+// ---------------------------------------------------------------------------
+
+type ChangeKey = keyof SvpCompanyChanges;
+
+/** The three UAE quarter patterns, worded exactly as the portal words stored periods. */
+const QUARTER_OPTIONS = [
+  'January to March, April to June, July to September and October to December',
+  'February to April, May to July, August to October and November to January',
+  'March to May, June to August, September to November and December to February',
+];
+
+function trnDigits(value: string | null | undefined): string {
+  return (value || '').replace(/[\s-]+/g, '');
+}
+
+/** What the TRN box lets through: digits only, at most 15, shown in groups of 5. */
+function typedTrn(value: string): string {
+  const digits = value.replace(/\D+/g, '').slice(0, 15);
+  return digits.replace(/(\d{5})(?=\d)/g, '$1 ');
+}
+
+function looseText(value: string | null | undefined): string {
+  return (value || '').replace(/[\s,.]+/g, ' ').trim().toLowerCase();
+}
+
+/** Same periods in any order ("A, B and C" vs "B, C and A"). */
+function samePeriods(a: string | null | undefined, b: string | null | undefined): boolean {
+  const key = (t: string | null | undefined) =>
+    splitVatPeriods(t)
+      .map((p) => p.toLowerCase())
+      .sort()
+      .join('|');
+  return key(a) === key(b);
+}
+
+/** Only what really differs from our record goes to the portal. */
+function changedDetails(changes: SvpCompanyChanges, prefill: SvpPrefill | null): SvpCompanyChanges {
+  const out: SvpCompanyChanges = {};
+  if (changes.trn !== undefined && trnDigits(changes.trn) !== trnDigits(prefill?.trn)) {
+    out.trn = changes.trn.trim();
+  }
+  if (changes.vatPeriods !== undefined && !samePeriods(changes.vatPeriods, prefill?.vatPeriodsText)) {
+    out.vatPeriods = changes.vatPeriods.trim();
+  }
+  if (
+    changes.registeredAddress !== undefined &&
+    looseText(changes.registeredAddress) !== looseText(prefill?.registeredAddress)
+  ) {
+    out.registeredAddress = changes.registeredAddress.trim();
+  }
+  return out;
+}
+
 function Fact({
   label,
   value,
   note,
+  action,
 }: {
   label: string;
   value: string | string[] | null | undefined;
   note?: string;
+  /** A "Change" button under the value. */
+  action?: React.ReactNode;
 }) {
   const lines = (Array.isArray(value) ? value : value ? [value] : []).filter((v) => v && v.trim());
   const has = lines.length > 0;
@@ -399,6 +467,7 @@ function Fact({
         )}
       </dd>
       {has && note && <dd className="text-xs text-gray-500 mt-1">{note}</dd>}
+      {action && <dd className="mt-1.5">{action}</dd>}
     </div>
   );
 }
@@ -710,15 +779,187 @@ function VariantNote({ people }: { people: People }) {
   );
 }
 
+function TextLink({
+  onClick,
+  disabled,
+  label,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  label?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-2 disabled:opacity-50"
+      style={{ color: NAVY }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CompanyChangesPanel({
+  changes,
+  periodsOther,
+  disabled,
+  errors,
+  onChange,
+  onPeriodsOther,
+  onKeep,
+}: {
+  changes: SvpCompanyChanges;
+  periodsOther: boolean;
+  disabled?: boolean;
+  errors: Record<string, string>;
+  onChange: (key: ChangeKey, value: string) => void;
+  onPeriodsOther: (other: boolean) => void;
+  onKeep: (key: ChangeKey) => void;
+}) {
+  const keep = (key: ChangeKey) => (
+    <TextLink onClick={() => onKeep(key)} disabled={disabled}>
+      Undo, keep your record
+    </TextLink>
+  );
+  return (
+    <div className="mt-4 rounded-xl border-2 p-4 sm:p-5 space-y-5" style={{ borderColor: NAVY }}>
+      <div>
+        <p className="text-sm font-semibold" style={{ color: NAVY }}>
+          Your correct details
+        </p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Our Tax team checks the change and updates our records. If you have a new Tax
+          Registration Certificate, please also reply to our email with it.
+        </p>
+      </div>
+
+      {changes.trn !== undefined && (
+        <div className="space-y-1.5">
+          <Field id={TRN_ID} label="VAT number (TRN)" hint="15 digits, numbers only" error={errors[TRN_ID]}>
+            {(describedBy) => (
+              <TextInput
+                id={TRN_ID}
+                value={changes.trn ?? ''}
+                maxLength={17}
+                inputMode="numeric"
+                autoComplete="off"
+                disabled={disabled}
+                hasError={!!errors[TRN_ID]}
+                describedBy={describedBy}
+                onChange={(v) => onChange('trn', v)}
+              />
+            )}
+          </Field>
+          {keep('trn')}
+        </div>
+      )}
+
+      {changes.vatPeriods !== undefined && (
+        <div className="space-y-1.5">
+          <fieldset aria-describedby={errors[VAT_PERIODS_ID] ? `${VAT_PERIODS_ID}-error` : undefined}>
+            <legend className="block text-sm font-medium mb-2" style={{ color: NAVY }}>
+              VAT periods
+            </legend>
+            {errors[VAT_PERIODS_ID] && (
+              <p id={`${VAT_PERIODS_ID}-error`} className="text-sm font-medium mb-2" style={{ color: TME_COLORS.error }}>
+                {errors[VAT_PERIODS_ID]}
+              </p>
+            )}
+            <div className="space-y-2">
+              {QUARTER_OPTIONS.map((option, i) => (
+                <RadioCard
+                  key={option}
+                  name="svp-vat-periods"
+                  id={i === 0 ? VAT_PERIODS_ID : undefined}
+                  checked={!periodsOther && changes.vatPeriods === option}
+                  disabled={disabled}
+                  onChange={() => {
+                    onPeriodsOther(false);
+                    onChange('vatPeriods', option);
+                  }}
+                >
+                  {splitVatPeriods(option).join(', ')}
+                </RadioCard>
+              ))}
+              <RadioCard
+                name="svp-vat-periods"
+                checked={periodsOther}
+                disabled={disabled}
+                onChange={() => {
+                  onPeriodsOther(true);
+                  onChange('vatPeriods', '');
+                }}
+              >
+                Other (for example monthly)
+              </RadioCard>
+              {periodsOther && (
+                <TextInput
+                  id={`${VAT_PERIODS_ID}-other`}
+                  value={changes.vatPeriods ?? ''}
+                  maxLength={SVP_LIMITS.vatPeriods}
+                  disabled={disabled}
+                  hasError={!!errors[VAT_PERIODS_ID]}
+                  onChange={(v) => onChange('vatPeriods', v)}
+                />
+              )}
+            </div>
+          </fieldset>
+          {keep('vatPeriods')}
+        </div>
+      )}
+
+      {changes.registeredAddress !== undefined && (
+        <div className="space-y-1.5">
+          <Field
+            id={ADDRESS_ID}
+            label="Registered office"
+            hint="As on your Tax Registration Certificate"
+            error={errors[ADDRESS_ID]}
+          >
+            {(describedBy) => (
+              <textarea
+                id={ADDRESS_ID}
+                value={changes.registeredAddress ?? ''}
+                onChange={(e) => onChange('registeredAddress', e.target.value)}
+                maxLength={SVP_LIMITS.registeredAddress}
+                rows={2}
+                disabled={disabled}
+                aria-invalid={!!errors[ADDRESS_ID] || undefined}
+                aria-describedby={describedBy}
+                className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
+                style={errors[ADDRESS_ID] ? { borderColor: TME_COLORS.error } : undefined}
+                onFocus={(e) => (e.currentTarget.style.borderColor = NAVY)}
+                onBlur={(e) =>
+                  (e.currentTarget.style.borderColor = errors[ADDRESS_ID] ? TME_COLORS.error : TME_COLORS.border)
+                }
+              />
+            )}
+          </Field>
+          {keep('registeredAddress')}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RadioCard({
   checked,
   onChange,
   disabled,
+  name = 'records-location',
+  id,
   children,
 }: {
   checked: boolean;
   onChange: () => void;
   disabled?: boolean;
+  name?: string;
+  id?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -731,7 +972,8 @@ function RadioCard({
     >
       <input
         type="radio"
-        name="records-location"
+        id={id}
+        name={name}
         checked={checked}
         onChange={onChange}
         disabled={disabled}
@@ -778,6 +1020,9 @@ export default function SupplierPolicyIntakePage() {
   const [atOffice, setAtOffice] = useState(true);
   const [location, setLocation] = useState('');
   const [note, setNote] = useState('');
+  // A key is present while the client corrects that company detail.
+  const [changes, setChanges] = useState<SvpCompanyChanges>({});
+  const [periodsOther, setPeriodsOther] = useState(false);
   const [priceAgreed, setPriceAgreed] = useState(false);
   const [dutyAcknowledged, setDutyAcknowledged] = useState(false);
   const bothTicked = priceAgreed && dutyAcknowledged;
@@ -834,6 +1079,40 @@ export default function SupplierPolicyIntakePage() {
     setServerMessages([]);
   }, []);
 
+  const companyChanges = useMemo(() => changedDetails(changes, data?.prefill ?? null), [changes, data]);
+
+  const startChange = useCallback(
+    (key: ChangeKey) => {
+      const prefill = data?.prefill ?? null;
+      setServerMessages([]);
+      if (key === 'trn') setChanges((c) => ({ ...c, trn: typedTrn(prefill?.trn ?? '') }));
+      if (key === 'registeredAddress') {
+        setChanges((c) => ({ ...c, registeredAddress: prefill?.registeredAddress ?? '' }));
+      }
+      if (key === 'vatPeriods') {
+        const current = QUARTER_OPTIONS.find((o) => samePeriods(o, prefill?.vatPeriodsText));
+        setPeriodsOther(!current && !!prefill?.vatPeriodsText);
+        setChanges((c) => ({ ...c, vatPeriods: current ?? prefill?.vatPeriodsText ?? '' }));
+      }
+    },
+    [data]
+  );
+
+  const editChange = useCallback((key: ChangeKey, value: string) => {
+    setChanges((c) => ({ ...c, [key]: key === 'trn' ? typedTrn(value) : value }));
+    setServerMessages([]);
+  }, []);
+
+  const keepRecord = useCallback((key: ChangeKey) => {
+    setChanges((c) => {
+      const next = { ...c };
+      delete next[key];
+      return next;
+    });
+    if (key === 'vatPeriods') setPeriodsOther(false);
+    setServerMessages([]);
+  }, []);
+
   const answers = useMemo(
     () => ({
       implementer: people.implementer,
@@ -843,8 +1122,9 @@ export default function SupplierPolicyIntakePage() {
       recordsLocation: atOffice ? '' : location,
       priceAgreed,
       ...(note.trim() ? { note: note.trim() } : {}),
+      ...(Object.keys(companyChanges).length > 0 ? { companyChanges } : {}),
     }),
-    [people, atOffice, location, note, priceAgreed]
+    [people, atOffice, location, note, priceAgreed, companyChanges]
   );
 
   // The same checks the server runs; shown once the client tries to submit.
@@ -1074,17 +1354,66 @@ export default function SupplierPolicyIntakePage() {
         </aside>
       </div>
 
-      <Step number={1} title="Check your company details" hint="From our records. You cannot change them here. If something is wrong, reply to our email.">
+      <Step
+        number={1}
+        title="Check your company details"
+        hint="From our records. If your VAT number, VAT periods or address changed, click Change next to it."
+      >
         <dl className="rounded-xl bg-gray-50 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <Fact label="Company" value={companyName} />
-          <Fact label="VAT number (TRN)" value={formatTrn(prefill?.trn)} />
-          <Fact label="VAT periods" value={splitVatPeriods(prefill?.vatPeriodsText)} />
+          <Fact
+            label="VAT number (TRN)"
+            value={formatTrn(prefill?.trn)}
+            action={
+              changes.trn === undefined && (
+                <TextLink onClick={() => startChange('trn')} disabled={submitting} label="Change the VAT number">
+                  <PenLine className="w-3.5 h-3.5" aria-hidden="true" />
+                  Change
+                </TextLink>
+              )
+            }
+          />
+          <Fact
+            label="VAT periods"
+            value={splitVatPeriods(prefill?.vatPeriodsText)}
+            action={
+              changes.vatPeriods === undefined && (
+                <TextLink onClick={() => startChange('vatPeriods')} disabled={submitting} label="Change the VAT periods">
+                  <PenLine className="w-3.5 h-3.5" aria-hidden="true" />
+                  Change
+                </TextLink>
+              )
+            }
+          />
           <Fact
             label="Registered office"
             value={prefill?.registeredAddress}
             note="As on your Tax Registration Certificate"
+            action={
+              changes.registeredAddress === undefined && (
+                <TextLink
+                  onClick={() => startChange('registeredAddress')}
+                  disabled={submitting}
+                  label="Change the registered office"
+                >
+                  <PenLine className="w-3.5 h-3.5" aria-hidden="true" />
+                  Change
+                </TextLink>
+              )
+            }
           />
         </dl>
+        {Object.keys(changes).length > 0 && (
+          <CompanyChangesPanel
+            changes={changes}
+            periodsOther={periodsOther}
+            disabled={submitting}
+            errors={fieldErrors}
+            onChange={editChange}
+            onPeriodsOther={setPeriodsOther}
+            onKeep={keepRecord}
+          />
+        )}
       </Step>
 
       <Step
@@ -1118,7 +1447,7 @@ export default function SupplierPolicyIntakePage() {
           <fieldset className="space-y-2">
             <legend className="sr-only">Where the records are kept</legend>
             <RadioCard checked={atOffice} onChange={() => setAtOffice(true)} disabled={submitting}>
-              {prefill?.registeredAddress || 'Our registered office'}
+              {companyChanges.registeredAddress || prefill?.registeredAddress || 'Our registered office'}
               <span className="block text-xs text-gray-500 mt-0.5">
                 As on your Tax Registration Certificate
               </span>
