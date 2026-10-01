@@ -21,6 +21,15 @@ import {
   passportDataPageCarriesIssueDetails,
   passportAdditionalPageRequired,
   passportAdditionalPageRequiredForDocs,
+  isLabourCardRenewal,
+  renewalAsksUaePresence,
+  uaePresenceLocked,
+  lockedUaePresenceNote,
+  employerApplicantInUaeForSubmit,
+  showStaffVisaCategoryPicker,
+  isStaffStep4Empty,
+  existingDocOnFile,
+  renewalDocSatisfied,
 } from './staff-form-logic';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -502,6 +511,130 @@ describe('initialIsInUae', () => {
         true
       )
     ).toBe(true);
+  });
+});
+
+describe('initialIsInUae with uae_presence_rule (labour card renewals)', () => {
+  const abroad = { employee_data: { uae_presence: 'outside' as const }, employer_data: {} };
+
+  it('asks like a new hire when a labour card renewal has rule "ask"', () => {
+    const prefill = { renewal_kind: 'labour_card', uae_presence_rule: 'ask' };
+    expect(initialIsInUae({ ...abroad, prefill_employer_data: prefill }, true)).toBe(false);
+    expect(
+      initialIsInUae({ employee_data: { uae_presence: 'inside' }, prefill_employer_data: prefill }, true)
+    ).toBe(true);
+    // No answer yet and the employer is not asked -> unchecked, the employee chooses.
+    expect(initialIsInUae({ employer_data: {}, prefill_employer_data: prefill }, true)).toBe(false);
+  });
+
+  it('stays locked inside for rule "required"', () => {
+    const prefill = { renewal_kind: 'labour_card', uae_presence_rule: 'required' };
+    expect(initialIsInUae({ ...abroad, prefill_employer_data: prefill }, true)).toBe(true);
+  });
+
+  it('stays locked inside when the rule is missing (old rows)', () => {
+    expect(initialIsInUae({ ...abroad, prefill_employer_data: { renewal_kind: 'labour_card' } }, true)).toBe(true);
+    expect(initialIsInUae({ ...abroad, prefill_employer_data: null }, true)).toBe(true);
+  });
+
+  it('ignores "ask" on a visa renewal', () => {
+    expect(
+      initialIsInUae({ ...abroad, prefill_employer_data: { renewal_kind: 'visa_eid', uae_presence_rule: 'ask' } }, true)
+    ).toBe(true);
+  });
+
+  it('ignores the rule on a new hire', () => {
+    const prefill = { renewal_kind: 'labour_card', uae_presence_rule: 'required' };
+    expect(initialIsInUae({ ...abroad, prefill_employer_data: prefill }, false)).toBe(false);
+  });
+});
+
+describe('renewal UAE presence rule helpers', () => {
+  it('isLabourCardRenewal', () => {
+    expect(isLabourCardRenewal({ renewal_kind: 'labour_card' })).toBe(true);
+    expect(isLabourCardRenewal({ renewal_kind: 'visa_eid' })).toBe(false);
+    expect(isLabourCardRenewal(null)).toBe(false);
+  });
+
+  it('renewalAsksUaePresence only for labour_card + ask', () => {
+    expect(renewalAsksUaePresence({ renewal_kind: 'labour_card', uae_presence_rule: 'ask' })).toBe(true);
+    expect(renewalAsksUaePresence({ renewal_kind: 'labour_card', uae_presence_rule: 'required' })).toBe(false);
+    expect(renewalAsksUaePresence({ renewal_kind: 'labour_card' })).toBe(false);
+    expect(renewalAsksUaePresence({ renewal_kind: 'visa_eid', uae_presence_rule: 'ask' })).toBe(false);
+    expect(renewalAsksUaePresence(undefined)).toBe(false);
+  });
+
+  it('uaePresenceLocked', () => {
+    expect(uaePresenceLocked(false, { renewal_kind: 'labour_card', uae_presence_rule: 'required' })).toBe(false);
+    expect(uaePresenceLocked(true, null)).toBe(true);
+    expect(uaePresenceLocked(true, { renewal_kind: 'labour_card', uae_presence_rule: 'required' })).toBe(true);
+    expect(uaePresenceLocked(true, { renewal_kind: 'labour_card', uae_presence_rule: 'ask' })).toBe(false);
+  });
+
+  it('lockedUaePresenceNote says labour card for labour_card renewals, visa otherwise', () => {
+    expect(lockedUaePresenceNote({ renewal_kind: 'labour_card' })).toBe(
+      'A labour card / Employment ID renewal requires you to be inside the UAE. Please provide your UAE address below.'
+    );
+    expect(lockedUaePresenceNote({ renewal_kind: 'visa_eid' })).toMatch(/^Visa renewal requires/);
+    expect(lockedUaePresenceNote(null)).toMatch(/^Visa renewal requires/);
+  });
+
+  it('employerApplicantInUaeForSubmit', () => {
+    // Locked renewal: forced true whatever was saved.
+    expect(employerApplicantInUaeForSubmit(true, null, false)).toBe(true);
+    expect(employerApplicantInUaeForSubmit(true, { renewal_kind: 'labour_card', uae_presence_rule: 'required' }, null)).toBe(true);
+    // Labour card + ask: left unset, even if something was saved.
+    expect(employerApplicantInUaeForSubmit(true, { renewal_kind: 'labour_card', uae_presence_rule: 'ask' }, true)).toBeUndefined();
+    // New hire: the employer's answer.
+    expect(employerApplicantInUaeForSubmit(false, null, false)).toBe(false);
+    expect(employerApplicantInUaeForSubmit(false, null, null)).toBeUndefined();
+  });
+});
+
+describe('step 4 visibility', () => {
+  it('renewal without the family override has no visa picker and drops step 4', () => {
+    const picker = showStaffVisaCategoryPicker({ isRenewal: true, employerSaysInUae: true, forceVisaMandatory: false });
+    expect(picker).toBe(false);
+    expect(isStaffStep4Empty({ isRenewal: true, showVisaCategoryPicker: picker })).toBe(true);
+  });
+
+  it('family-sponsored renewal keeps step 4 (visa + Emirates ID)', () => {
+    const picker = showStaffVisaCategoryPicker({ isRenewal: true, employerSaysInUae: false, forceVisaMandatory: true });
+    expect(picker).toBe(true);
+    expect(isStaffStep4Empty({ isRenewal: true, showVisaCategoryPicker: picker })).toBe(false);
+  });
+
+  it('new hire never drops step 4', () => {
+    expect(showStaffVisaCategoryPicker({ isRenewal: false, employerSaysInUae: true, forceVisaMandatory: false })).toBe(true);
+    expect(showStaffVisaCategoryPicker({ isRenewal: false, employerSaysInUae: false, forceVisaMandatory: false })).toBe(false);
+    expect(isStaffStep4Empty({ isRenewal: false, showVisaCategoryPicker: false })).toBe(false);
+  });
+});
+
+describe('renewal documents on file', () => {
+  it('existingDocOnFile needs a renewal and a stored path', () => {
+    expect(existingDocOnFile(true, { path: 'a/visa.pdf' })).toBe(true);
+    expect(existingDocOnFile(true, { path: '' })).toBe(false);
+    expect(existingDocOnFile(true, undefined)).toBe(false);
+    expect(existingDocOnFile(false, { path: 'a/visa.pdf' })).toBe(false);
+  });
+
+  it('a confirmed copy on file satisfies the requirement without an upload', () => {
+    expect(renewalDocSatisfied({ uploaded: false, onFile: true, confirmed: true, changed: false })).toBe(true);
+  });
+
+  it('on file but not confirmed still needs an upload', () => {
+    expect(renewalDocSatisfied({ uploaded: false, onFile: true, confirmed: false, changed: false })).toBe(false);
+  });
+
+  it('"it has changed" needs a new upload', () => {
+    expect(renewalDocSatisfied({ uploaded: false, onFile: true, confirmed: true, changed: true })).toBe(false);
+    expect(renewalDocSatisfied({ uploaded: true, onFile: true, confirmed: false, changed: true })).toBe(true);
+  });
+
+  it('nothing on file behaves as before (upload decides)', () => {
+    expect(renewalDocSatisfied({ uploaded: false, onFile: false, confirmed: true, changed: false })).toBe(false);
+    expect(renewalDocSatisfied({ uploaded: true, onFile: false, confirmed: false, changed: false })).toBe(true);
   });
 });
 

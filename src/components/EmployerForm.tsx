@@ -13,7 +13,7 @@ import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/compo
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
-import { isDmccAuthority, pluralizePeriod } from '@/lib/staff-form-logic';
+import { employerApplicantInUaeForSubmit, isDmccAuthority, pluralizePeriod } from '@/lib/staff-form-logic';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
 import { uploadDocument, updateDocumentReferences } from '@/lib/supabase';
 import type { StaffDocumentReferences } from '@/types';
@@ -258,10 +258,16 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
       return;
     }
     setSignatureError(null);
-    // On renewal the checkbox is hidden entirely — the employee MUST be inside
-    // the UAE for a visa renewal, so we force the flag to true regardless of
-    // any previously-saved value from a prior new-hire onboarding.
-    const applicantInUaeForSubmit = isRenewal ? true : (applicantInUAE ?? undefined);
+    // On renewal the question is hidden entirely. Normally the employee MUST
+    // be inside the UAE, so we force the flag to true regardless of any
+    // previously-saved value from a prior new-hire onboarding. A labour card
+    // renewal with uae_presence_rule 'ask' leaves it unset instead: the
+    // employee answers it on their part of the form.
+    const applicantInUaeForSubmit = employerApplicantInUaeForSubmit(
+      !!isRenewal,
+      submission.prefill_employer_data,
+      applicantInUAE
+    );
     await onSubmit({ ...data, applicant_in_uae: applicantInUaeForSubmit }, signature);
   };
 

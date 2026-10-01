@@ -347,8 +347,10 @@ export function relationshipOptionsForSponsor(
 /**
  * Initial "is the applicant in the UAE?" state for the employee form.
  *
- * Priority: renewals are always inside (the toggle is hidden and locked);
- * then the employee's own saved answer; then any saved UAE address fields
+ * Priority: renewals are always inside (the toggle is hidden and locked),
+ * EXCEPT a labour card renewal whose authority lets the employee renew from
+ * abroad (`uae_presence_rule: 'ask'`) — that one asks exactly like a new
+ * hire; then the employee's own saved answer; then any saved UAE address fields
  * (legacy drafts predating uae_presence); then the employer's
  * "applicant currently in the UAE" answer; else outside.
  *
@@ -368,10 +370,11 @@ export function initialIsInUae(
       uae_street_name?: string;
     } | null;
     employer_data?: { applicant_in_uae?: boolean } | null;
+    prefill_employer_data?: RenewalPrefillMarkers | null;
   },
   isRenewal: boolean
 ): boolean {
-  if (isRenewal) return true;
+  if (uaePresenceLocked(isRenewal, submission.prefill_employer_data)) return true;
   const saved = submission.employee_data?.uae_presence;
   if (saved === 'inside') return true;
   if (saved === 'outside') return false;
@@ -384,4 +387,110 @@ export function initialIsInUae(
     return true;
   }
   return submission.employer_data?.applicant_in_uae === true;
+}
+
+/** Portal-set renewal markers on `prefill_employer_data` read by the forms. */
+export type RenewalPrefillMarkers = {
+  renewal_kind?: string;
+  uae_presence_rule?: string;
+};
+
+/**
+ * Is this a labour card / Employment ID renewal (TME renews the labour card
+ * only, never the visa)? The portal marks it with renewal_kind 'labour_card'.
+ */
+export function isLabourCardRenewal(prefill: RenewalPrefillMarkers | null | undefined): boolean {
+  return prefill?.renewal_kind === 'labour_card';
+}
+
+/**
+ * Does this renewal ASK the employee whether they are in the UAE (instead of
+ * requiring it)? Only a labour card renewal with `uae_presence_rule: 'ask'`
+ * does. 'required', a missing rule (rows created before the rule existed) and
+ * every visa renewal keep the old behaviour: the employee must be inside.
+ */
+export function renewalAsksUaePresence(prefill: RenewalPrefillMarkers | null | undefined): boolean {
+  return isLabourCardRenewal(prefill) && prefill?.uae_presence_rule === 'ask';
+}
+
+/**
+ * Is the "are you in the UAE?" answer fixed to inside (question hidden)?
+ * True on every renewal except a labour card renewal that asks.
+ */
+export function uaePresenceLocked(
+  isRenewal: boolean,
+  prefill: RenewalPrefillMarkers | null | undefined
+): boolean {
+  return isRenewal && !renewalAsksUaePresence(prefill);
+}
+
+/**
+ * The note shown above the UAE address when the presence is locked.
+ */
+export function lockedUaePresenceNote(prefill: RenewalPrefillMarkers | null | undefined): string {
+  return isLabourCardRenewal(prefill)
+    ? 'A labour card / Employment ID renewal requires you to be inside the UAE. Please provide your UAE address below.'
+    : 'Visa renewal requires you to be currently inside the UAE. Please provide your UAE address below.';
+}
+
+/**
+ * What the employer form submits as `applicant_in_uae`. The employer is never
+ * asked on a renewal: a locked renewal sends true; a labour card renewal that
+ * asks leaves it unset (the employee answers it); a new hire sends the
+ * employer's own answer.
+ */
+export function employerApplicantInUaeForSubmit(
+  isRenewal: boolean,
+  prefill: RenewalPrefillMarkers | null | undefined,
+  employerAnswer: boolean | null
+): boolean | undefined {
+  if (isRenewal) return renewalAsksUaePresence(prefill) ? undefined : true;
+  return employerAnswer ?? undefined;
+}
+
+/**
+ * Whether the employee's "Current visa status" picker (step 4) shows. On a
+ * renewal the employee already holds the visa, so only the family-sponsored
+ * override brings it back; on a new hire it follows the employer's in-UAE
+ * answer.
+ */
+export function showStaffVisaCategoryPicker(args: {
+  isRenewal: boolean;
+  employerSaysInUae: boolean;
+  forceVisaMandatory: boolean;
+}): boolean {
+  return (!args.isRenewal && args.employerSaysInUae) || args.forceVisaMandatory;
+}
+
+/**
+ * Step 4 (Identity & Visa Documents) has no UI on a renewal without the visa
+ * picker, so it is dropped from the step list.
+ */
+export function isStaffStep4Empty(args: { isRenewal: boolean; showVisaCategoryPicker: boolean }): boolean {
+  return !args.showVisaCategoryPicker && args.isRenewal;
+}
+
+/**
+ * Is a document that is on file from the portal (existing_documents) usable
+ * here? It needs a stored path, and only renewals show what is on file.
+ */
+export function existingDocOnFile(
+  isRenewal: boolean,
+  doc: { path?: string } | null | undefined
+): boolean {
+  return isRenewal && !!doc?.path;
+}
+
+/**
+ * Is a required renewal document satisfied? Either a new copy was uploaded,
+ * or a copy is on file and the employee confirmed it is still current (and
+ * did not say it changed).
+ */
+export function renewalDocSatisfied(args: {
+  uploaded: boolean;
+  onFile: boolean;
+  confirmed: boolean;
+  changed: boolean;
+}): boolean {
+  return args.uploaded || (args.onFile && args.confirmed && !args.changed);
 }

@@ -383,6 +383,12 @@ export interface StaffDocumentReferences {
   // server-side submit gate can verify the skip was legitimate (both existing
   // pages on file) instead of trusting client state.
   passport_unchanged?: boolean;
+  // Renewals only: the employee confirmed the visa / Emirates ID copies the
+  // portal sent in existing_documents (visa, eid_front, eid_back) are still
+  // current, so no new copy was uploaded. visa_document / eid_front / eid_back
+  // stay ABSENT in that case; false = they said it changed and uploaded.
+  visa_unchanged?: boolean;
+  eid_unchanged?: boolean;
   eid?: {
     path: string;
     filename: string;
@@ -587,8 +593,16 @@ export interface StaffOnboardingSubmission {
   // so the portal flags everyone else and the form drops step 7 entirely.
   // `renewal_kind` is a portal-set marker too: 'labour_card' means TME renews
   // only the Employment ID, so the header reads "Staff Employment ID Renewal".
+  // `uae_presence_rule` (labour_card renewals only): 'required' keeps the
+  // employee locked inside the UAE; 'ask' shows the new-hire "in the UAE?"
+  // question. Missing = 'required' (rows created before the rule existed).
   prefill_employer_data:
-    | (Partial<EmployerFormData> & { visa_track?: string; education_skipped?: boolean; renewal_kind?: string })
+    | (Partial<EmployerFormData> & {
+        visa_track?: string;
+        education_skipped?: boolean;
+        renewal_kind?: string;
+        uae_presence_rule?: 'required' | 'ask';
+      })
     | null;
   prefill_employee_data: Partial<EmployeeFormData> | null;
   onboarding_type: OnboardingType;
