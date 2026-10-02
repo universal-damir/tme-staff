@@ -1543,9 +1543,9 @@ export default function SupplierPolicyIntakePage() {
                 onChange={setDutyAcknowledged}
                 disabled={submitting}
               >
-                I understand that TME Services does not check our suppliers or purchases and does
-                not keep these documents. Checking suppliers and keeping the documents stays with
-                our company.
+                I understand that TME Services does not check your suppliers or purchases and does
+                not keep these documents. Checking suppliers and keeping all purchase documents
+                stays with your company.
               </TickBox>
             </div>
           </div>

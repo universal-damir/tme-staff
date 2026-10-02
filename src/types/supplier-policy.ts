@@ -29,7 +29,7 @@ export interface SvpPolicyAnswers {
   /** Optional "anything we should know", max 1000. */
   note?: string;
   /**
-   * The client ticked "TME Services does not check our suppliers or purchases
+   * The client ticked "TME Services does not check your suppliers or purchases
    * and does not keep these documents" (policy section 8). tme-staff only so
    * far: the form refuses to submit without it and the submit route rejects a
    * body without it. Rides in submitted_data (JSONB); the portal sync ignores

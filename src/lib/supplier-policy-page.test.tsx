@@ -56,7 +56,7 @@ describe('Supplier policy form page', () => {
     const confirm = screen.getByRole('button', { name: /Confirm my policy details/ }) as HTMLButtonElement;
     const [priceBox, dutyBox] = screen.getAllByRole('checkbox') as HTMLInputElement[];
     expect(dutyBox.closest('label')?.textContent).toContain(
-      'TME Services does not check our suppliers or purchases'
+      'TME Services does not check your suppliers or purchases'
     );
 
     // Neither ticked, then only one: still disabled, with the hint.
