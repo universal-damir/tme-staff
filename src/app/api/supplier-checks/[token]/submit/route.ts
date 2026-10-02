@@ -53,6 +53,12 @@ export async function POST(
     return NextResponse.json({ error: 'price_changed' }, { status: 409 });
   }
 
+  // No charge (TME Group, price 0): the form shows no tick boxes at all.
+  if (rowPrice === 0) {
+    picked.priceAgreed = true;
+    picked.dutyAcknowledged = true;
+  }
+
   if (picked.priceAgreed !== true) {
     return NextResponse.json({ error: 'price_not_agreed' }, { status: 400 });
   }

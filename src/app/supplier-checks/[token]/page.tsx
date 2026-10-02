@@ -991,6 +991,13 @@ const NEXT_STEPS: { icon: React.ElementType; text: string }[] = [
   { icon: Mail, text: 'You get the invoice in a separate email.' },
 ];
 
+/** A TME Group company: the portal sends price 0 (no price step, no invoice). */
+const NEXT_STEPS_NO_CHARGE = NEXT_STEPS.slice(0, 2);
+
+function isNoCharge(priceAed: number | null | undefined): boolean {
+  return priceAed === 0;
+}
+
 function initialPeople(data: IntakeData): People {
   const from = data.submitted ?? null;
   const suggested = data.prefill?.suggested;
@@ -1023,8 +1030,13 @@ export default function SupplierPolicyIntakePage() {
   // A key is present while the client corrects that company detail.
   const [changes, setChanges] = useState<SvpCompanyChanges>({});
   const [periodsOther, setPeriodsOther] = useState(false);
-  const [priceAgreed, setPriceAgreed] = useState(false);
-  const [dutyAcknowledged, setDutyAcknowledged] = useState(false);
+  const [priceTicked, setPriceTicked] = useState(false);
+  const [dutyTicked, setDutyAcknowledged] = useState(false);
+  // No charge (TME Group): no tick boxes at all. Nothing to agree to, and the
+  // duty box makes no sense for our own companies (Damir 02.10.2026).
+  const noCharge = isNoCharge(data?.priceAed);
+  const priceAgreed = noCharge || priceTicked;
+  const dutyAcknowledged = noCharge || dutyTicked;
   const bothTicked = priceAgreed && dutyAcknowledged;
   const [showErrors, setShowErrors] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -1246,8 +1258,9 @@ export default function SupplierPolicyIntakePage() {
           </h2>
           <p className="text-gray-600 max-w-md">
             Our Tax team now prepares your Supplier Verification Policy. You will receive the
-            policy by email for electronic signature, and the invoice in a separate email. No
-            further action is needed from you right now.
+            policy by email for electronic signature
+            {isNoCharge(data?.priceAed) ? '' : ', and the invoice in a separate email'}. No further
+            action is needed from you right now.
           </p>
         </div>
       </Shell>
@@ -1326,7 +1339,7 @@ export default function SupplierPolicyIntakePage() {
           </p>
           <p className="text-base text-gray-800 leading-relaxed mt-3">
             We have prepared this policy for your company. Please confirm who does the checks and
-            where the records are kept, then agree to the price.
+            where the records are kept{noCharge ? '.' : ', then agree to the price.'}
           </p>
         </div>
         <aside
@@ -1500,62 +1513,64 @@ export default function SupplierPolicyIntakePage() {
         </Step>
       </div>
 
-      <Step number={5} title="Agree to the price and confirm">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div>
-            {price != null && (
-              <div className="rounded-xl p-4 mb-3" style={{ backgroundColor: NAVY_TINT }}>
-                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                  Supplier Verification Policy on your company letterhead
-                </p>
-                <p className="mt-1">
-                  <span className="text-2xl font-bold" style={{ color: NAVY }}>
-                    AED {formatAed(price)}
-                  </span>{' '}
-                  <span className="text-sm text-gray-600">plus 5% VAT</span>
-                </p>
+      <Step number={5} title={noCharge ? 'Confirm' : 'Agree to the price and confirm'}>
+        <div className={`grid grid-cols-1 gap-6 ${noCharge ? '' : 'lg:grid-cols-2'}`}>
+          {!noCharge && (
+            <div>
+              {price != null && (
+                <div className="rounded-xl p-4 mb-3" style={{ backgroundColor: NAVY_TINT }}>
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                    Supplier Verification Policy on your company letterhead
+                  </p>
+                  <p className="mt-1">
+                    <span className="text-2xl font-bold" style={{ color: NAVY }}>
+                      AED {formatAed(price)}
+                    </span>{' '}
+                    <span className="text-sm text-gray-600">plus 5% VAT</span>
+                  </p>
+                </div>
+              )}
+              <div className="space-y-3">
+                <TickBox
+                  id={PRICE_ID}
+                  checked={priceAgreed}
+                  onChange={setPriceTicked}
+                  disabled={submitting}
+                  error={fieldErrors[PRICE_ID]}
+                >
+                  {price != null ? (
+                    <>
+                      I agree to the price of{' '}
+                      <strong style={{ color: NAVY }}>AED {formatAed(price)}</strong> (plus VAT) for
+                      the Supplier Verification Policy. You get the invoice in a separate email.
+                    </>
+                  ) : (
+                    <>
+                      I agree to the price in the TME email for the Supplier Verification Policy. You
+                      get the invoice in a separate email.
+                    </>
+                  )}
+                </TickBox>
+                <TickBox
+                  id={DUTY_ID}
+                  checked={dutyAcknowledged}
+                  onChange={setDutyAcknowledged}
+                  disabled={submitting}
+                >
+                  I understand that TME Services does not check your suppliers or purchases and does
+                  not keep these documents. Checking suppliers and keeping all purchase documents
+                  stays with your company.
+                </TickBox>
               </div>
-            )}
-            <div className="space-y-3">
-              <TickBox
-                id={PRICE_ID}
-                checked={priceAgreed}
-                onChange={setPriceAgreed}
-                disabled={submitting}
-                error={fieldErrors[PRICE_ID]}
-              >
-                {price != null ? (
-                  <>
-                    I agree to the price of{' '}
-                    <strong style={{ color: NAVY }}>AED {formatAed(price)}</strong> (plus VAT) for
-                    the Supplier Verification Policy. You get the invoice in a separate email.
-                  </>
-                ) : (
-                  <>
-                    I agree to the price in the TME email for the Supplier Verification Policy. You
-                    get the invoice in a separate email.
-                  </>
-                )}
-              </TickBox>
-              <TickBox
-                id={DUTY_ID}
-                checked={dutyAcknowledged}
-                onChange={setDutyAcknowledged}
-                disabled={submitting}
-              >
-                I understand that TME Services does not check your suppliers or purchases and does
-                not keep these documents. Checking suppliers and keeping all purchase documents
-                stays with your company.
-              </TickBox>
             </div>
-          </div>
+          )}
 
           <div className="rounded-xl border-2 p-4" style={{ borderColor: TME_COLORS.border }}>
             <h3 className="text-sm font-semibold mb-3" style={{ color: NAVY }}>
               What happens next
             </h3>
             <ol className="space-y-3">
-              {NEXT_STEPS.map(({ icon: Icon, text }, i) => (
+              {(noCharge ? NEXT_STEPS_NO_CHARGE : NEXT_STEPS).map(({ icon: Icon, text }, i) => (
                 <li key={text} className="flex gap-3 text-sm text-gray-700">
                   <span
                     className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
