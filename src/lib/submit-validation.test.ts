@@ -261,6 +261,35 @@ describe('missingRequiredDocuments', () => {
     expect(missing).toEqual([]);
   });
 
+  it('renewal: the four sponsor docs on file may be kept (02.10)', () => {
+    const sponsorOnFile = {
+      sponsor_passport: { path: 'e/sp.pdf' },
+      sponsor_visa: { path: 'e/sv.pdf' },
+      sponsor_eid_front: { path: 'e/sf.pdf' },
+      sponsor_eid_back: { path: 'e/sb.pdf' },
+    };
+    const row = {
+      onboarding_type: 'renewal',
+      sponsorship_type: 'family',
+      documents: { photo: validPhoto, passportPages, sponsor_docs_unchanged: true },
+      existing_documents: sponsorOnFile,
+    };
+    expect(missingRequiredDocuments(row, 'data:image/png;base64,iVBOR')).toEqual([]);
+    // Not confirmed -> uploads still needed.
+    expect(
+      missingRequiredDocuments({ ...row, documents: { photo: validPhoto, passportPages } }, 'data:image/png;base64,iVBOR')
+    ).toHaveLength(4);
+    // Only three on file -> cannot be kept.
+    const { sponsor_eid_back: _b, ...three } = sponsorOnFile;
+    expect(
+      missingRequiredDocuments({ ...row, existing_documents: three }, 'data:image/png;base64,iVBOR')
+    ).toHaveLength(4);
+    // A new hire never keeps docs on file.
+    expect(
+      missingRequiredDocuments({ ...row, onboarding_type: null }, 'data:image/png;base64,iVBOR')
+    ).toHaveLength(4);
+  });
+
   it('does not require sponsor docs for company sponsorship', () => {
     expect(
       missingRequiredDocuments({

@@ -266,8 +266,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
     // On renewal the question is hidden entirely. Normally the employee MUST
     // be inside the UAE, so we force the flag to true regardless of any
     // previously-saved value from a prior new-hire onboarding. A labour card
-    // renewal with uae_presence_rule 'ask' leaves it unset instead: the
-    // employee answers it on their part of the form.
+    // renewal with uae_presence_rule 'not_required' leaves it unset instead:
+    // nobody is asked.
     // 'cancel_copy': the person already holds a UAE visa through TME, so the
     // question is not asked and the answer is Yes.
     const applicantInUaeForSubmit = isCancelCopy

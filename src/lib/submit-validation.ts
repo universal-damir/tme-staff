@@ -26,6 +26,8 @@ import {
   passportAdditionalPageRequiredForDocs,
   isPakistaniNationality,
   photoKeepAllowed,
+  sponsorDocsOnFile,
+  usesDocumentsOnFile,
 } from '@/lib/staff-form-logic';
 import { isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
 
@@ -135,8 +137,10 @@ export const RECALLED_MESSAGE =
  *    fresh data page was uploaded this session (mirrors the client gate,
  *    which reveals the additional-page step off the uploaded data page).
  *    The renewal "passport unchanged" skip therefore skips this too.
- *  - Family sponsorship: all four sponsor documents + the sponsor NOC
- *    signature (either already on the row or arriving with this request).
+ *  - Family sponsorship: all four sponsor documents (or, on a renewal /
+ *    cancel_copy, the four on file kept via sponsor_docs_unchanged) + the
+ *    sponsor NOC signature (either already on the row or arriving with this
+ *    request).
  */
 export function missingRequiredDocuments(row: {
   onboarding_type?: string | null;
@@ -197,10 +201,17 @@ export function missingRequiredDocuments(row: {
     ? sponsorshipTypeFromSponsor(effectiveSponsor)
     : ((row.sponsorship_type as 'company' | 'family' | 'self_gcc' | undefined) ?? 'company');
   if (sponsorDocsRequired(sponsorshipType)) {
-    if (!docs.sponsor_passport?.path) missing.push('Sponsor passport');
-    if (!docs.sponsor_visa?.path) missing.push('Sponsor visa');
-    if (!docs.sponsor_eid_front?.path) missing.push('Sponsor Emirates ID (front)');
-    if (!docs.sponsor_eid_back?.path) missing.push('Sponsor Emirates ID (back)');
+    // Renewal / cancel_copy: the four sponsor documents on file may be kept
+    // (explicit attestation + all four stored in existing_documents).
+    const sponsorKept =
+      docs.sponsor_docs_unchanged === true &&
+      sponsorDocsOnFile(usesDocumentsOnFile(row.onboarding_type), row.existing_documents);
+    if (!sponsorKept) {
+      if (!docs.sponsor_passport?.path) missing.push('Sponsor passport');
+      if (!docs.sponsor_visa?.path) missing.push('Sponsor visa');
+      if (!docs.sponsor_eid_front?.path) missing.push('Sponsor Emirates ID (front)');
+      if (!docs.sponsor_eid_back?.path) missing.push('Sponsor Emirates ID (back)');
+    }
     const hasNoc =
       (typeof incomingSponsorNoc === 'string' && incomingSponsorNoc.length > 0) ||
       (typeof row.sponsor_noc_signature_data === 'string' && row.sponsor_noc_signature_data.length > 0);

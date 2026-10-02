@@ -50,11 +50,13 @@ import {
   relationshipOptionsForSponsor,
   initialIsInUae,
   uaePresenceLocked as getUaePresenceLocked,
+  renewalPresenceNotRequired,
   lockedUaePresenceNote,
   showStaffVisaCategoryPicker,
   isStaffStep4Empty,
   existingDocOnFile,
   renewalDocSatisfied,
+  sponsorDocsOnFile,
   usesDocumentsOnFile,
   photoKeepAllowed,
   CANCEL_COPY_INTRO,
@@ -433,10 +435,11 @@ export function EmployeeForm({
   const isCancelCopy = submission.onboarding_type === 'cancel_copy';
   const docsOnFileFlow = usesDocumentsOnFile(submission.onboarding_type);
   // Renewals lock the employee inside the UAE (question hidden), except a
-  // labour card renewal whose authority lets them renew from abroad
-  // (prefill_employer_data.uae_presence_rule === 'ask'): that one asks the
-  // same "currently in the UAE" question as a new hire.
+  // labour card renewal whose authority does not need them in the UAE
+  // (prefill_employer_data.uae_presence_rule 'not_required'): that one asks
+  // nothing either, records no answer and only collects the UAE address.
   const uaePresenceLocked = getUaePresenceLocked(isRenewal, submission.prefill_employer_data);
+  const uaePresenceNotRequired = isRenewal && renewalPresenceNotRequired(submission.prefill_employer_data);
   // Partner/Investor track (DET company shareholders): the portal skips the
   // employer stage entirely and marks the row via prefill_employer_data.
   // Copy-only adjustments here — the applicant is a partner, not an employee.
@@ -552,6 +555,10 @@ export function EmployeeForm({
     if (uaePresenceLocked) {
       setValue('uae_presence', 'inside');
     }
+    // Not required: no answer is recorded (the form default is 'inside').
+    if (uaePresenceNotRequired) {
+      setValue('uae_presence', undefined as unknown as EmployeeFormData['uae_presence']);
+    }
   }, []);
 
   // Previous UAE visa / residence permit state (optional, sits alongside EID
@@ -656,6 +663,16 @@ export function EmployeeForm({
       submission.documents?.eid_unchanged === false
   );
   const eidUnchangedRef = React.useRef<boolean | undefined>(submission.documents?.eid_unchanged);
+  // The sponsor's passport, visa and Emirates ID on file (02.10): kept as a
+  // set of four, like the visa / EID above. "Changed" shows the four uploads.
+  const existingSponsorDocsOnFile = sponsorDocsOnFile(docsOnFileFlow, existingDocs);
+  const [sponsorDocsOnFileConfirmed, setSponsorDocsOnFileConfirmed] = useState(
+    submission.documents?.sponsor_docs_unchanged === true
+  );
+  const [sponsorDocsOnFileChanged, setSponsorDocsOnFileChanged] = useState(
+    !!submission.documents?.sponsor_passport || submission.documents?.sponsor_docs_unchanged === false
+  );
+  const sponsorDocsUnchangedRef = React.useRef<boolean | undefined>(submission.documents?.sponsor_docs_unchanged);
 
   // Employer's "Yes" answer gates the visa-status section below. The actual
   // category + arrival date are picked by the employee (derived below, after
@@ -1070,10 +1087,9 @@ export function EmployeeForm({
   const [hasPreviousNationality, setHasPreviousNationality] = useState(
     !!submission.employee_data?.previous_nationality
   );
-  // On a locked renewal (see uaePresenceLocked), the employee MUST be inside
-  // the UAE — the toggle is hidden below and UAE address fields are always
-  // shown. A labour card renewal with rule 'ask' behaves like a new hire. Init to true regardless
-  // of any prior saved value so the form state matches the locked UI.
+  // On every renewal the toggle is hidden and the UAE address fields are
+  // always shown (locked inside, or presence not required). Init to true
+  // regardless of any prior saved value so the form state matches the UI.
   // For new-hires: prefer the employee's saved answer; fall back to the
   // employer's "applicant in the UAE" answer so the box arrives pre-checked
   // (the employee can still uncheck it).
@@ -1087,7 +1103,7 @@ export function EmployeeForm({
   // renewals are forced to 'inside' by the earlier mount effect.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(() => {
-    if (!uaePresenceLocked) {
+    if (!uaePresenceLocked && !uaePresenceNotRequired) {
       setValue('uae_presence', isInUAE ? 'inside' : 'outside');
     }
   }, []);
@@ -1227,7 +1243,7 @@ export function EmployeeForm({
   );
   const isSponsorDocsComplete = !!(
     sponsorPassportDoc && sponsorVisaDoc && sponsorEidFrontDoc && sponsorEidBackDoc
-  );
+  ) || (existingSponsorDocsOnFile && sponsorDocsOnFileConfirmed && !sponsorDocsOnFileChanged);
   const isSponsorStepComplete =
     !isFamilySponsored ||
     (isSponsorMetadataComplete && isSponsorDocsComplete && !!sponsorSignature);
@@ -1461,7 +1477,7 @@ export function EmployeeForm({
       const docsComplete = !!(
         sponsorPassportDocRef.current && sponsorVisaDocRef.current &&
         sponsorEidFrontDocRef.current && sponsorEidBackDocRef.current
-      );
+      ) || (existingSponsorDocsOnFile && sponsorDocsUnchangedRef.current === true);
       const nocSigned = !!sponsorSignatureRef.current;
       if (!metaComplete || !docsComplete || !nocSigned) {
         setSponsorError(
@@ -1502,6 +1518,7 @@ export function EmployeeForm({
       photo_unchanged: photoUnchangedRef.current,
       visa_unchanged: visaUnchangedRef.current,
       eid_unchanged: eidUnchangedRef.current,
+      sponsor_docs_unchanged: sponsorDocsUnchangedRef.current,
       degree_attested: degreeDocRef.current,
       transcript_of_records: transcriptDocRef.current,
       education_additional: educationAdditionalDocRef.current,
@@ -4431,10 +4448,13 @@ export function EmployeeForm({
           >
             <div className="space-y-4">
               {/* On a locked renewal the employee MUST be in the UAE — no
-                  toggle. On new-hire onboarding (and labour card renewals
-                  with rule 'ask') the checkbox stays so applicants abroad
-                  can skip the UAE address fields. */}
-              {!uaePresenceLocked ? (
+                  toggle. A labour card renewal where it is not required asks
+                  nothing: only the UAE home address. On new-hire onboarding
+                  the checkbox stays so applicants abroad can skip the UAE
+                  address fields. */}
+              {uaePresenceNotRequired ? (
+                <p className="text-xs text-gray-600">Please provide your UAE home address.</p>
+              ) : !uaePresenceLocked ? (
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -5024,10 +5044,54 @@ export function EmployeeForm({
               <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
                 <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
                 <p className="text-sm" style={{ color: TME_COLORS.primary }}>
-                  Your residence visa is sponsored by a family member — please upload your sponsor&apos;s documents below.
+                  {existingSponsorDocsOnFile && !sponsorDocsOnFileChanged
+                    ? 'Your residence visa is sponsored by a family member. These are your sponsor\u2019s documents we have on file. Please check that they are still current.'
+                    : <>Your residence visa is sponsored by a family member — please upload your sponsor&apos;s documents below.</>}
                 </p>
               </div>
 
+              {existingSponsorDocsOnFile && !sponsorDocsOnFileChanged && existingDocs && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <ExistingDocPreview label="Sponsor's passport (on file)" doc={existingDocs.sponsor_passport!} />
+                    <ExistingDocPreview label="Sponsor's visa (on file)" doc={existingDocs.sponsor_visa!} />
+                    <ExistingDocPreview label="Sponsor's Emirates ID front (on file)" doc={existingDocs.sponsor_eid_front!} />
+                    <ExistingDocPreview label="Sponsor's Emirates ID back (on file)" doc={existingDocs.sponsor_eid_back!} />
+                  </div>
+                  <div className="border-t border-gray-200 pt-4">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sponsorDocsOnFileConfirmed}
+                        onChange={(e) => {
+                          setSponsorDocsOnFileConfirmed(e.target.checked);
+                          sponsorDocsUnchangedRef.current = e.target.checked ? true : undefined;
+                          void saveDocRefs(buildDocRefs());
+                        }}
+                        className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#243F7B] focus:ring-[#243F7B]"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-gray-800">These are still my sponsor&apos;s current documents</span>
+                        <p className="text-xs text-gray-500 mt-0.5">My sponsor&apos;s passport, visa and Emirates ID have not been renewed, replaced, or lost since these copies.</p>
+                      </div>
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSponsorDocsOnFileChanged(true);
+                      setSponsorDocsOnFileConfirmed(false);
+                      sponsorDocsUnchangedRef.current = false;
+                      void saveDocRefs(buildDocRefs());
+                    }}
+                    className="text-sm text-red-600 hover:text-red-700 font-medium underline"
+                  >
+                    My sponsor&apos;s documents have changed. I need to upload new copies
+                  </button>
+                </div>
+              )}
+
+              {!(existingSponsorDocsOnFile && !sponsorDocsOnFileChanged) && (<>
               {/* Sponsor passport */}
               <div className="space-y-2">
                 <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Sponsor&apos;s Passport <span className="text-red-500">*</span></p>
@@ -5289,6 +5353,7 @@ export function EmployeeForm({
                   )}
                 </div>
               </div>
+              </>)}
             </div>
           </FormSection>
 

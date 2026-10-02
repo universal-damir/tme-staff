@@ -22,7 +22,8 @@ import {
   passportAdditionalPageRequired,
   passportAdditionalPageRequiredForDocs,
   isLabourCardRenewal,
-  renewalAsksUaePresence,
+  renewalPresenceNotRequired,
+  sponsorDocsOnFile,
   uaePresenceLocked,
   lockedUaePresenceNote,
   employerApplicantInUaeForSubmit,
@@ -520,14 +521,12 @@ describe('initialIsInUae', () => {
 describe('initialIsInUae with uae_presence_rule (labour card renewals)', () => {
   const abroad = { employee_data: { uae_presence: 'outside' as const }, employer_data: {} };
 
-  it('asks like a new hire when a labour card renewal has rule "ask"', () => {
-    const prefill = { renewal_kind: 'labour_card', uae_presence_rule: 'ask' };
-    expect(initialIsInUae({ ...abroad, prefill_employer_data: prefill }, true)).toBe(false);
-    expect(
-      initialIsInUae({ employee_data: { uae_presence: 'inside' }, prefill_employer_data: prefill }, true)
-    ).toBe(true);
-    // No answer yet and the employer is not asked -> unchecked, the employee chooses.
-    expect(initialIsInUae({ employer_data: {}, prefill_employer_data: prefill }, true)).toBe(false);
+  it('shows the UAE address when presence is not required (and for older "ask" rows)', () => {
+    for (const rule of ['not_required', 'ask']) {
+      const prefill = { renewal_kind: 'labour_card', uae_presence_rule: rule };
+      expect(initialIsInUae({ ...abroad, prefill_employer_data: prefill }, true), rule).toBe(true);
+      expect(initialIsInUae({ employer_data: {}, prefill_employer_data: prefill }, true), rule).toBe(true);
+    }
   });
 
   it('stays locked inside for rule "required"', () => {
@@ -540,9 +539,9 @@ describe('initialIsInUae with uae_presence_rule (labour card renewals)', () => {
     expect(initialIsInUae({ ...abroad, prefill_employer_data: null }, true)).toBe(true);
   });
 
-  it('ignores "ask" on a visa renewal', () => {
+  it('ignores "not_required" on a visa renewal', () => {
     expect(
-      initialIsInUae({ ...abroad, prefill_employer_data: { renewal_kind: 'visa_eid', uae_presence_rule: 'ask' } }, true)
+      initialIsInUae({ ...abroad, prefill_employer_data: { renewal_kind: 'visa_eid', uae_presence_rule: 'not_required' } }, true)
     ).toBe(true);
   });
 
@@ -559,19 +558,20 @@ describe('renewal UAE presence rule helpers', () => {
     expect(isLabourCardRenewal(null)).toBe(false);
   });
 
-  it('renewalAsksUaePresence only for labour_card + ask', () => {
-    expect(renewalAsksUaePresence({ renewal_kind: 'labour_card', uae_presence_rule: 'ask' })).toBe(true);
-    expect(renewalAsksUaePresence({ renewal_kind: 'labour_card', uae_presence_rule: 'required' })).toBe(false);
-    expect(renewalAsksUaePresence({ renewal_kind: 'labour_card' })).toBe(false);
-    expect(renewalAsksUaePresence({ renewal_kind: 'visa_eid', uae_presence_rule: 'ask' })).toBe(false);
-    expect(renewalAsksUaePresence(undefined)).toBe(false);
+  it('renewalPresenceNotRequired only for labour_card + not_required (or older ask)', () => {
+    expect(renewalPresenceNotRequired({ renewal_kind: 'labour_card', uae_presence_rule: 'not_required' })).toBe(true);
+    expect(renewalPresenceNotRequired({ renewal_kind: 'labour_card', uae_presence_rule: 'ask' })).toBe(true);
+    expect(renewalPresenceNotRequired({ renewal_kind: 'labour_card', uae_presence_rule: 'required' })).toBe(false);
+    expect(renewalPresenceNotRequired({ renewal_kind: 'labour_card' })).toBe(false);
+    expect(renewalPresenceNotRequired({ renewal_kind: 'visa_eid', uae_presence_rule: 'not_required' })).toBe(false);
+    expect(renewalPresenceNotRequired(undefined)).toBe(false);
   });
 
   it('uaePresenceLocked', () => {
     expect(uaePresenceLocked(false, { renewal_kind: 'labour_card', uae_presence_rule: 'required' })).toBe(false);
     expect(uaePresenceLocked(true, null)).toBe(true);
     expect(uaePresenceLocked(true, { renewal_kind: 'labour_card', uae_presence_rule: 'required' })).toBe(true);
-    expect(uaePresenceLocked(true, { renewal_kind: 'labour_card', uae_presence_rule: 'ask' })).toBe(false);
+    expect(uaePresenceLocked(true, { renewal_kind: 'labour_card', uae_presence_rule: 'not_required' })).toBe(false);
   });
 
   it('lockedUaePresenceNote says labour card for labour_card renewals, visa otherwise', () => {
@@ -586,8 +586,8 @@ describe('renewal UAE presence rule helpers', () => {
     // Locked renewal: forced true whatever was saved.
     expect(employerApplicantInUaeForSubmit(true, null, false)).toBe(true);
     expect(employerApplicantInUaeForSubmit(true, { renewal_kind: 'labour_card', uae_presence_rule: 'required' }, null)).toBe(true);
-    // Labour card + ask: left unset, even if something was saved.
-    expect(employerApplicantInUaeForSubmit(true, { renewal_kind: 'labour_card', uae_presence_rule: 'ask' }, true)).toBeUndefined();
+    // Labour card, not required: left unset, even if something was saved.
+    expect(employerApplicantInUaeForSubmit(true, { renewal_kind: 'labour_card', uae_presence_rule: 'not_required' }, true)).toBeUndefined();
     // New hire: the employer's answer.
     expect(employerApplicantInUaeForSubmit(false, null, false)).toBe(false);
     expect(employerApplicantInUaeForSubmit(false, null, null)).toBeUndefined();
@@ -749,5 +749,20 @@ describe('cancel_copy onboarding type', () => {
     // EmployeeForm passes isRenewal === (type === 'renewal'), false here.
     expect(uaePresenceLocked(false, null)).toBe(false);
     expect(employerApplicantInUaeForSubmit(false, null, false)).toBe(false);
+  });
+});
+
+describe('sponsorDocsOnFile', () => {
+  const four = {
+    sponsor_passport: { path: 'a' },
+    sponsor_visa: { path: 'b' },
+    sponsor_eid_front: { path: 'c' },
+    sponsor_eid_back: { path: 'd' },
+  };
+  it('needs all four with a path, in a documents-on-file flow', () => {
+    expect(sponsorDocsOnFile(true, four)).toBe(true);
+    expect(sponsorDocsOnFile(false, four)).toBe(false);
+    expect(sponsorDocsOnFile(true, { ...four, sponsor_visa: {} })).toBe(false);
+    expect(sponsorDocsOnFile(true, null)).toBe(false);
   });
 });

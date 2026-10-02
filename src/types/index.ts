@@ -389,6 +389,10 @@ export interface StaffDocumentReferences {
   // stay ABSENT in that case; false = they said it changed and uploaded.
   visa_unchanged?: boolean;
   eid_unchanged?: boolean;
+  // Renewals only (02.10): the sponsor's passport, visa and Emirates ID the
+  // portal sent in existing_documents (sponsor_*) are still current, so none
+  // was uploaded. sponsor_* stay ABSENT then; false = changed and uploaded.
+  sponsor_docs_unchanged?: boolean;
   // 'cancel_copy' only: the employee kept the photo TME already has on file
   // (existing_documents.photo, which needs a stored path). `photo` stays
   // ABSENT in that case; false = they chose to upload a new one.
@@ -605,14 +609,15 @@ export interface StaffOnboardingSubmission {
   // `renewal_kind` is a portal-set marker too: 'labour_card' means TME renews
   // only the Employment ID, so the header reads "Staff Employment ID Renewal".
   // `uae_presence_rule` (labour_card renewals only): 'required' keeps the
-  // employee locked inside the UAE; 'ask' shows the new-hire "in the UAE?"
-  // question. Missing = 'required' (rows created before the rule existed).
+  // employee locked inside the UAE; 'not_required' (older rows: 'ask') asks
+  // nothing and records no answer. Missing = 'required' (rows created before
+  // the rule existed).
   prefill_employer_data:
     | (Partial<EmployerFormData> & {
         visa_track?: string;
         education_skipped?: boolean;
         renewal_kind?: string;
-        uae_presence_rule?: 'required' | 'ask';
+        uae_presence_rule?: 'required' | 'not_required' | 'ask';
       })
     | null;
   prefill_employee_data: Partial<EmployeeFormData> | null;

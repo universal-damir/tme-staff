@@ -347,10 +347,11 @@ export function relationshipOptionsForSponsor(
 /**
  * Initial "is the applicant in the UAE?" state for the employee form.
  *
- * Priority: renewals are always inside (the toggle is hidden and locked),
- * EXCEPT a labour card renewal whose authority lets the employee renew from
- * abroad (`uae_presence_rule: 'ask'`) — that one asks exactly like a new
- * hire; then the employee's own saved answer; then any saved UAE address fields
+ * Priority: renewals always show the UAE address (the toggle is hidden):
+ * locked inside, or a labour card renewal whose authority does not need the
+ * employee in the UAE (`uae_presence_rule: 'not_required'`) — that one asks
+ * nothing and only collects the UAE home address; then the employee's own
+ * saved answer; then any saved UAE address fields
  * (legacy drafts predating uae_presence); then the employer's
  * "applicant currently in the UAE" answer; else outside.
  *
@@ -374,7 +375,7 @@ export function initialIsInUae(
   },
   isRenewal: boolean
 ): boolean {
-  if (uaePresenceLocked(isRenewal, submission.prefill_employer_data)) return true;
+  if (isRenewal) return true;
   const saved = submission.employee_data?.uae_presence;
   if (saved === 'inside') return true;
   if (saved === 'outside') return false;
@@ -404,24 +405,26 @@ export function isLabourCardRenewal(prefill: RenewalPrefillMarkers | null | unde
 }
 
 /**
- * Does this renewal ASK the employee whether they are in the UAE (instead of
- * requiring it)? Only a labour card renewal with `uae_presence_rule: 'ask'`
- * does. 'required', a missing rule (rows created before the rule existed) and
- * every visa renewal keep the old behaviour: the employee must be inside.
+ * Labour card renewal at an authority that does NOT need the employee inside
+ * the UAE (`uae_presence_rule: 'not_required'`; rows sent before 02.10 carry
+ * the older 'ask'). The employee is not asked whether they are in the UAE and
+ * no answer is recorded. 'required', a missing rule (rows created before the
+ * rule existed) and every visa renewal keep the employee locked inside.
  */
-export function renewalAsksUaePresence(prefill: RenewalPrefillMarkers | null | undefined): boolean {
-  return isLabourCardRenewal(prefill) && prefill?.uae_presence_rule === 'ask';
+export function renewalPresenceNotRequired(prefill: RenewalPrefillMarkers | null | undefined): boolean {
+  return isLabourCardRenewal(prefill) &&
+    (prefill?.uae_presence_rule === 'not_required' || prefill?.uae_presence_rule === 'ask');
 }
 
 /**
  * Is the "are you in the UAE?" answer fixed to inside (question hidden)?
- * True on every renewal except a labour card renewal that asks.
+ * True on every renewal except a labour card renewal where it is not required.
  */
 export function uaePresenceLocked(
   isRenewal: boolean,
   prefill: RenewalPrefillMarkers | null | undefined
 ): boolean {
-  return isRenewal && !renewalAsksUaePresence(prefill);
+  return isRenewal && !renewalPresenceNotRequired(prefill);
 }
 
 /**
@@ -435,16 +438,16 @@ export function lockedUaePresenceNote(prefill: RenewalPrefillMarkers | null | un
 
 /**
  * What the employer form submits as `applicant_in_uae`. The employer is never
- * asked on a renewal: a locked renewal sends true; a labour card renewal that
- * asks leaves it unset (the employee answers it); a new hire sends the
- * employer's own answer.
+ * asked on a renewal: a locked renewal sends true; a labour card renewal where
+ * presence is not required leaves it unset; a new hire sends the employer's
+ * own answer.
  */
 export function employerApplicantInUaeForSubmit(
   isRenewal: boolean,
   prefill: RenewalPrefillMarkers | null | undefined,
   employerAnswer: boolean | null
 ): boolean | undefined {
-  if (isRenewal) return renewalAsksUaePresence(prefill) ? undefined : true;
+  if (isRenewal) return renewalPresenceNotRequired(prefill) ? undefined : true;
   return employerAnswer ?? undefined;
 }
 
@@ -516,6 +519,26 @@ export function existingDocOnFile(
   doc: { path?: string } | null | undefined
 ): boolean {
   return docsOnFileFlow && !!doc?.path;
+}
+
+/** The sponsor's four identity documents (family sponsorship). */
+export const SPONSOR_DOC_KEYS = [
+  'sponsor_passport',
+  'sponsor_visa',
+  'sponsor_eid_front',
+  'sponsor_eid_back',
+] as const;
+
+/**
+ * Are the sponsor's documents on file from the portal (existing_documents,
+ * 02.10) usable? Only as a full set of four, and only in flows that use
+ * documents on file (renewal, cancel_copy).
+ */
+export function sponsorDocsOnFile(
+  docsOnFileFlow: boolean,
+  existing: Record<string, { path?: string } | undefined> | null | undefined
+): boolean {
+  return docsOnFileFlow && SPONSOR_DOC_KEYS.every(k => !!existing?.[k]?.path);
 }
 
 /**
