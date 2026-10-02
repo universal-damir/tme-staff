@@ -58,6 +58,16 @@ interface PhoneInputProps {
   error?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Optional: id of the number input, and its accessible name / description. */
+  inputId?: string;
+  ariaLabelledBy?: string;
+  ariaDescribedBy?: string;
+  /** Red border without printing a message (the caller shows its own). */
+  invalid?: boolean;
+  /** The English "Valid number" / "Enter at least" lines under the input. Default: shown. */
+  showValidation?: boolean;
+  searchPlaceholder?: string;
+  noOptionsText?: string;
 }
 
 /**
@@ -82,6 +92,13 @@ export function PhoneInput({
   error,
   placeholder,
   disabled = false,
+  inputId,
+  ariaLabelledBy,
+  ariaDescribedBy,
+  invalid = false,
+  showValidation: validationLines = true,
+  searchPlaceholder,
+  noOptionsText,
 }: PhoneInputProps) {
   const [selectedCountry, setSelectedCountry] = useState<Country>(
     lockedCountry || defaultCountry
@@ -244,7 +261,7 @@ export function PhoneInput({
     // Update the full number with new country code
     if (inputValue) {
       const callingCode = getCountryCallingCode(country);
-      onChange(`+${callingCode}${inputValue}`);
+      onChange(`+${callingCode}${inputValue.replace(/\D/g, '')}`);
     }
 
     inputRef.current?.focus();
@@ -269,7 +286,7 @@ export function PhoneInput({
     }
   }
 
-  const showValidation = currentLength > 0;
+  const showValidation = validationLines && currentLength > 0;
 
   // Get current country info
   const currentCountry = allCountries.find((c) => c.code === selectedCountry);
@@ -288,11 +305,11 @@ export function PhoneInput({
 
       <div
         className={`flex items-center rounded-lg border-2 transition-all duration-200 overflow-hidden ${
-          error ? 'border-red-500' : focused ? '' : 'border-gray-200'
+          error || invalid ? 'border-red-500' : focused ? '' : 'border-gray-200'
         }`}
         style={{
           height: INPUT_HEIGHT,
-          borderColor: error ? undefined : focused ? TME_COLORS.primary : undefined,
+          borderColor: error || invalid ? undefined : focused ? TME_COLORS.primary : undefined,
         }}
       >
         {/* Country Selector */}
@@ -300,6 +317,9 @@ export function PhoneInput({
           type="button"
           onClick={() => !isLocked && !disabled && setIsOpen(!isOpen)}
           disabled={isLocked || disabled}
+          aria-haspopup="listbox"
+          aria-expanded={isOpen}
+          aria-label={currentCountry ? `${currentCountry.name} +${currentCountry.callingCode}` : undefined}
           className={`flex items-center gap-1 px-3 h-full border-r border-gray-200 bg-gray-50 ${
             isLocked || disabled ? 'cursor-default' : 'cursor-pointer hover:bg-gray-100'
           }`}
@@ -315,7 +335,13 @@ export function PhoneInput({
         {/* Phone Number Input */}
         <input
           ref={inputRef}
+          id={inputId}
           type="tel"
+          inputMode="tel"
+          autoComplete="off"
+          aria-labelledby={ariaLabelledBy}
+          aria-describedby={ariaDescribedBy}
+          aria-invalid={error || invalid ? true : undefined}
           value={inputValue}
           onChange={handleInputChange}
           onFocus={() => setFocused(true)}
@@ -365,7 +391,7 @@ export function PhoneInput({
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search country..."
+                                    placeholder={searchPlaceholder || 'Search country...'}
                   className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500"
                   style={{ fontFamily: 'Inter, sans-serif' }}
                 />
@@ -394,7 +420,7 @@ export function PhoneInput({
                 ))}
                 {filteredCountries.length === 0 && (
                   <div className="px-3 py-4 text-sm text-gray-500 text-center">
-                    No countries found
+                    {noOptionsText || 'No countries found'}
                   </div>
                 )}
               </AnimatePresence>

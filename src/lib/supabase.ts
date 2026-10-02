@@ -57,7 +57,7 @@ export async function autoSaveEmployeeData(
  */
 const UPLOAD_BYTE_BUDGET = 4 * 1024 * 1024;
 
-async function shrinkImageToBudget(file: File): Promise<File> {
+export async function shrinkImageToBudget(file: File): Promise<File> {
   if (!file.type.startsWith('image/') || file.size <= UPLOAD_BYTE_BUDGET) return file;
   try {
     const dataUrl = await new Promise<string>((resolve, reject) => {

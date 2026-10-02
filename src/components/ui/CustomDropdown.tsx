@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TME_COLORS, INPUT_HEIGHT } from '@/lib/constants';
@@ -8,6 +8,8 @@ import { TME_COLORS, INPUT_HEIGHT } from '@/lib/constants';
 interface DropdownOption {
   value: string;
   label: string;
+  /** Optional second line under the label in the open list (e.g. a German translation). */
+  sublabel?: string;
 }
 
 interface CustomDropdownProps {
@@ -26,6 +28,14 @@ interface CustomDropdownProps {
   onCustomEntry?: (text: string) => void;
   /** Guidance text shown below the custom entry option */
   customEntryHint?: string;
+  /** Let a long selected label wrap in the closed field instead of being cut off. */
+  wrapLabel?: boolean;
+  /** Accessible name of the field when the label is rendered outside (id of the label element). */
+  ariaLabelledBy?: string;
+  /** Placeholder of the search box (searchable only). Default 'Type to search...'. */
+  searchPlaceholder?: string;
+  /** Text when the search matches nothing. Default 'No options found'. */
+  noOptionsText?: string;
 }
 
 export default function CustomDropdown({
@@ -42,6 +52,10 @@ export default function CustomDropdown({
   loading = false,
   onCustomEntry,
   customEntryHint,
+  wrapLabel = false,
+  ariaLabelledBy,
+  searchPlaceholder = 'Type to search...',
+  noOptionsText = 'No options found',
 }: CustomDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -59,6 +73,9 @@ export default function CustomDropdown({
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
+  const optionId = (index: number) => `${listboxId}-option-${index}`;
   const [isMounted, setIsMounted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -81,7 +98,9 @@ export default function CustomDropdown({
 
   // Filter options based on search term
   const filteredOptions = searchable && searchTerm
-    ? options.filter((opt) => opt.label.toLowerCase().includes(searchTerm.toLowerCase()))
+    ? options.filter((opt) =>
+        `${opt.label} ${opt.sublabel ?? ''}`.toLowerCase().includes(searchTerm.toLowerCase())
+      )
     : options;
 
   // Update dropdown position (using viewport coordinates for fixed positioning)
@@ -158,8 +177,29 @@ export default function CustomDropdown({
     setFocusedIndex(-1);
   };
 
+  /** Open the list with the chosen option (or the first) active. */
+  const openList = () => {
+    const selected = options.findIndex((opt) => opt.value === value);
+    setFocusedIndex(searchable ? -1 : Math.max(0, selected));
+    setIsOpen(true);
+  };
+
+  /** After a keyboard pick or Escape, focus goes back to the closed field. */
+  const refocusTrigger = () => {
+    setTimeout(() => triggerRef.current?.focus(), 0);
+  };
+
+  // Keep the active option in view while moving with the arrow keys.
+  useEffect(() => {
+    if (!isOpen || focusedIndex < 0) return;
+    const el = document.getElementById(optionId(focusedIndex));
+    el?.scrollIntoView?.({ block: 'nearest' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- optionId is stable per mount
+  }, [isOpen, focusedIndex]);
+
+  // Keyboard on the open list: arrows move, Enter (Space when not searching) picks, Escape / Tab close.
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!searchable || !isOpen) return;
+    if (!isOpen) return;
 
     switch (e.key) {
       case 'ArrowDown':
@@ -170,13 +210,36 @@ export default function CustomDropdown({
         e.preventDefault();
         setFocusedIndex((prev) => Math.max(prev - 1, 0));
         break;
+      case 'Home':
+        if (searchable) break;
+        e.preventDefault();
+        setFocusedIndex(0);
+        break;
+      case 'End':
+        if (searchable) break;
+        e.preventDefault();
+        setFocusedIndex(filteredOptions.length - 1);
+        break;
+      case ' ':
+        if (searchable) break;
+      // falls through: Space picks like Enter on the closed-field list
       case 'Enter':
         e.preventDefault();
         if (focusedIndex >= 0 && focusedIndex < filteredOptions.length) {
           handleSelect(filteredOptions[focusedIndex].value);
+          refocusTrigger();
+        } else if (!searchable) {
+          setIsOpen(false);
         }
         break;
       case 'Escape':
+        e.preventDefault();
+        setIsOpen(false);
+        setSearchTerm('');
+        setFocusedIndex(-1);
+        refocusTrigger();
+        break;
+      case 'Tab':
         setIsOpen(false);
         setSearchTerm('');
         setFocusedIndex(-1);
@@ -202,6 +265,7 @@ export default function CustomDropdown({
 
         <div className="relative">
           <select
+            aria-labelledby={ariaLabelledBy}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
@@ -220,7 +284,7 @@ export default function CustomDropdown({
             </option>
             {options.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {option.sublabel ? `${option.label} / ${option.sublabel}` : option.label}
               </option>
             ))}
           </select>
@@ -239,7 +303,7 @@ export default function CustomDropdown({
           </div>
         </div>
 
-        {error && (
+        {error && error.trim() && (
           <p className="text-red-500 text-xs mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
             {error}
           </p>
@@ -270,6 +334,7 @@ export default function CustomDropdown({
               value={searchTerm}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 setSearchTerm(e.target.value);
+                setFocusedIndex(e.target.value ? 0 : -1);
                 if (!isOpen) setIsOpen(true);
               }}
               onFocus={(e: React.FocusEvent<HTMLInputElement>) => {
@@ -282,7 +347,13 @@ export default function CustomDropdown({
                 }
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Type to search..."
+              placeholder={searchPlaceholder}
+              role="combobox"
+              aria-expanded={isOpen}
+              aria-controls={listboxId}
+              aria-autocomplete="list"
+              aria-labelledby={ariaLabelledBy}
+              aria-activedescendant={focusedIndex >= 0 && focusedIndex < filteredOptions.length ? optionId(focusedIndex) : undefined}
               className="w-full px-3 py-2 text-sm rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200"
               style={{
                 height: `${INPUT_HEIGHT}px`,
@@ -315,14 +386,39 @@ export default function CustomDropdown({
           </div>
         ) : (
           <motion.div
-            onClick={() => !disabled && setIsOpen(!isOpen)}
+            ref={triggerRef}
+            role="button"
+            tabIndex={disabled ? -1 : 0}
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+            aria-controls={isOpen ? listboxId : undefined}
+            aria-labelledby={ariaLabelledBy}
+            aria-activedescendant={
+              isOpen && focusedIndex >= 0 && focusedIndex < filteredOptions.length ? optionId(focusedIndex) : undefined
+            }
+            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+              if (disabled) return;
+              if (isOpen) {
+                handleKeyDown(e);
+                return;
+              }
+              if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                openList();
+              }
+            }}
+            onClick={() => {
+              if (disabled) return;
+              if (isOpen) setIsOpen(false);
+              else openList();
+            }}
             whileHover={!disabled ? { scale: 1.01 } : undefined}
             className={`w-full px-3 py-2 rounded-lg border-2 border-gray-200 transition-all duration-200 flex items-center justify-between ${
               disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'cursor-pointer'
             }`}
             style={{
               minHeight: `${INPUT_HEIGHT}px`,
-              height: formatBrackets ? 'auto' : `${INPUT_HEIGHT}px`,
+              height: formatBrackets || wrapLabel ? 'auto' : `${INPUT_HEIGHT}px`,
               borderColor: error ? '#ef4444' : isOpen ? TME_COLORS.primary : '#e5e7eb',
               fontFamily: 'Inter, sans-serif',
             }}
@@ -343,7 +439,7 @@ export default function CustomDropdown({
                   <span className="text-xs text-gray-500 truncate block">({displayLabel.split('(')[1]}</span>
                 </>
               ) : (
-                <span className="truncate block">{displayLabel}</span>
+                <span className={wrapLabel ? 'block py-0.5' : 'truncate block'}>{displayLabel}</span>
               )}
             </div>
 
@@ -377,6 +473,9 @@ export default function CustomDropdown({
         <AnimatePresence>
           <motion.div
             ref={dropdownRef}
+            id={listboxId}
+            role="listbox"
+            aria-labelledby={ariaLabelledBy}
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -396,12 +495,15 @@ export default function CustomDropdown({
               filteredOptions.map((option, index) => (
                 <motion.div
                   key={option.value}
+                  id={optionId(index)}
+                  role="option"
+                  aria-selected={value === option.value}
                   onClick={() => handleSelect(option.value)}
-                  onMouseEnter={() => searchable && setFocusedIndex(index)}
+                  onMouseEnter={() => setFocusedIndex(index)}
                   whileHover={{ backgroundColor: `${TME_COLORS.primary}10` }}
                   className={`px-3 py-2 cursor-pointer transition-colors text-sm ${
                     value === option.value ? 'font-semibold' : ''
-                  } ${searchable && index === focusedIndex ? 'bg-blue-50' : ''}`}
+                  } ${index === focusedIndex ? 'bg-blue-50 ring-2 ring-inset ring-[#243F7B]/40' : ''}`}
                   style={{
                     backgroundColor: value === option.value ? `${TME_COLORS.primary}20` : undefined,
                     color: value === option.value ? TME_COLORS.primary : '#1f2937',
@@ -409,6 +511,11 @@ export default function CustomDropdown({
                   }}
                 >
                   {option.label}
+                  {option.sublabel && (
+                    <span className="block text-xs font-normal text-gray-500">
+                      {option.sublabel}
+                    </span>
+                  )}
                 </motion.div>
               ))
             ) : loading ? (
@@ -437,7 +544,7 @@ export default function CustomDropdown({
               </div>
             ) : (
               <div className="px-3 py-4 text-center text-gray-400 text-sm">
-                No options found
+                {noOptionsText}
               </div>
             )}
           </motion.div>
@@ -445,7 +552,7 @@ export default function CustomDropdown({
         document.body
       )}
 
-      {error && (
+      {error && error.trim() && (
         <p className="text-red-500 text-xs mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
           {error}
         </p>

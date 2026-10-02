@@ -25,3 +25,7 @@ export const GAP_INTAKE_BUCKET = 'gap-intake-documents';
 // uploads (passport / photo / EID / proof of address per person). Service-role
 // only; the air-gapped portal pulls via the sync-company-setup cron.
 export const COMPANY_SETUP_BUCKET = 'company-setup-documents';
+
+// Private bucket for the eKYC individual uploads (passport, photo, EID, proof
+// of address, GCC ID). Service-role only; the portal pulls via its eKYC sync.
+export const EKYC_BUCKET = 'ekyc-documents';

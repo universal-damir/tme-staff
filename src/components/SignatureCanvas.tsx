@@ -5,10 +5,28 @@ import SignatureCanvas from 'react-signature-canvas';
 import { TME_COLORS } from '@/lib/constants';
 import Image from 'next/image';
 
+/**
+ * Screen texts of the pad. Every one is optional; a missing one keeps the
+ * English default. The eKYC form passes bilingual texts (German under the
+ * English) and hides the keyboard hint.
+ */
+export interface SignaturePadTexts {
+  draw?: React.ReactNode;
+  saved?: React.ReactNode;
+  edit?: React.ReactNode;
+  undo?: React.ReactNode;
+  clear?: React.ReactNode;
+  /** Show the "Tap Undo" / "⌘Z to undo" hint. Default: true. */
+  undoHint?: boolean;
+}
+
 interface SignaturePadProps {
   onSignatureChange: (data: string | null) => void;
   disabled?: boolean;
-  label?: string;
+  label?: React.ReactNode;
+  texts?: SignaturePadTexts;
+  /** id on the label element, so a caller can point aria-labelledby at it. */
+  labelId?: string;
   // Restore a previously-captured signature on mount. When a non-empty data
   // URL is supplied the pad starts in the LOCKED state showing that image, so
   // navigating away and back (which remounts this component) does not visually
@@ -16,7 +34,20 @@ interface SignaturePadProps {
   initialValue?: string | null;
 }
 
-export function SignaturePad({ onSignatureChange, disabled = false, label = 'Signature', initialValue }: SignaturePadProps) {
+export function SignaturePad({
+  onSignatureChange,
+  disabled = false,
+  label = 'Signature',
+  initialValue,
+  texts,
+  labelId,
+}: SignaturePadProps) {
+  const tDraw = texts?.draw ?? 'Draw your signature';
+  const tSaved = texts?.saved ?? 'Signature saved';
+  const tEdit = texts?.edit ?? 'Edit';
+  const tUndo = texts?.undo ?? 'Undo';
+  const tClear = texts?.clear ?? 'Clear';
+  const showUndoHint = texts?.undoHint ?? true;
   // A non-empty data URL means the parent already has a saved signature; start
   // locked so the first render shows it (with the Edit button) instead of an
   // empty canvas. We do NOT call onSignatureChange on mount — the parent value
@@ -155,6 +186,7 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
   return (
     <div className="w-full">
       <label
+        id={labelId}
         className="block text-sm font-medium mb-2"
         style={{ color: TME_COLORS.primary }}
       >
@@ -219,9 +251,14 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
       <div className="flex justify-between items-center mt-2">
         <span className="text-sm text-gray-500">
           {isLocked ? (
-            'Signature saved'
+            tSaved
           ) : (
-            <>Draw your signature {canUndo && <span className="text-gray-400">{isTouchDevice ? '• Tap Undo' : '• ⌘Z to undo'}</span>}</>
+            <>
+              {tDraw}{' '}
+              {showUndoHint && canUndo && (
+                <span className="text-gray-400">{isTouchDevice ? '• Tap Undo' : '• ⌘Z to undo'}</span>
+              )}
+            </>
           )}
         </span>
         <div className="flex gap-2">
@@ -237,7 +274,7 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
                 cursor: disabled ? 'not-allowed' : 'pointer',
               }}
             >
-              Edit
+              {tEdit}
             </button>
           ) : (
             <button
@@ -251,7 +288,7 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
                 cursor: disabled || !canUndo ? 'not-allowed' : 'pointer',
               }}
             >
-              Undo
+              {tUndo}
             </button>
           )}
           <button
@@ -265,7 +302,7 @@ export function SignaturePad({ onSignatureChange, disabled = false, label = 'Sig
               cursor: disabled || (isEmpty && !isLocked) ? 'not-allowed' : 'pointer',
             }}
           >
-            Clear
+            {tClear}
           </button>
         </div>
       </div>

@@ -13,6 +13,20 @@ interface CustomDatePickerProps {
   required?: boolean;
   placeholder?: string;
   disabled?: boolean;
+  /**
+   * Optional screen texts (the eKYC bilingual form). Missing ones keep the
+   * English defaults, so every other caller is unchanged.
+   */
+  texts?: {
+    /** 12 month names, January first. */
+    monthNames?: readonly string[];
+    today?: React.ReactNode;
+    clear?: React.ReactNode;
+  };
+  /** id of the element that labels the field (aria-labelledby on the toggle). */
+  ariaLabelledBy?: string;
+  /** id of the error text (aria-describedby on the toggle). */
+  ariaDescribedBy?: string;
 }
 
 /**
@@ -32,6 +46,9 @@ export default function CustomDatePicker({
   required = false,
   placeholder = 'dd.mm.yyyy',
   disabled = false,
+  texts,
+  ariaLabelledBy,
+  ariaDescribedBy,
 }: CustomDatePickerProps) {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,10 +68,11 @@ export default function CustomDatePicker({
   const [currentMonth, setCurrentMonth] = useState(initialDate.month);
   const [currentYear, setCurrentYear] = useState(initialDate.year);
 
-  const monthNames = [
+  const defaultMonthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
+  const monthNames = texts?.monthNames?.length === 12 ? texts.monthNames : defaultMonthNames;
 
   const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -141,6 +159,9 @@ export default function CustomDatePicker({
       <div className="relative">
         <motion.button
           type="button"
+          aria-labelledby={ariaLabelledBy}
+          aria-describedby={ariaDescribedBy}
+          aria-expanded={ariaLabelledBy ? isCalendarOpen : undefined}
           onClick={() => {
             if (disabled) return;
             if (!isCalendarOpen) {
@@ -242,7 +263,7 @@ export default function CustomDatePicker({
                   onBlur={(e) => (e.currentTarget.style.borderColor = `${TME_COLORS.primary}80`)}
                 >
                   {monthNames.map((month, index) => (
-                    <option key={month} value={index}>
+                    <option key={index} value={index}>
                       {month}
                     </option>
                   ))}
@@ -350,7 +371,7 @@ export default function CustomDatePicker({
                 }}
                 className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors duration-150"
               >
-                Clear
+                {texts?.clear ?? 'Clear'}
               </motion.button>
 
               <motion.button
@@ -366,7 +387,7 @@ export default function CustomDatePicker({
                 className="px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150"
                 style={{ backgroundColor: TME_COLORS.secondary, color: TME_COLORS.primary }}
               >
-                Today
+                {texts?.today ?? 'Today'}
               </motion.button>
             </div>
           </motion.div>
