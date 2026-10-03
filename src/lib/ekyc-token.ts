@@ -72,7 +72,7 @@ export interface EkycAccessResult {
  * - cancelled (resend / withdrawn) = 410
  * - submitted / synced: fine for reads (read-only view), 409 for writes.
  *   Checked before the expiry, so a submitted form still opens read-only
- *   after the 14 days.
+ *   after the 60 days (EKYC_LINK_EXPIRES_DAYS).
  * - expired status or past expires_at = 410
  */
 export function decideEkycAccess(

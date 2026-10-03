@@ -37,8 +37,8 @@ export const EKYC_LANGUAGE_LABELS: Record<EkycLanguage, string> = {
   de_sie: 'German (Sie)',
 };
 
-/** The link in the email works for 14 days (email text, R3). Resend = new link. */
-export const EKYC_LINK_EXPIRES_DAYS = 14;
+/** The link in the email works for 60 days (Damir 03.10.2026, was 14: clients take long). Resend = new link. */
+export const EKYC_LINK_EXPIRES_DAYS = 60;
 
 /** Corporate form: at most 3 licenses (R9). */
 export const EKYC_MAX_LICENSES = 3;
