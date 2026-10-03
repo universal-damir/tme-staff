@@ -215,7 +215,7 @@ export const EKYC_ENTITY_TYPE_OPTIONS: readonly EkycOption[] = [
   },
   { value: 'public_listed', en: 'Public Listed Company', de: 'Börsennotierte Gesellschaft', deReviewed: false },
   { value: 'government', en: 'Govt. Organization / Quasi-GO', de: 'Regierungsorganisation / regierungsnahe Organisation (Quasi-GO)', deReviewed: false },
-  { value: 'cooperative_association', en: 'Co-Operative Society / Association', de: 'Genossenschaft / Verein', deReviewed: false },
+  { value: 'cooperative_association', en: 'Co-operative Society / Association', de: 'Genossenschaft / Verein', deReviewed: false },
   { value: 'non_profit_foundation', en: 'Non-Profit Organization / Foundation', de: 'Gemeinnützige Organisation / Stiftung', deReviewed: false },
 ];
 
@@ -311,21 +311,21 @@ export function ekycAuthorityUnitOptions(authority: string | null | undefined): 
 export const EKYC_CORPORATE_PAYMENT_OPTIONS: readonly EkycOption[] = [
   {
     value: 'virtual_assets',
-    en: 'Non-Traditional payment receiving methods such as cryptocurrencies or virtual assets used.',
+    en: 'Non-traditional payment receiving methods such as cryptocurrencies or virtual assets used.',
     de: 'Nicht traditionelle Zahlungsmethoden wie Kryptowährungen oder virtuelle Vermögenswerte werden genutzt.',
     deReviewed: false,
   },
   {
     value: 'bank_cheque_few_cash',
-    en: 'Payment received by Bank Transfer / cheque and few cash',
+    en: 'Payment received by bank transfer / cheque and some cash',
     de: 'Zahlung per Banküberweisung / Scheck und in geringem Umfang in bar',
     deReviewed: false,
   },
   { value: 'cash', en: 'Payment received by cash', de: 'Zahlung in bar', deReviewed: false },
-  { value: 'cheque', en: 'Payment received by Cheque', de: 'Zahlung per Scheck', deReviewed: false },
+  { value: 'cheque', en: 'Payment received by cheque', de: 'Zahlung per Scheck', deReviewed: false },
   {
     value: 'mostly_cash',
-    en: 'Payment Received largely by Cash and few cheques / bank transfer',
+    en: 'Payment received largely in cash and some cheques / bank transfers',
     de: 'Zahlung überwiegend in bar und in geringem Umfang per Scheck / Banküberweisung',
     deReviewed: false,
   },
@@ -376,16 +376,16 @@ export type EkycIncomeSource =
   | 'others';
 
 export const EKYC_INCOME_SOURCE_OPTIONS: readonly EkycOption[] = [
-  { value: 'employment', en: 'Employment Income (Salary, bonuses, etc)', de: 'Einkünfte aus nichtselbständiger Arbeit (Gehalt, Boni usw.)', deReviewed: false },
-  { value: 'business', en: 'Business Ownership (Income from self-owned, family-owned business, etc)', de: 'Unternehmensbeteiligung (Einkünfte aus eigenem Unternehmen, Familienunternehmen usw.)', deReviewed: false },
-  { value: 'investments', en: 'Investments (Returns from stocks, bonds, mutual funds, real estate, trading activity, etc)', de: 'Kapitalanlagen (Erträge aus Aktien, Anleihen, Investmentfonds, Immobilien, Handelsaktivitäten usw.)', deReviewed: false },
-  { value: 'inheritance', en: 'Inheritance (Assets or money inherited from family, relatives, etc)', de: 'Erbschaft (von Familie, Verwandten usw. geerbtes Vermögen oder Geld)', deReviewed: false },
-  { value: 'sale_of_assets', en: 'Sale of Assets (Proceeds from sale of property, business, art, vehicles, etc)', de: 'Verkauf von Vermögenswerten (Erlöse aus dem Verkauf von Immobilien, Unternehmen, Kunst, Fahrzeugen usw.)', deReviewed: false },
-  { value: 'dividends_trust', en: 'Dividends / Trust Income (Earnings from family trusts, funds, private equity, etc)', de: 'Dividenden / Trust-Einkünfte (Erträge aus Familientrusts, Fonds, Private Equity usw.)', deReviewed: false },
-  { value: 'gifts', en: 'Gifts (Large sums received as a gift from a family member, others, etc)', de: 'Schenkungen (größere Beträge, die Sie von Familienmitgliedern oder anderen als Geschenk erhalten haben)', deReviewed: false },
-  { value: 'pension', en: 'Pension / Retirement Income (Income from pension funds, retirement schemes, etc)', de: 'Rente / Pension (Einkünfte aus Pensionsfonds, Altersvorsorgeplänen usw.)', deReviewed: false },
-  { value: 'crypto', en: 'Crypto Assets (Proceeds from cryptocurrency investment, selling, mining, etc)', de: 'Krypto-Vermögenswerte (Erlöse aus Investitionen in, Verkauf oder Mining von Kryptowährungen usw.)', deReviewed: false },
-  { value: 'legal_settlements', en: 'Legal Settlements or Compensation (Settlement payments from lawsuits, insurance claims, etc)', de: 'Vergleiche oder Entschädigungen (Zahlungen aus Gerichtsverfahren, Versicherungsfällen usw.)', deReviewed: false },
+  { value: 'employment', en: 'Employment Income (Salary, bonuses, etc.)', de: 'Einkünfte aus nichtselbständiger Arbeit (Gehalt, Boni usw.)', deReviewed: false },
+  { value: 'business', en: 'Business Ownership (Income from self-owned, family-owned business, etc.)', de: 'Unternehmensbeteiligung (Einkünfte aus eigenem Unternehmen, Familienunternehmen usw.)', deReviewed: false },
+  { value: 'investments', en: 'Investments (Returns from stocks, bonds, mutual funds, real estate, trading activity, etc.)', de: 'Kapitalanlagen (Erträge aus Aktien, Anleihen, Investmentfonds, Immobilien, Handelsaktivitäten usw.)', deReviewed: false },
+  { value: 'inheritance', en: 'Inheritance (Assets or money inherited from family, relatives, etc.)', de: 'Erbschaft (von Familie, Verwandten usw. geerbtes Vermögen oder Geld)', deReviewed: false },
+  { value: 'sale_of_assets', en: 'Sale of Assets (Proceeds from sale of property, business, art, vehicles, etc.)', de: 'Verkauf von Vermögenswerten (Erlöse aus dem Verkauf von Immobilien, Unternehmen, Kunst, Fahrzeugen usw.)', deReviewed: false },
+  { value: 'dividends_trust', en: 'Dividends / Trust Income (Earnings from family trusts, funds, private equity, etc.)', de: 'Dividenden / Trust-Einkünfte (Erträge aus Familientrusts, Fonds, Private Equity usw.)', deReviewed: false },
+  { value: 'gifts', en: 'Gifts (Large sums received as a gift from a family member, others, etc.)', de: 'Schenkungen (größere Beträge, die Sie von Familienmitgliedern oder anderen als Geschenk erhalten haben)', deReviewed: false },
+  { value: 'pension', en: 'Pension / Retirement Income (Income from pension funds, retirement schemes, etc.)', de: 'Rente / Pension (Einkünfte aus Pensionsfonds, Altersvorsorgeplänen usw.)', deReviewed: false },
+  { value: 'crypto', en: 'Crypto Assets (Proceeds from cryptocurrency investment, selling, mining, etc.)', de: 'Krypto-Vermögenswerte (Erlöse aus Investitionen in, Verkauf oder Mining von Kryptowährungen usw.)', deReviewed: false },
+  { value: 'legal_settlements', en: 'Legal Settlements or Compensation (Settlement payments from lawsuits, insurance claims, etc.)', de: 'Vergleiche oder Entschädigungen (Zahlungen aus Gerichtsverfahren, Versicherungsfällen usw.)', deReviewed: false },
   { value: 'others', en: 'Others', de: 'Sonstige', deReviewed: false },
 ];
 
@@ -934,7 +934,7 @@ export const EKYC_DOCUMENT_SLOTS: readonly EkycDocumentSlotDef[] = [
   {
     slot: 'photo',
     number: '3',
-    label: { en: 'Latest passport size photo', de: 'Aktuelles Passfoto', deReviewed: false },
+    label: { en: 'Latest passport-size photo', de: 'Aktuelles Passfoto', deReviewed: false },
     hint: plainHint(
       'A recent photo of your face on a plain white background, like for a visa.',
       'Ein aktuelles Foto Ihres Gesichts vor einfarbig weißem Hintergrund, wie für ein Visum.'
@@ -944,14 +944,14 @@ export const EKYC_DOCUMENT_SLOTS: readonly EkycDocumentSlotDef[] = [
   {
     slot: 'eid_front',
     number: '4',
-    label: { en: 'EID Front, in case of a resident of UAE', de: 'Emirates ID Vorderseite, bei Wohnsitz in den VAE', deReviewed: false },
+    label: { en: 'EID Front, in case of a resident of the UAE', de: 'Emirates ID Vorderseite, bei Wohnsitz in den VAE', deReviewed: false },
     hint: plainHint('The side of your Emirates ID with your photo.', 'Die Seite Ihrer Emirates ID mit Ihrem Foto.'),
     requiredWhen: (d) => d.uaeResident === 'yes',
   },
   {
     slot: 'eid_back',
     number: '4',
-    label: { en: 'EID Back, in case of a resident of UAE', de: 'Emirates ID Rückseite, bei Wohnsitz in den VAE', deReviewed: false },
+    label: { en: 'EID Back, in case of a resident of the UAE', de: 'Emirates ID Rückseite, bei Wohnsitz in den VAE', deReviewed: false },
     hint: plainHint('The other side of the same card.', 'Die andere Seite derselben Karte.'),
     requiredWhen: (d) => d.uaeResident === 'yes',
   },
@@ -959,7 +959,7 @@ export const EKYC_DOCUMENT_SLOTS: readonly EkycDocumentSlotDef[] = [
     slot: 'proof_of_address',
     number: '5',
     label: {
-      en: 'Proof of residential address: utility bill, government issued documents, lease agreement, or an account statement issued by a government regulated financial institution',
+      en: 'Proof of residential address: utility bill, government-issued documents, lease agreement, or an account statement issued by a government regulated financial institution',
       de: 'Nachweis der Wohnadresse: Nebenkostenabrechnung, behördlich ausgestellte Dokumente, Mietvertrag oder Kontoauszug eines staatlich regulierten Finanzinstituts',
       deReviewed: false,
     },
@@ -972,7 +972,7 @@ export const EKYC_DOCUMENT_SLOTS: readonly EkycDocumentSlotDef[] = [
   {
     slot: 'gcc_id',
     number: '6',
-    label: { en: 'GCC Id card if a GCC national', de: 'GCC-Ausweis bei GCC-Staatsangehörigkeit', deReviewed: false },
+    label: { en: 'GCC ID card, if a GCC national', de: 'GCC-Ausweis bei GCC-Staatsangehörigkeit', deReviewed: false },
     hint: plainHint('The national ID card of your GCC country.', 'Der Personalausweis Ihres GCC-Staates.'),
     requiredWhen: (d) => d.gccNational === 'yes',
   },
@@ -1394,7 +1394,7 @@ export const EKYC_PRIVACY_PARAGRAPHS: readonly EkycText[] = [
     de: 'TME Services verpflichtet sich, Ihre personenbezogenen Daten gemäß dem Datenschutzgesetz der VAE (PDPL) zu schützen. Vor der Erhebung oder Verarbeitung personenbezogener Daten holen wir Ihre ausdrückliche Einwilligung ein. Ist die Verarbeitung jedoch zur Erfüllung regulatorischer Vorgaben, gesetzlicher Pflichten, im öffentlichen Interesse oder zur Erbringung vertraglicher Leistungen erforderlich, können wir die Daten, soweit gesetzlich zulässig, auch ohne vorherige Einwilligung verarbeiten.',
   },
   {
-    en: 'As a corporate service provider, we may process personal data for business registrations, legal structuring, and related services. All data processing is conducted securely, transparently, and in alignment with industry best practices in the industry.',
+    en: 'As a corporate service provider, we may process personal data for business registrations, legal structuring, and related services. All data processing is conducted securely, transparently, and in alignment with industry best practices.',
     de: 'Als Corporate Service Provider können wir personenbezogene Daten für Unternehmensregistrierungen, rechtliche Strukturierungen und damit verbundene Dienstleistungen verarbeiten. Die gesamte Datenverarbeitung erfolgt sicher, transparent und im Einklang mit den bewährten Verfahren der Branche.',
   },
   {
@@ -1402,7 +1402,7 @@ export const EKYC_PRIVACY_PARAGRAPHS: readonly EkycText[] = [
     de: 'Mit der Inanspruchnahme unserer Dienstleistungen nehmen Sie die in dieser Vereinbarung beschriebene Datenverarbeitung zur Kenntnis und willigen in diese ein.',
   },
   {
-    en: 'For more details on how we handle personal data, please contact us at dpo@TME-Services.com',
+    en: 'For more details on how we handle personal data, please contact us at dpo@TME-Services.com.',
     de: 'Weitere Informationen zum Umgang mit personenbezogenen Daten erhalten Sie unter dpo@TME-Services.com.',
   },
 ];
@@ -1410,7 +1410,7 @@ export const EKYC_PRIVACY_PARAGRAPHS: readonly EkycText[] = [
 export const EKYC_DECLARATION_TITLE: EkycText = { en: 'Declaration', de: 'Erklärung' };
 
 export const EKYC_DECLARATION_TEXT: EkycText = {
-  en: 'I/We hereby declare that the details provided above are true and correct to the best of my/ our knowledge and belief. I/ We intend to inform you of any changes therein immediately. If any of the above information is found to be false or untrue or misleading, or misrepresenting, I/We am aware that I/We may be held liable for it, which may result in an automatic denial of a relationship with TME.',
+  en: 'I/We hereby declare that the details provided above are true and correct to the best of my/our knowledge and belief. I/We intend to inform you of any changes therein immediately. If any of the above information is found to be false or untrue or misleading, or misrepresenting, I/We am/are aware that I/we may be held liable for it, which may result in an automatic denial of a relationship with TME.',
   de: 'Ich/Wir erkläre(n) hiermit, dass die oben gemachten Angaben nach bestem Wissen und Gewissen wahr und richtig sind. Ich/Wir verpflichte(n) mich/uns, Sie unverzüglich über etwaige Änderungen zu informieren. Mir/Uns ist bewusst, dass ich/wir haftbar gemacht werden kann/können, falls sich eine der oben genannten Angaben als falsch, unwahr, irreführend oder unzutreffend herausstellt, was zur automatischen Ablehnung einer Geschäftsbeziehung mit TME führen kann.',
 };
 
@@ -1442,7 +1442,7 @@ const CLOSING_ITEMS = [
 // ---------------------------------------------------------------------------
 
 const PEP_DEFINITION: EkycText = {
-  en: "(PEP's are Natural persons who are or have been entrusted with prominent public functions in the State or any other foreign country such as heads of states or governments, senior politicians, senior government officials, judicial or military officials, senior executive managers of state-owned corporations, and senior officials of political parties and persons who are, or have previously been, entrusted with the management of an international organization or any prominent function within such an organization.)",
+  en: "(PEPs are natural persons who are or have been entrusted with prominent public functions in the State or any other foreign country such as heads of state or governments, senior politicians, senior government officials, judicial or military officials, senior executive managers of state-owned corporations, and senior officials of political parties and persons who are, or have previously been, entrusted with the management of an international organization or any prominent function within such an organization.)",
   de: '(PEPs sind natürliche Personen, die im Staat oder in einem anderen Land mit herausragenden öffentlichen Ämtern betraut sind oder waren, z. B. Staats- oder Regierungschefs, hochrangige Politiker, hochrangige Regierungsbeamte, Justiz- oder Militärbeamte, leitende Führungskräfte staatseigener Unternehmen und hochrangige Funktionäre politischer Parteien, sowie Personen, die mit der Leitung einer internationalen Organisation oder einer herausragenden Funktion innerhalb einer solchen Organisation betraut sind oder waren.)',
 };
 
@@ -1535,7 +1535,7 @@ export const CORPORATE_SHAREHOLDER_FIELDS: readonly EkycFieldDef<CorporateKycDat
     latinName: true,
     latinNameWhen: (_d, row) => row.type === 'individual',
   },
-  { id: 'email', label: { en: 'Email', de: 'Email Addresse' }, kind: 'email', required: true, prefillable: true },
+  { id: 'email', label: { en: 'Email', de: 'E-Mail-Adresse' }, kind: 'email', required: true, prefillable: true },
   {
     id: 'nationalityOrCountry',
     label: { en: 'Nationality / Country of Incorporation', de: 'Staatsangehörigkeit / Gründungsland' },
@@ -1582,7 +1582,7 @@ export const CORPORATE_UBO_FIELDS: readonly EkycFieldDef<CorporateKycData, EkycU
   },
   {
     id: 'percent',
-    label: { en: 'Share-holding %', de: 'Beteiligung in %' },
+    label: { en: 'Shareholding %', de: 'Beteiligung in %' },
     hint: plainHint(
       'The share this person owns, directly or through other companies.',
       'Der Anteil dieser Person, direkt oder über andere Firmen.'
@@ -1647,7 +1647,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   {
     id: 'entityType',
     number: '5',
-    label: { en: 'Type of Entity/ Legal Status', de: 'Art der Gesellschaft / Rechtsform' },
+    label: { en: 'Type of Entity / Legal Status', de: 'Art der Gesellschaft / Rechtsform' },
     hint: plainHint(
       'Free zone companies such as FZ-LLC, FZCO and FZE belong to the first option (LLC).',
       'Freizonen-Gesellschaften wie FZ-LLC, FZCO und FZE gehören zur ersten Option (LLC).'
@@ -1723,7 +1723,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   {
     id: 'primaryContactName',
     number: '11',
-    label: { en: "Primary contact person's full name as it appears in the respective passport.", de: 'Vollständiger Name der Hauptkontaktperson laut Reisepass' },
+    label: { en: "Primary contact person's full name as it appears in the respective passport", de: 'Vollständiger Name der Hauptkontaktperson laut Reisepass' },
     hint: plainHint(
       'The person we contact if we have questions about this form.',
       'Die Person, an die wir uns wenden, wenn wir Fragen zu diesem Formular haben.'
@@ -1834,15 +1834,15 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   question(
     '23',
     'Is your institution publicly traded?',
-    'Ist Ihr Unternehmen an einer Börse notiert',
+    'Ist Ihr Unternehmen an einer Börse notiert?',
     plainHint(
       "Yes only if the company's shares are bought and sold on a stock exchange.",
-      'Ja nur, wenn die Aktien des Unternehmens an einer Börse gehandelt werden.'
+      'Ja, nur wenn die Aktien des Unternehmens an einer Börse gehandelt werden.'
     )
   ),
   question(
     '24',
-    'Does the Company name or Subsidiary/Affiliate entities feature in any sanction list?',
+    'Does the company name, or the name of any subsidiary/affiliate entity, feature in any sanctions list?',
     'Erscheint der Name des Unternehmens oder einer Tochter- / verbundenen Gesellschaft auf einer Sanktionsliste?',
     plainHint(
       'Sanction lists are official lists (for example UN, EU, US) of people and companies nobody may do business with.',
@@ -1860,13 +1860,13 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '26',
-    'Does any of the board of directors/senior management/owner have relatives/close associates who are PEPs?',
+    'Do any of the board of directors/senior management/owner have relatives/close associates who are PEPs?',
     'Haben Mitglieder des Verwaltungsrats / der Geschäftsleitung oder der Eigentümer Verwandte oder enge Vertraute, die PEPs sind?',
     PEP_DEFINITION
   ),
   question(
     '27',
-    'Does any of the board of directors / authorized signatories / partners / shareholders / owner of or business subject to financial Sanctions or connected with prescribed terrorist organizations?',
+    'Are any of the board of directors / authorized signatories / partners / shareholders / owner, or the business, subject to financial sanctions or connected with proscribed terrorist organizations?',
     'Unterliegen Mitglieder des Verwaltungsrats / Zeichnungsberechtigte / Partner / Gesellschafter / der Eigentümer oder das Unternehmen finanziellen Sanktionen oder stehen sie in Verbindung mit gelisteten terroristischen Organisationen?',
     plainHint(
       'In short: is any of these people, or the company, under financial sanctions or linked to terrorism?',
@@ -1875,7 +1875,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '28',
-    'Does the company have any subsidiary, affiliate, branch or group/holding company in FATF listed high risk monitored jurisdiction?',
+    'Does the company have any subsidiary, affiliate, branch or group/holding company in an FATF-listed high-risk or monitored jurisdiction?',
     'Hat das Unternehmen eine Tochtergesellschaft, verbundene Gesellschaft, Zweigniederlassung oder Konzern- / Holdinggesellschaft in einem von der FATF gelisteten Hochrisikoland unter verstärkter Beobachtung?',
     plainHint(
       'The FATF is the global body against money laundering. It keeps a public list of high-risk countries.',
@@ -1884,7 +1884,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '29',
-    'Does any of the board of directors / authorized signatory(s) / partners / shareholders / owner have dual nationality?',
+    'Do any of the board of directors / authorized signatories / partners / shareholders / owner have dual nationality?',
     'Besitzen Mitglieder des Verwaltungsrats / Zeichnungsberechtigte / Partner / Gesellschafter / der Eigentümer eine doppelte Staatsangehörigkeit?',
     plainHint(
       'Yes if any of these people is a citizen of more than one country.',
@@ -1893,7 +1893,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '30',
-    'Does the company intend to deal with any country listed in Sanctions List?',
+    'Does the company intend to deal with any country listed in any sanctions list?',
     'Beabsichtigt das Unternehmen, Geschäfte mit einem Land zu tätigen, das auf einer Sanktionsliste steht?',
     plainHint(
       'Yes if the company plans to buy from, sell to or work in a country under sanctions.',
@@ -1902,7 +1902,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '31',
-    'Does the company or subsidiary/affiliate entities are having operations in any High-Risk Countries?',
+    'Do the company or its subsidiary/affiliate entities have operations in any high-risk countries?',
     'Ist das Unternehmen oder sind Tochter- / verbundene Gesellschaften in Hochrisikoländern tätig?',
     plainHint(
       'High-risk countries are the countries on the FATF black and grey lists.',
@@ -1911,7 +1911,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '32',
-    'Has the entity established a conformity program that contains AML/CFT policies and procedures according to internal & international laws, rules and standards?',
+    'Has the entity established a compliance program that contains AML/CFT policies and procedures according to internal & international laws, rules and standards?',
     'Hat das Unternehmen ein Compliance-Programm eingerichtet, das AML/CFT-Richtlinien und -Verfahren gemäß internen und internationalen Gesetzen, Vorschriften und Standards enthält?',
     plainHint(
       'Yes if the company has a written policy to prevent money laundering and terrorist financing (AML/CFT).',
@@ -1947,7 +1947,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '36',
-    'Is the entity involved in any offshore business /banking activities?',
+    'Is the entity involved in any offshore business / banking activities?',
     'Ist das Unternehmen an Offshore-Geschäften oder Offshore-Bankaktivitäten beteiligt?',
     plainHint(
       'Offshore means a company or bank account in another country with no real business there, often for tax reasons.',
@@ -2056,7 +2056,7 @@ export const CORPORATE_SECTIONS: readonly EkycSectionDef[] = [
 export const CORPORATE_KYC_SCHEMA: EkycFormSchema<CorporateKycData> = {
   type: 'corporate',
   title: { en: 'KYC form for Corporate Clients', de: 'KYC-Formular für Firmenkunden' },
-  intro: { en: 'Please make sure all the details are valid', de: 'Bitte stellen Sie sicher, dass alle Angaben gültig sind.' },
+  intro: { en: 'Please make sure all the details are valid.', de: 'Bitte stellen Sie sicher, dass alle Angaben gültig sind.' },
   sections: CORPORATE_SECTIONS,
   fields: CORPORATE_FIELDS,
   groups: CORPORATE_GROUPS,
@@ -2094,7 +2094,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
       'Alle Ihre Namen, auch weitere Vornamen, genau wie im Reisepass.'
     ),
   }),
-  indField('nationality', ind('Please mention your Nationality', 'Bitte geben Sie Ihre Staatsangehörigkeit an'), 'country'),
+  indField('nationality', ind('Please mention your nationality', 'Bitte geben Sie Ihre Staatsangehörigkeit an'), 'country'),
   indField('dualNationality', ind('Do you have dual nationality?', 'Besitzen Sie eine doppelte Staatsangehörigkeit?'), 'yesno', {
     options: EKYC_YES_NO_OPTIONS,
     hint: ind(
@@ -2105,7 +2105,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
   indField(
     'dualNationalityCountries',
     ind(
-      'If yes, then mention the countries where you have nationalities.',
+      'If yes, then mention the countries of which you are a national.',
       'Wenn ja, geben Sie bitte die Länder an, deren Staatsangehörigkeit Sie besitzen.'
     ),
     'countries',
@@ -2125,7 +2125,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
     ),
   }),
   indField('uaeAddress.buildingName', ind('Building Name', 'Gebäudename'), 'text', { visibleWhen: isUaeResident }),
-  indField('uaeAddress.apartmentNo', ind('Apartment No', 'Wohnungsnummer'), 'text', { visibleWhen: isUaeResident }),
+  indField('uaeAddress.apartmentNo', ind('Apartment No.', 'Wohnungsnummer'), 'text', { visibleWhen: isUaeResident }),
   indField('uaeAddress.street', ind('Street', 'Straße'), 'text', { visibleWhen: isUaeResident }),
   indField('uaeAddress.city', ind('City', 'Stadt'), 'text', { visibleWhen: isUaeResident }),
   indField('uaeAddress.emirate', ind('Emirate', 'Emirat'), 'select', {
@@ -2136,7 +2136,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
   indField('uaeAddress.postalCode', ind('Postal Code', 'Postleitzahl'), 'text', { visibleWhen: isUaeResident, required: false }),
   indField(
     'uaePhone',
-    ind('Contact number in UAE', 'Kontaktnummer in den VAE'),
+    ind('Contact number in the UAE', 'Kontaktnummer in den VAE'),
     'phone',
     { visibleWhen: isUaeResident, hint: EKYC_PHONE_HINT }
   ),
@@ -2152,12 +2152,12 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
   ),
   indField(
     'gccNational',
-    ind('Are you a GCC (Gulf Corporation Council) national?', 'Sind Sie Staatsangehörige(r) eines GCC-Staates (Golf-Kooperationsrat)?'),
+    ind('Are you a GCC (Gulf Cooperation Council) national?', 'Sind Sie Staatsangehörige(r) eines GCC-Staates (Golf-Kooperationsrat)?'),
     'yesno',
     {
       options: EKYC_YES_NO_OPTIONS,
       hint: ind(
-        '(Someone who holds citizenship in one of the six member countries of the GCC: Bahrain, Kuwait, Oman, Qatar, Saudi Arabia, and UAE)',
+        '(Someone who holds citizenship in one of the six member countries of the GCC: Bahrain, Kuwait, Oman, Qatar, Saudi Arabia, and the UAE)',
         '(Personen mit der Staatsangehörigkeit eines der sechs Mitgliedstaaten des GCC: Bahrain, Kuwait, Oman, Katar, Saudi-Arabien und VAE)'
       ),
     }
@@ -2208,7 +2208,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
     'text',
     { visibleWhen: (d) => yes(d.isPep) }
   ),
-  indField('rcaIsPep', ind('Are your relatives or close Associates PEP?', 'Sind Verwandte oder enge Vertraute von Ihnen PEPs?'), 'yesno', {
+  indField('rcaIsPep', ind('Are any of your relatives or close associates PEPs?', 'Sind Verwandte oder enge Vertraute von Ihnen PEPs?'), 'yesno', {
     options: EKYC_YES_NO_OPTIONS,
     hint: ind(
       'Yes if a family member or close business partner of yours is a PEP.',
@@ -2242,14 +2242,14 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
   indField(
     'sanctioned',
     ind(
-      'Are you subject to financial sanctions and/or connected with prescribed terrorist organizations?',
+      'Are you subject to financial sanctions and/or connected with proscribed terrorist organizations?',
       'Unterliegen Sie finanziellen Sanktionen und / oder stehen Sie in Verbindung mit gelisteten terroristischen Organisationen?'
     ),
     'yesno',
     {
       options: EKYC_YES_NO_OPTIONS,
       hint: ind(
-        'Financial sanctions mean both asset freezing and prohibitions to prevent funds or other assets from being made available, directly or indirectly, for the benefit of designated persons and entities',
+        'Financial sanctions mean both asset freezing and prohibitions to prevent funds or other assets from being made available, directly or indirectly, for the benefit of designated persons and entities.',
         'Finanzielle Sanktionen umfassen sowohl das Einfrieren von Vermögenswerten als auch Verbote, die verhindern, dass benannten Personen und Organisationen direkt oder indirekt Gelder oder andere Vermögenswerte zur Verfügung gestellt werden.'
       ),
     }
@@ -2267,7 +2267,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
     'highRisk',
     ind(
       'Are you based in and/or associated with any High-Risk jurisdictions? This could be checked using the link https://www.fatf-gafi.org/en/countries/black-and-grey-lists.html',
-      'Haben Sie Ihren Wohnsitz in einem Hochrisiko-Land oder Verbindungen zu einem solchen Land? Dies können Sie unter folgendem Link prüfen: https://www.fatf-gafi.org/en/countries/black-and-grey-lists.html'
+      'Haben Sie Ihren Wohnsitz in einem Hochrisikoland oder Verbindungen zu einem solchen Land? Dies können Sie unter folgendem Link prüfen: https://www.fatf-gafi.org/en/countries/black-and-grey-lists.html'
     ),
     'yesno',
     {
@@ -2287,7 +2287,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
   indField(
     'trustCharity',
     ind(
-      'Are you involved in or control any trust / charities?',
+      'Are you involved in, or do you control, any trusts / charities?',
       'Sind Sie an einem Trust oder einer gemeinnützigen Organisation beteiligt oder kontrollieren Sie eine solche?'
     ),
     'yesno',
@@ -2302,7 +2302,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
   indField(
     'trustCharityNames',
     ind(
-      'If yes, then mention the name of the trust / charities.',
+      'If yes, then mention the name of the trust / charity.',
       'Wenn ja, nennen Sie bitte den Namen des Trusts / der gemeinnützigen Organisation.'
     ),
     'text',
@@ -2327,7 +2327,7 @@ export const INDIVIDUAL_FIELDS: readonly IndField[] = [
 export const INDIVIDUAL_FIELD_CAPTIONS: Record<string, EkycText> = {
   'uaeAddress.buildingName': ind('If yes, please mention your residential address in UAE', 'Wenn ja, geben Sie bitte Ihre Wohnadresse in den VAE an'),
   'homeAddress.street': ind(
-    'If not a UAE resident, then mention your address in home country',
+    'If not a UAE resident, then mention your address in your home country',
     'Wenn Sie keinen Wohnsitz in den VAE haben, geben Sie bitte Ihre Adresse in Ihrem Heimatland an'
   ),
   'employer.companyName': ind(
@@ -2337,12 +2337,12 @@ export const INDIVIDUAL_FIELD_CAPTIONS: Record<string, EkycText> = {
 };
 
 export const EKYC_PEP_DEFINITION: EkycText = ind(
-  "PEP's ( Politically Exposed Person ) are Natural persons who are or have been entrusted with prominent public functions in the State or any other foreign country such as heads of states or governments, senior politicians, senior government officials, judicial or military officials, senior executive managers of state-owned corporations, and senior officials of political parties and persons who are, or have previously been, entrusted with the management of an international organization or any prominent function within such an organization.",
+  "PEPs (Politically Exposed Persons) are natural persons who are or have been entrusted with prominent public functions in the State or any other foreign country such as heads of state or governments, senior politicians, senior government officials, judicial or military officials, senior executive managers of state-owned corporations, and senior officials of political parties and persons who are, or have previously been, entrusted with the management of an international organization or any prominent function within such an organization.",
   'PEPs (politisch exponierte Personen) sind natürliche Personen, die im Staat oder in einem anderen Land mit herausragenden öffentlichen Ämtern betraut sind oder waren, z. B. Staats- oder Regierungschefs, hochrangige Politiker, hochrangige Regierungsbeamte, Justiz- oder Militärbeamte, leitende Führungskräfte staatseigener Unternehmen und hochrangige Funktionäre politischer Parteien, sowie Personen, die mit der Leitung einer internationalen Organisation oder einer herausragenden Funktion innerhalb einer solchen Organisation betraut sind oder waren.'
 );
 
 export const EKYC_RCA_DEFINITION: EkycText = ind(
-  'RCA ( Relatives or Close Associates ) include spouses, children, spouses of children, parents, individuals having joint ownership rights in a legal person or arrangement or any other close business relationship with the PEP or individuals having individual ownership rights in a legal person or arrangement established in favor of the PEP',
+  'RCAs (Relatives or Close Associates) include spouses, children, spouses of children, parents, individuals having joint ownership rights in a legal person or arrangement or any other close business relationship with the PEP or individuals having individual ownership rights in a legal person or arrangement established in favor of the PEP.',
   'RCAs (Verwandte oder enge Vertraute) sind Ehepartner, Kinder, Ehepartner von Kindern, Eltern, Personen, die gemeinsam mit der PEP Eigentumsrechte an einer juristischen Person oder Rechtsgestaltung halten oder in einer anderen engen Geschäftsbeziehung zu der PEP stehen, sowie Personen, die allein Eigentumsrechte an einer juristischen Person oder Rechtsgestaltung halten, die zugunsten der PEP errichtet wurde.'
 );
 
@@ -2429,8 +2429,8 @@ export const INDIVIDUAL_KYC_SCHEMA: EkycFormSchema<IndividualKycData> = {
   type: 'individual',
   title: ind('AML KYC Questionnaire for INDIVIDUAL Client', 'AML-KYC-Fragebogen für PRIVATKUNDEN'),
   intro: ind(
-    "The following questions are required by TME Services for the due diligence of all clients as it is mandatory from 'Ministry of Economy & Tourism'.",
-    'Die folgenden Fragen benötigt TME Services für die Sorgfaltsprüfung aller Kunden, da sie vom „Ministry of Economy & Tourism“ (Wirtschafts- und Tourismusministerium) vorgeschrieben ist.'
+    "The following questions are required by TME Services for the due diligence of all clients, as they are mandatory under the 'Ministry of Economy & Tourism'.",
+    'Die folgenden Fragen benötigt TME Services für die Sorgfaltsprüfung aller Kunden, da sie vom „Ministry of Economy & Tourism“ (Wirtschafts- und Tourismusministerium) vorgeschrieben sind.'
   ),
   sections: INDIVIDUAL_SECTIONS,
   fields: INDIVIDUAL_FIELDS,

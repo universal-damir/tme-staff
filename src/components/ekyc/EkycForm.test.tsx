@@ -146,7 +146,7 @@ describe('EkycForm', () => {
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
     expect(heading().textContent).toBe('Company');
     const summary = screen.getByText('Please check these answers:').closest('[role="alert"]') as HTMLElement;
-    expect(within(summary).getByText('Type of Entity/ Legal Status: Please choose an answer.')).toBeTruthy();
+    expect(within(summary).getByText('Type of Entity / Legal Status: Please choose an answer.')).toBeTruthy();
     expect(within(summary).queryByText(/License/)).toBeNull();
     // The step list now flags the step.
     const nav = screen.getByRole('navigation', { name: 'Steps' });
@@ -185,7 +185,7 @@ describe('EkycForm', () => {
     expect(screen.getAllByText(EKYC_PREFILL_NOTICE.en)).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
     const summary = screen.getByText('Please complete the following before you submit:').closest('[role="alert"]') as HTMLElement;
-    expect(within(summary).getByText(/Type of Entity\/ Legal Status: Please choose an answer\./)).toBeTruthy();
+    expect(within(summary).getByText(/Type of Entity \/ Legal Status: Please choose an answer\./)).toBeTruthy();
     expect(within(summary).queryByText(/Corporate website/)).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     // A link takes the client to the step with the problem.
@@ -198,12 +198,12 @@ describe('EkycForm', () => {
     start();
     openStep('Documents');
     expect(screen.getByText('Passport Copy')).toBeTruthy();
-    expect(screen.queryByText('EID Front, in case of a resident of UAE')).toBeNull();
+    expect(screen.queryByText('EID Front, in case of a resident of the UAE')).toBeNull();
     openStep('Address and contact');
     const uaeQuestion = document.getElementById('ekyc-uaeResident-field') as HTMLElement;
     fireEvent.click(within(uaeQuestion).getByRole('radio', { name: 'Yes' }));
     openStep('Documents');
-    expect(screen.getByText('EID Front, in case of a resident of UAE')).toBeTruthy();
+    expect(screen.getByText('EID Front, in case of a resident of the UAE')).toBeTruthy();
   });
 
   it('a return visit opens on the first step with something missing', () => {
@@ -456,7 +456,7 @@ describe('EkycForm', () => {
     openStep('Check your answers');
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
     const summary = screen.getByText('Please complete the following before you submit:').closest('[role="alert"]') as HTMLElement;
-    fireEvent.click(within(summary).getByText(/^Contact number in UAE/));
+    fireEvent.click(within(summary).getByText(/^Contact number in the UAE/));
     return waitFor(() => {
       const number = document.getElementById('ekyc-uaePhone') as HTMLInputElement;
       expect(number.type).toBe('tel');

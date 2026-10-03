@@ -487,7 +487,7 @@ export function ekycRowHeading(rowLabel: EkycText, rowNo: number): EkycText {
 
 /**
  * The name of the field behind an error, in both languages, so the error
- * summary can say WHAT is missing: 'Type of Entity/ Legal Status',
+ * summary can say WHAT is missing: 'Type of Entity / Legal Status',
  * 'License 2: Trade License Expiry Date', 'Passport Copy'. No question
  * numbers: they come from the paper form and only the PDF prints them.
  */

@@ -203,7 +203,7 @@ describe('validation and labels', () => {
   });
 
   it('names what is missing, with numbers and rows, in both languages', () => {
-    expect(ekycErrorLabel('corporate', 'entityType').en).toBe('Type of Entity/ Legal Status');
+    expect(ekycErrorLabel('corporate', 'entityType').en).toBe('Type of Entity / Legal Status');
     expect(ekycErrorLabel('corporate', 'licenses.1.expiryDate')).toEqual({
       en: 'License 2: Trade License Expiry Date',
       de: 'Lizenz 2: Ablaufdatum der Handelslizenz',
