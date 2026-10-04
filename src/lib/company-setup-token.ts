@@ -144,6 +144,9 @@ export const COMPANY_SETUP_DOC_SLOTS = [
   'visa_document',
   'previous_visa_document',
   'proof_of_address',
+  // Optional: a visa job title that needs a degree (see
+  // companySetupVisaTitleNeedsDegree). Uploaded on the Visa & Facility step.
+  'education_certificate',
 ] as const;
 
 export type CompanySetupDocSlot = (typeof COMPANY_SETUP_DOC_SLOTS)[number];

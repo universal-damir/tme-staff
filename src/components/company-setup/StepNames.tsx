@@ -142,7 +142,7 @@ export function StepNames({
 
       {/* Tester feedback: the activity rule needs an example, not only a line
           in the checklist. Built from the client's own first activity when
-          possible, plus a fixed worked example. */}
+          possible. */}
       <InfoNote title="Your name must show your business activity">
         <p>{NAME_ACTIVITY_RULE}</p>
         {ownExample && (
@@ -150,14 +150,6 @@ export function StepNames({
             With your activities, a name such as <strong>&quot;{ownExample}&quot;</strong> works.
           </p>
         )}
-        <p className="mt-2">
-          Example: the activities &quot;Agricultural Research &amp; Consultancy&quot;, &quot;Flowers &amp;
-          Ornamental Plants Trading&quot; and &quot;Artificial Flowers &amp; Plants Trading&quot; give good
-          names such as &quot;Tina Agricultural Research &amp; Consultancy&quot;, &quot;Tinas Plants
-          Trading&quot;, &quot;Tinas Premium Plants Trading&quot;, &quot;Tina Plants Trading and
-          Consultants&quot; or &quot;GreenThumb Trading&quot;. A name such as &quot;Tina Design
-          Studio&quot; does not fit these activities.
-        </p>
       </InfoNote>
 
       {anyStaffSuggestion && (

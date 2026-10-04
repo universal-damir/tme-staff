@@ -3,9 +3,17 @@
 import React from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { Input, CustomDropdown, CurrencyInput } from '@/components/ui';
+import { AlertTriangle } from 'lucide-react';
 import { InfoNote } from './chrome';
+import { PlainDocSlot, type DocSlot } from './StepPeopleDocuments';
 import type { DraftCompany } from './draft';
-import type { CompanySetupFacilityType, CompanySetupPerson } from '@/types/company-setup';
+import {
+  companySetupVisaEducationWarning,
+  type CompanySetupDocRef,
+  type CompanySetupDocuments,
+  type CompanySetupFacilityType,
+  type CompanySetupPerson,
+} from '@/types/company-setup';
 import {
   COMPANY_SETUP_MAX_MONTHLY_SALARY_AED,
   COMPANY_SETUP_MAX_VISA_COUNT,
@@ -20,20 +28,46 @@ const FACILITY_OPTIONS: { value: CompanySetupFacilityType; label: string }[] = [
 interface StepVisaFacilityProps {
   company: DraftCompany;
   persons: CompanySetupPerson[];
+  documents: CompanySetupDocuments;
   onCompanyChange: (patch: Partial<DraftCompany>) => void;
   onPersonsChange: (persons: CompanySetupPerson[]) => void;
+  onDocumentChange: (
+    personIndex: number,
+    slot: DocSlot,
+    ref: CompanySetupDocRef | undefined,
+  ) => void;
+  uploadFile: (
+    personIndex: number,
+    slot: DocSlot,
+    file: File,
+  ) => Promise<{ path: string; filename: string } | null>;
 }
 
 export function StepVisaFacility({
   company,
   persons,
+  documents,
   onCompanyChange,
   onPersonsChange,
+  onDocumentChange,
+  uploadFile,
 }: StepVisaFacilityProps) {
   const updateVisa = (index: number, patch: Partial<CompanySetupPerson['visa']>) => {
     onPersonsChange(
       persons.map((p, i) => (i === index ? { ...p, visa: { ...p.visa, ...patch } } : p))
     );
+  };
+
+  const uploadCertificate = async (index: number, file: File) => {
+    const uploaded = await uploadFile(index, 'education_certificate', file);
+    if (!uploaded) return null;
+    onDocumentChange(index, 'education_certificate', {
+      path: uploaded.path,
+      filename: uploaded.filename,
+      uploadedAt: new Date().toISOString(),
+      needsReview: true,
+    });
+    return uploaded;
   };
 
   const visaPersonCount = persons.filter((p) => p.visa.visaRequired).length;
@@ -50,7 +84,16 @@ export function StepVisaFacility({
         <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
           Who needs a residence visa?
         </p>
-        {persons.map((person, index) => (
+        {persons.map((person, index) => {
+          const certificate = documents[String(index)]?.education_certificate;
+          const educationWarning = companySetupVisaEducationWarning(person, !!certificate?.path);
+          // The slot shows while the title needs a degree the person has, and
+          // stays visible once a file is on it so it can be seen or replaced.
+          const showCertificate =
+            person.visa.visaRequired &&
+            (educationWarning?.kind === 'certificate' || !!certificate?.path) &&
+            educationWarning?.kind !== 'no_degree';
+          return (
           <div key={index} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <label className="flex items-start gap-2.5 cursor-pointer">
               <input
@@ -101,10 +144,29 @@ export function StepVisaFacility({
                     </span>
                   </label>
                 </div>
+                {educationWarning && (
+                  <div className="sm:col-span-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-800">{educationWarning.message}</p>
+                  </div>
+                )}
+                {showCertificate && (
+                  <div className="sm:col-span-2">
+                    <PlainDocSlot
+                      label="Attested education certificate"
+                      description="Bachelor's degree or higher, attested"
+                      staffProvided={certificate?.source === 'staff'}
+                      docRef={certificate}
+                      onUpload={(file) => uploadCertificate(index, file)}
+                      onRemove={() => onDocumentChange(index, 'education_certificate', undefined)}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="max-w-sm">

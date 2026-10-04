@@ -156,6 +156,9 @@ export type CompanySetupPersonDocuments = Partial<{
   visa_document: CompanySetupDocRef;
   previous_visa_document: CompanySetupDocRef;
   proof_of_address: CompanySetupDocRef;
+  // Visa job title that needs a degree (companySetupVisaTitleNeedsDegree):
+  // the attested education certificate. Optional, the form only warns.
+  education_certificate: CompanySetupDocRef;
 }>;
 
 export type CompanySetupDocuments = Record<string, CompanySetupPersonDocuments>;
@@ -315,4 +318,73 @@ export function companySetupNeedsPhotoAndAddress(
   person: Pick<CompanySetupPerson, 'roles' | 'visa'> | undefined
 ): boolean {
   return !!person?.roles?.shareholder || !!person?.visa?.visaRequired;
+}
+
+/**
+ * IFZA visa job title vs education (Tina 04.10):
+ * - General Manager: any education, no certificate needed.
+ * - Any other manager title (Marketing Manager, Director, CEO, ...): a
+ *   Bachelor's degree or higher, plus the attested education certificate.
+ * - No manager title (Admin Support, ...): any education.
+ * The title patterns are the portal's renewal-education.ts rule. The form
+ * only WARNS: nothing here blocks Continue or submit.
+ */
+const COMPANY_SETUP_DEGREE_TITLE_PATTERNS: RegExp[] = [
+  /manager/i,
+  /director/i,
+  /\bchief\b/i,
+  /\bc[efoti]o\b/i,
+  /president/i,
+  /\bdoctor\b/i,
+  /\bdr\b/i,
+  /professor/i,
+  /ph\.?\s?d/i,
+];
+
+/** Education levels that count as "Bachelor's degree or higher". */
+export const COMPANY_SETUP_DEGREE_LEVELS: readonly string[] = [
+  "Bachelor's Degree",
+  "Master's Degree",
+  'Doctorate (PhD)',
+  'Post Graduate Diploma',
+];
+
+/** True when this visa job title needs a degree and the attested certificate. */
+export function companySetupVisaTitleNeedsDegree(jobTitle: string | undefined): boolean {
+  const title = (jobTitle ?? '').trim();
+  if (!title || /general\s+manager/i.test(title)) return false;
+  return COMPANY_SETUP_DEGREE_TITLE_PATTERNS.some((pattern) => pattern.test(title));
+}
+
+export function companySetupHasDegree(education: string | undefined): boolean {
+  return COMPANY_SETUP_DEGREE_LEVELS.includes((education ?? '').trim());
+}
+
+/**
+ * The warning shown under a visa job title, or null when the title and the
+ * education fit. 'no_degree' = the title needs a degree the person does not
+ * have; 'certificate' = they have it, the attested certificate is missing.
+ */
+export function companySetupVisaEducationWarning(
+  person: Pick<CompanySetupPerson, 'fullName' | 'educationalQualification' | 'visa'>,
+  hasCertificate: boolean
+): { kind: 'no_degree' | 'certificate'; message: string } | null {
+  const title = person.visa?.jobTitle?.trim() ?? '';
+  if (!person.visa?.visaRequired || !companySetupVisaTitleNeedsDegree(title)) return null;
+  const name = person.fullName?.trim() || 'This person';
+  const education = person.educationalQualification?.trim() ?? '';
+  if (!companySetupHasDegree(education)) {
+    const has = education ? `${name}'s education is "${education}"` : `${name} has no education level yet`;
+    return {
+      kind: 'no_degree',
+      message:
+        `The job title "${title}" needs a Bachelor's degree or higher, and ${has}. ` +
+        'Please choose another job title, for example General Manager, or a title without Manager or Director.',
+    };
+  }
+  if (hasCertificate) return null;
+  return {
+    kind: 'certificate',
+    message: `The job title "${title}" needs ${name}'s attested education certificate. Please upload it.`,
+  };
 }

@@ -91,7 +91,12 @@ import {
 } from 'lucide-react';
 
 type AiSlot = 'photo' | 'passport' | 'passport_additional' | 'proof_of_address';
-type PlainSlot = 'eid_front' | 'eid_back' | 'visa_document' | 'previous_visa_document';
+type PlainSlot =
+  | 'eid_front'
+  | 'eid_back'
+  | 'visa_document'
+  | 'previous_visa_document'
+  | 'education_certificate';
 export type DocSlot = AiSlot | PlainSlot;
 
 interface SlotUiState {
@@ -1673,7 +1678,7 @@ export function StepPeopleDocuments({
  * the client confirms it, they do not re-upload it, and they cannot delete a
  * file they never provided.
  */
-function PlainDocSlot({
+export function PlainDocSlot({
   label,
   description,
   staffProvided,

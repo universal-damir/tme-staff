@@ -81,6 +81,7 @@ export const DOC_SLOT_LABELS: Record<string, string> = {
   visa_document: 'Current UAE visa',
   previous_visa_document: 'Previous UAE visa',
   proof_of_address: 'Proof of address (bank statement)',
+  education_certificate: 'Attested education certificate',
 };
 
 /** Why the form can no longer be saved or submitted. */
@@ -799,8 +800,11 @@ export function CompanySetupForm({
           <StepVisaFacility
             company={draft.company}
             persons={draft.persons}
+            documents={documents}
             onCompanyChange={updateCompany}
             onPersonsChange={updatePersons}
+            onDocumentChange={handleDocumentChange}
+            uploadFile={uploadFile}
           />
           {visaMissing.length > 0 && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
