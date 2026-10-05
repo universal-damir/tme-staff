@@ -37,8 +37,8 @@ export const EKYC_LANGUAGE_LABELS: Record<EkycLanguage, string> = {
   de_sie: 'German (Sie)',
 };
 
-/** The link in the email works for 60 days (Damir 03.10.2026, was 14: clients take long). Resend = new link. */
-export const EKYC_LINK_EXPIRES_DAYS = 60;
+/** The link in the email works for 14 days (Tina 05.10.2026: MAX 14 days; 60 between 03.10 and 05.10). Resend = new link. */
+export const EKYC_LINK_EXPIRES_DAYS = 14;
 
 /** Corporate form: at most 3 licenses (R9). */
 export const EKYC_MAX_LICENSES = 3;
@@ -1278,6 +1278,8 @@ export interface EkycFieldDef<D, R = D> {
   number?: string;
   label: EkycText;
   hint?: EkycText;
+  /** A web link shown under the hint (Renji 05.10.2026: the FATF list at Q28). */
+  hintLink?: EkycHintLink;
   kind: EkycFieldKind;
   options?: readonly EkycOption[];
   /** Required whenever the field is visible. */
@@ -1617,17 +1619,41 @@ export const CORPORATE_UBO_FIELDS: readonly EkycFieldDef<CorporateKycData, EkycU
   },
 ];
 
+/** A link under a field's hint: opens in a new tab. */
+export interface EkycHintLink {
+  href: string;
+  label: EkycText;
+}
+
+/**
+ * The questionnaire is section 6 of the KYC record PDF and step 6 of the
+ * corporate form. Its questions carry the SAME number on screen and in the
+ * PDF (6.1 to 6.14), so a client who asks about "question 6.3" and the team
+ * reading the record mean the same one (Tina 05.10.2026).
+ */
+export const EKYC_QUESTIONNAIRE_SECTION = 6;
+
+/** '6.N' for a questionnaire question ('questionnaire.q23' -> '6.1'), else null. */
+export function ekycQuestionnaireNumber(fieldId: string): string | null {
+  const m = /^questionnaire\.(q\d+)$/.exec(fieldId);
+  if (!m) return null;
+  const i = (EKYC_CORPORATE_QUESTION_IDS as readonly string[]).indexOf(m[1]);
+  return i < 0 ? null : `${EKYC_QUESTIONNAIRE_SECTION}.${i + 1}`;
+}
+
 function question(
   number: string,
   en: string,
   de: string,
-  hint?: EkycText
+  hint?: EkycText,
+  hintLink?: EkycHintLink
 ): EkycFieldDef<CorporateKycData, CorporateKycData> {
   return {
     id: `questionnaire.q${number}`,
     number,
     label: { en, de },
     ...(hint ? { hint } : {}),
+    ...(hintLink ? { hintLink } : {}),
     kind: 'yesno',
     options: EKYC_YES_NO_OPTIONS,
     required: true,
@@ -1775,7 +1801,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     ),
     kind: 'textarea',
     required: true,
-    prefillable: false,
+    prefillable: true,
   },
   {
     id: 'serviceOfficeAddress',
@@ -1787,7 +1813,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     ),
     kind: 'textarea',
     required: true,
-    prefillable: false,
+    prefillable: true,
   },
   {
     id: 'website',
@@ -1797,7 +1823,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     required: false,
     prefillable: false,
   },
-  { id: 'poBox', number: '19', label: { en: 'P.O. Box', de: 'Postfach' }, kind: 'text', required: false, prefillable: false },
+  { id: 'poBox', number: '19', label: { en: 'P.O. Box', de: 'Postfach' }, kind: 'text', required: false, prefillable: true },
   {
     id: 'telephone',
     number: '20',
@@ -1845,8 +1871,8 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     'Does the company name, or the name of any subsidiary/affiliate entity, feature in any sanctions list?',
     'Erscheint der Name des Unternehmens oder einer Tochter- / verbundenen Gesellschaft auf einer Sanktionsliste?',
     plainHint(
-      'Sanction lists are official lists (for example UN, EU, US) of people and companies nobody may do business with.',
-      'Sanktionslisten sind offizielle Listen (zum Beispiel von UN, EU, USA) mit Personen und Firmen, mit denen niemand Geschäfte machen darf.'
+      'Official lists of people and companies nobody may do business with, for example the UAE Local Terrorist List, the UN Consolidated List and major global watchlists like the OFAC SDN List and the EU Consolidated Financial Sanctions List.',
+      'Offizielle Listen mit Personen und Firmen, mit denen niemand Geschäfte machen darf, zum Beispiel die UAE Local Terrorist List, die UN Consolidated List und wichtige internationale Listen wie die OFAC SDN List und die EU Consolidated Financial Sanctions List.'
     )
   ),
   question(
@@ -1866,7 +1892,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '27',
-    'Are any of the board of directors / authorized signatories / partners / shareholders / owner, or the business, subject to financial sanctions or connected with proscribed terrorist organizations?',
+    'Are any of the board of directors / authorized signatories / partners / shareholders / owner, or the business, subject to financial sanctions or connected with prescribed terrorist organizations?',
     'Unterliegen Mitglieder des Verwaltungsrats / Zeichnungsberechtigte / Partner / Gesellschafter / der Eigentümer oder das Unternehmen finanziellen Sanktionen oder stehen sie in Verbindung mit gelisteten terroristischen Organisationen?',
     plainHint(
       'In short: is any of these people, or the company, under financial sanctions or linked to terrorism?',
@@ -1878,9 +1904,17 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     'Does the company have any subsidiary, affiliate, branch or group/holding company in an FATF-listed high-risk or monitored jurisdiction?',
     'Hat das Unternehmen eine Tochtergesellschaft, verbundene Gesellschaft, Zweigniederlassung oder Konzern- / Holdinggesellschaft in einem von der FATF gelisteten Hochrisikoland unter verstärkter Beobachtung?',
     plainHint(
-      'The FATF is the global body against money laundering. It keeps a public list of high-risk countries.',
-      'Die FATF ist die internationale Stelle gegen Geldwäsche. Sie führt eine öffentliche Liste von Hochrisikoländern.'
-    )
+      'The FATF (Financial Action Task Force) is the global body against money laundering. It keeps a public list of high-risk countries.',
+      'Die FATF (Financial Action Task Force) ist die internationale Stelle gegen Geldwäsche. Sie führt eine öffentliche Liste von Hochrisikoländern.'
+    ),
+    {
+      href: 'https://www.fatf-gafi.org/en/publications/High-risk-and-other-monitored-jurisdictions.html',
+      label: {
+        en: 'FATF list: High-risk and other monitored jurisdictions',
+        de: 'FATF-Liste: Hochrisikoländer und Länder unter verstärkter Beobachtung (Englisch)',
+        deReviewed: false,
+      },
+    }
   ),
   question(
     '29',
@@ -1911,11 +1945,11 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '32',
-    'Has the entity established a compliance program that contains AML/CFT policies and procedures according to internal & international laws, rules and standards?',
-    'Hat das Unternehmen ein Compliance-Programm eingerichtet, das AML/CFT-Richtlinien und -Verfahren gemäß internen und internationalen Gesetzen, Vorschriften und Standards enthält?',
+    'Has the entity established a compliance program that contains AML/CFT/PF policies and procedures according to internal & international laws, rules and standards?',
+    'Hat das Unternehmen ein Compliance-Programm eingerichtet, das AML/CFT/PF-Richtlinien und -Verfahren gemäß internen und internationalen Gesetzen, Vorschriften und Standards enthält?',
     plainHint(
-      'Yes if the company has a written policy to prevent money laundering and terrorist financing (AML/CFT).',
-      'Ja, wenn das Unternehmen eine schriftliche Richtlinie gegen Geldwäsche und Terrorismusfinanzierung (AML/CFT) hat.'
+      'Yes if the company has a written policy to prevent money laundering, terrorist financing and proliferation financing (AML/CFT/PF).',
+      'Ja, wenn das Unternehmen eine schriftliche Richtlinie gegen Geldwäsche, Terrorismusfinanzierung und Proliferationsfinanzierung (AML/CFT/PF) hat.'
     )
   ),
   question(
@@ -1929,8 +1963,8 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   ),
   question(
     '34',
-    'Has the entity or the senior management ever been charged anywhere in the world for violation of applicable anti-bribery/AML-CFT laws or regulations?',
-    'Wurde das Unternehmen oder die Geschäftsleitung jemals irgendwo auf der Welt wegen eines Verstoßes gegen geltende Antikorruptions- oder AML/CFT-Gesetze oder -Vorschriften angeklagt?',
+    'Has the entity or the senior management ever been charged anywhere in the world for violation of applicable anti-bribery/AML/CFT/PF laws or regulations?',
+    'Wurde das Unternehmen oder die Geschäftsleitung jemals irgendwo auf der Welt wegen eines Verstoßes gegen geltende Antikorruptions- oder AML/CFT/PF-Gesetze oder -Vorschriften angeklagt?',
     plainHint(
       'Charged means formally accused by a court or authority, even without a conviction.',
       'Angeklagt heißt: von einem Gericht oder einer Behörde offiziell beschuldigt, auch ohne Verurteilung.'
@@ -1950,8 +1984,8 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     'Is the entity involved in any offshore business / banking activities?',
     'Ist das Unternehmen an Offshore-Geschäften oder Offshore-Bankaktivitäten beteiligt?',
     plainHint(
-      'Offshore means a company or bank account in another country with no real business there, often for tax reasons.',
-      'Offshore heißt: eine Firma oder ein Bankkonto in einem anderen Land ohne echte Geschäftstätigkeit dort, oft aus Steuergründen.'
+      "Financial or commercial transactions conducted in a foreign country outside of the client's home nation or primary place of operations.",
+      'Finanz- oder Handelsgeschäfte in einem anderen Land außerhalb des Heimatlandes oder des Hauptgeschäftssitzes des Kunden.'
     )
   ),
   ...closingFields<CorporateKycData>(

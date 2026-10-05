@@ -13,6 +13,8 @@ import {
   type EkycFieldDef,
   type EkycOption,
   type EkycText,
+  ekycQuestionnaireNumber,
+  type EkycHintLink,
 } from '@/types/ekyc';
 import { isoToPickerDate, pickerDateToIso } from '@/lib/ekyc-form';
 import type { Country } from 'react-phone-number-input';
@@ -23,7 +25,7 @@ import { EKYC_MONTHS, EKYC_UI } from './texts';
 /** A single choice with this many options or more is a dropdown; fewer are buttons side by side. */
 const DROPDOWN_MIN_OPTIONS = 3;
 /** Hints longer than this fold away behind "More information". */
-const LONG_HINT_CHARS = 220;
+const LONG_HINT_CHARS = 260;
 
 const inputClass =
   'w-full px-3 py-2 rounded-lg border-2 bg-white text-gray-900 transition-colors duration-200 focus:outline-none focus:border-[#243F7B] disabled:bg-gray-50 disabled:text-gray-700';
@@ -77,24 +79,51 @@ export function FieldError({ message, id }: { message: EkycText | undefined; id?
  * A question: English (15px, semibold, navy) and in a bilingual form the
  * German under it (13px, slate). Styles live in Bi.tsx (EKYC_TYPE).
  */
+/**
+ * The label to show: questionnaire questions lead with their record number
+ * (6.1 ... 6.14, the same as the PDF; Tina 05.10.2026), so a client can ask
+ * about one by number. All other fields stay unnumbered.
+ */
+export function ekycNumberedLabel(field: { id?: string; label: EkycText }): EkycText {
+  const n = field.id ? ekycQuestionnaireNumber(field.id) : null;
+  return n ? { ...field.label, en: `${n} ${field.label.en}` } : field.label;
+}
+
+/** A web link under a field's hint (new tab), e.g. the FATF list at question 6.6. */
+export function FieldHintLink({ link }: { link: EkycHintLink | undefined }) {
+  const bilingual = useEkycBilingual();
+  if (!link) return null;
+  return (
+    <a
+      href={link.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 ml-5 inline-block text-[13px] font-medium underline underline-offset-2"
+      style={{ color: TME_COLORS.primary }}
+    >
+      {biInline(link.label, bilingual)}
+    </a>
+  );
+}
+
 export function FieldLabel({
   field,
   id,
   htmlFor,
 }: {
-  field: Pick<AnyFieldDef, 'label' | 'required'>;
+  field: Pick<AnyFieldDef, 'label' | 'required'> & { id?: string };
   id: string;
   /** Only for a native input / textarea; the other controls point aria-labelledby at `id`. */
   htmlFor?: string;
 }) {
   const bilingual = useEkycBilingual();
-  // Question numbers stay off the screen: they come from the paper form and
-  // only the PDF prints them. No star either: the optional fields say so.
+  // Paper form numbers stay off the screen; only the questionnaire shows its
+  // record number (ekycNumberedLabel). No star: the optional fields say so.
   // "(Optional)" sits on a small line under the label, so the label keeps the
   // full width. The pre-filled tag sits under the INPUT (PrefilledSlot).
   return (
     <label id={id} htmlFor={htmlFor} className="block">
-      <BiLabel text={field.label} />
+      <BiLabel text={ekycNumberedLabel(field)} />
       {!field.required && (
         <span className="mt-1 flex flex-wrap items-center gap-1.5">
           <span className="text-xs font-normal text-slate-500">({biInline(EKYC_UI.optional, bilingual)})</span>
@@ -642,6 +671,7 @@ export function EkycField({
           <div className="min-w-0 flex-1">
             <FieldLabel field={field} id={labelId} />
             <FieldHint text={field.hint} id={hintId} />
+            <FieldHintLink link={field.hintLink} />
           </div>
           <div className="shrink-0">
             {control}
@@ -664,6 +694,7 @@ export function EkycField({
         />
       ) : null}
       <FieldHint text={field.hint} id={hintId} />
+      <FieldHintLink link={field.hintLink} />
     </>
   );
 

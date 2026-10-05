@@ -18,6 +18,7 @@ import { ekycRowHeading, isoToPickerDate, type EkycFormData } from '@/lib/ekyc-f
 import type { EkycStepDef } from '@/lib/ekyc-steps';
 import type { EkycClientDocuments } from '@/lib/ekyc-token';
 import { Bi, BiLabel, BiTitle, useEkycBilingual } from './Bi';
+import { ekycNumberedLabel } from './EkycField';
 import { EKYC_UI } from './texts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rows differ per group
@@ -194,7 +195,7 @@ export function EkycReview({
           const field = fieldsById.get(id);
           if (!field || !isEkycFieldVisible(field, data, data)) continue;
           rows.push(
-            <Row key={id} label={field.label}>
+            <Row key={id} label={ekycNumberedLabel(field)}>
               <Answer
                 field={field}
                 value={getEkycValue(data, id)}

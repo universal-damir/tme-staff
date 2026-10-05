@@ -125,7 +125,7 @@ export const EKYC_UI = {
   startNeedTitle: t('What you need', 'Was Sie benötigen'),
   startNeedLicense: t('Your trade license (all licenses, if you have more than one)', 'Ihre Handelslizenz (alle Lizenzen, falls Sie mehrere haben)'),
   startNeedOwners: t(
-    'Names of all shareholders and UBOs exactly as in their passports',
+    'Names of all shareholders and UBOs, exactly as shown in their passports',
     'Die Namen aller Gesellschafter und wirtschaftlich Berechtigten (UBO) genau wie im Reisepass'
   ),
   startNeedCapital: t('The authorized and issued share capital', 'Das genehmigte und das ausgegebene Stammkapital'),
@@ -140,7 +140,7 @@ export const EKYC_UI = {
   startNeedPhoto: t('A recent passport size photo', 'Ein aktuelles Passfoto'),
   startTime: t('It takes about 15 minutes.', 'Das dauert etwa 15 Minuten.'),
   startSaved: t(
-    'Your answers save automatically. You can stop and come back later with the same link.',
+    'Your answers are saved automatically. You can stop and come back later using the same link.',
     'Ihre Angaben werden automatisch gespeichert. Sie können jederzeit aufhören und später mit demselben Link weitermachen.'
   ),
   startButton: t('Start', 'Beginnen'),
