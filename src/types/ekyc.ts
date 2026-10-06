@@ -226,7 +226,7 @@ export type EkycEntityZone = 'mainland' | 'freezone';
 
 export const EKYC_ENTITY_ZONE_OPTIONS: readonly EkycOption[] = [
   { value: 'mainland', en: 'Mainland', de: 'Mainland', deReviewed: false },
-  { value: 'freezone', en: 'Freezone', de: 'Freizone (Freezone)', deReviewed: false },
+  { value: 'freezone', en: 'Freezone', de: 'Freihandelszone', deReviewed: false },
 ];
 
 /**
@@ -1492,7 +1492,7 @@ export const CORPORATE_LICENSE_FIELDS: readonly EkycFieldDef<CorporateKycData, E
     label: { en: 'Business unit', de: 'Geschäftseinheit', deReviewed: false },
     hint: plainHint(
       'This authority has several free zones. Choose the one named on your license.',
-      'Diese Behörde hat mehrere Freizonen. Wählen Sie die Freizone, die auf Ihrer Lizenz steht.'
+      'Diese Behörde hat mehrere Freihandelszonen. Wählen Sie die Freihandelszone, die auf Ihrer Lizenz steht.'
     ),
     kind: 'select',
     required: true,
@@ -1503,7 +1503,7 @@ export const CORPORATE_LICENSE_FIELDS: readonly EkycFieldDef<CorporateKycData, E
   {
     id: 'mainActivities',
     number: '15',
-    label: { en: 'Main activities of the reporting entity as per the Trade License', de: 'Haupttätigkeiten des meldenden Unternehmens laut Handelslizenz' },
+    label: { en: 'Main activities of the reporting entity as per the Trade License', de: 'Haupttätigkeiten des Unternehmens laut Handelslizenz' },
     hint: plainHint(
       'One activity per box, as written on your trade license.',
       'Eine Tätigkeit pro Feld, wie auf Ihrer Handelslizenz.'
@@ -1676,7 +1676,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     label: { en: 'Type of Entity / Legal Status', de: 'Art der Gesellschaft / Rechtsform' },
     hint: plainHint(
       'Free zone companies such as FZ-LLC, FZCO and FZE belong to the first option (LLC).',
-      'Freizonen-Gesellschaften wie FZ-LLC, FZCO und FZE gehören zur ersten Option (LLC).'
+      'Freihandelszonen-Gesellschaften wie FZ-LLC, FZCO und FZE gehören zur ersten Option (LLC).'
     ),
     kind: 'select',
     options: EKYC_ENTITY_TYPE_OPTIONS,
@@ -1686,10 +1686,10 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   {
     id: 'entityZone',
     number: '5',
-    label: { en: 'Mainland or Freezone', de: 'Mainland oder Freizone', deReviewed: false },
+    label: { en: 'Mainland or Freezone', de: 'Mainland oder Freihandelszone', deReviewed: false },
     hint: plainHint(
       'Freezone if a free zone issued your license (for example IFZA, DMCC, RAKEZ). Mainland if DET or DED issued it.',
-      'Freizone, wenn eine Freizone Ihre Lizenz ausgestellt hat (zum Beispiel IFZA, DMCC, RAKEZ). Mainland, wenn DET oder DED sie ausgestellt hat.'
+      'Freihandelszone, wenn eine Freihandelszone Ihre Lizenz ausgestellt hat (zum Beispiel IFZA, DMCC, RAKEZ). Mainland, wenn DET oder DED sie ausgestellt hat.'
     ),
     kind: 'select',
     options: EKYC_ENTITY_ZONE_OPTIONS,
@@ -1780,7 +1780,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     number: '14',
     label: {
       en: 'Is the reporting entity a branch or subsidiary of another entity located locally or outside of the UAE?',
-      de: 'Ist das meldende Unternehmen eine Zweigniederlassung oder Tochtergesellschaft eines anderen Unternehmens mit Sitz in den VAE oder außerhalb der VAE?',
+      de: 'Ist das Unternehmen eine Zweigniederlassung oder Tochtergesellschaft eines anderen Unternehmens mit Sitz in den VAE oder außerhalb der VAE?',
     },
     hint: plainHint(
       'Yes if this company is part of another company, or another company owns most of it.',
@@ -1795,10 +1795,10 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     id: 'headOfficeAddress',
     number: '16',
     label: { en: 'Address of Head Office', de: 'Adresse des Hauptsitzes' },
-    hint: plainHint(
-      'The main address of the company. If it has only one office, this is the address on the license.',
-      'Die Hauptadresse des Unternehmens. Hat es nur ein Büro, ist das die Adresse laut Lizenz.'
-    ),
+    hint: {
+      en: 'The main address of the company. If it has only one office, this is the address on the license.',
+      de: 'Der Firmensitz des Unternehmens. Hat es nur ein Büro, ist das die Adresse laut Lizenz.',
+    },
     kind: 'textarea',
     required: true,
     prefillable: true,
@@ -1807,10 +1807,10 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     id: 'serviceOfficeAddress',
     number: '17',
     label: { en: 'Address of Office for which service is required', de: 'Adresse des Büros, für das die Dienstleistung benötigt wird' },
-    hint: plainHint(
-      'The address of the office TME Services works for. Often the same as the head office.',
-      'Die Adresse des Büros, für das TME Services tätig ist. Oft dieselbe wie die des Hauptsitzes.'
-    ),
+    hint: {
+      en: 'The address of the office TME Services works for. Often the same as the head office.',
+      de: 'Die Adresse des Büros, für das TME Services arbeitet. Oft dieselbe wie die des Firmensitzes.',
+    },
     kind: 'textarea',
     required: true,
     prefillable: true,
@@ -1903,10 +1903,10 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     '28',
     'Does the company have any subsidiary, affiliate, branch or group/holding company in an FATF-listed high-risk or monitored jurisdiction?',
     'Hat das Unternehmen eine Tochtergesellschaft, verbundene Gesellschaft, Zweigniederlassung oder Konzern- / Holdinggesellschaft in einem von der FATF gelisteten Hochrisikoland unter verstärkter Beobachtung?',
-    plainHint(
-      'The FATF (Financial Action Task Force) is the global body against money laundering. It keeps a public list of high-risk countries.',
-      'Die FATF (Financial Action Task Force) ist die internationale Stelle gegen Geldwäsche. Sie führt eine öffentliche Liste von Hochrisikoländern.'
-    ),
+    {
+      en: 'The FATF (Financial Action Task Force) is the global body against money laundering. It keeps a public list of high-risk countries.',
+      de: 'Die FATF (Financial Action Task Force) ist die internationale Organisation gegen Geldwäsche. Sie führt eine öffentliche Liste von Hochrisikoländern.',
+    },
     {
       href: 'https://www.fatf-gafi.org/en/publications/High-risk-and-other-monitored-jurisdictions.html',
       label: {
@@ -1983,9 +1983,10 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
     '36',
     'Is the entity involved in any offshore business / banking activities?',
     'Ist das Unternehmen an Offshore-Geschäften oder Offshore-Bankaktivitäten beteiligt?',
+    // Tina 06.10.2026 (replaces Renji's 05.10 sentence).
     plainHint(
-      "Financial or commercial transactions conducted in a foreign country outside of the client's home nation or primary place of operations.",
-      'Finanz- oder Handelsgeschäfte in einem anderen Land außerhalb des Heimatlandes oder des Hauptgeschäftssitzes des Kunden.'
+      'If the company is a legal entity registered in a country or jurisdiction other than where it conducts its core commercial operations, or if it trades, has affiliates or is involved in banking activities in offshore jurisdictions.',
+      'Wenn das Unternehmen eine juristische Person ist, die in einem anderen Land oder Rechtsgebiet eingetragen ist als dort, wo es seine Hauptgeschäftstätigkeit ausübt, oder wenn es in Offshore-Rechtsgebieten Handel treibt, verbundene Unternehmen hat oder Bankgeschäfte tätigt.'
     )
   ),
   ...closingFields<CorporateKycData>(
@@ -2018,7 +2019,7 @@ export const CORPORATE_GROUPS: readonly EkycGroupDef<CorporateKycData, any>[] = 
     label: { en: 'Shareholder details', de: 'Angaben zu den Gesellschaftern' },
     hint: {
       en: 'Full legal name: Name of the shareholder as it appears in the respective passport (if a natural person) else name of the company (if a corporate shareholder) as it appears in the respective trade license.',
-      de: 'Vollständiger rechtlicher Name: Name des Gesellschafters laut Reisepass (bei einer natürlichen Person) bzw. Name des Unternehmens laut Handelslizenz (bei einem Gesellschafter, der eine juristische Person ist).',
+      de: 'Gesetzlicher Name: Name des Gesellschafters laut Reisepass (bei einer natürlichen Person) bzw. Name des Unternehmens laut Handelslizenz (bei einem Gesellschafter, der eine juristische Person ist).',
     },
     min: 1,
     addLabel: { en: 'Add another shareholder', de: 'Weiteren Gesellschafter hinzufügen', deReviewed: false },

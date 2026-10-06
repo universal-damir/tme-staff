@@ -128,7 +128,7 @@ export const EKYC_UI = {
     'Names of all shareholders and UBOs, exactly as shown in their passports',
     'Die Namen aller Gesellschafter und wirtschaftlich Berechtigten (UBO) genau wie im Reisepass'
   ),
-  startNeedCapital: t('The authorized and issued share capital', 'Das genehmigte und das ausgegebene Stammkapital'),
+  startNeedCapital: t('The authorized and issued share capital', 'Das genehmigte und das eingezahlte Stammkapital'),
   startNeedContact: t('Contact details and the office addresses', 'Kontaktdaten und die Büroadressen'),
   startNeedPassport: t('Your passport (and a second passport if you have two)', 'Ihren Reisepass (und einen zweiten Reisepass, falls Sie zwei haben)'),
   startNeedEid: t('Your Emirates ID, if you live in the UAE', 'Ihre Emirates ID, falls Sie in den VAE wohnen'),
@@ -138,7 +138,7 @@ export const EKYC_UI = {
   ),
   startNeedIncome: t('Details of your income', 'Angaben zu Ihren Einkünften'),
   startNeedPhoto: t('A recent passport size photo', 'Ein aktuelles Passfoto'),
-  startTime: t('It takes about 15 minutes.', 'Das dauert etwa 15 Minuten.'),
+  startTime: t('It takes about 15 minutes.', 'Dauer ca. 15 Minuten.'),
   startSaved: t(
     'Your answers are saved automatically. You can stop and come back later using the same link.',
     'Ihre Angaben werden automatisch gespeichert. Sie können jederzeit aufhören und später mit demselben Link weitermachen.'
