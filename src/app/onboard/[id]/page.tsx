@@ -731,7 +731,7 @@ function OnboardingPageInner() {
           <p className="mt-1">
             Need help?{' '}
             <a
-              href="mailto:info@tme-services.com"
+              href="mailto:portal@tme-services.com"
               className="underline"
               style={{ color: TME_COLORS.primary }}
             >
