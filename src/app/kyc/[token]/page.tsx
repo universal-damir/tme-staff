@@ -9,13 +9,15 @@ import type { EkycClientPayload } from '@/lib/ekyc-token';
 import { Bi, EkycBilingualContext } from '@/components/ekyc/Bi';
 import { EkycForm, type EkycClosedReason } from '@/components/ekyc/EkycForm';
 import { EKYC_UI } from '@/components/ekyc/texts';
+import { reportClientFailure } from '@/lib/client-error-log';
+import { requestJson } from '@/lib/request-outcome';
 
 type PageState =
   | { kind: 'loading' }
   | { kind: 'form'; payload: EkycClientPayload }
   | { kind: 'not_found' }
   | { kind: 'closed'; bilingual: boolean }
-  | { kind: 'error' };
+  | { kind: 'error'; offline: boolean };
 
 /**
  * The whole form may hold German (umlauts) and names in any script. The app's
@@ -61,20 +63,24 @@ export default function EkycPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch(`/api/kyc/${token}`, { cache: 'no-store' });
-        if (cancelled) return;
-        if (res.status === 404) return setState({ kind: 'not_found' });
-        if (res.status === 410) {
-          const body = (await res.json().catch(() => ({}))) as { bilingual?: boolean };
-          return setState({ kind: 'closed', bilingual: body.bilingual === true });
+      const context = { form: 'ekyc', action: 'load', ref: token };
+      const outcome = await requestJson<EkycClientPayload>(`/api/kyc/${token}`, { cache: 'no-store' });
+      if (cancelled) return;
+      if (!outcome.ok) {
+        if (outcome.status === 404) return setState({ kind: 'not_found' });
+        // The 410 answer carries `bilingual`: the language of the closed page.
+        if (outcome.status === 410) {
+          return setState({ kind: 'closed', bilingual: outcome.body?.bilingual === true });
         }
-        if (!res.ok) return setState({ kind: 'error' });
-        const payload = (await res.json()) as EkycClientPayload;
-        setState({ kind: 'form', payload });
-      } catch {
-        if (!cancelled) setState({ kind: 'error' });
+        reportClientFailure(context, outcome);
+        return setState({ kind: 'error', offline: outcome.kind === 'offline' });
       }
+      const payload = outcome.data;
+      if (!payload) {
+        reportClientFailure(context, { kind: 'server_error', status: outcome.status });
+        return setState({ kind: 'error', offline: false });
+      }
+      setState({ kind: 'form', payload });
     })();
     return () => {
       cancelled = true;
@@ -104,7 +110,13 @@ export default function EkycPage() {
           <MessageCard
             icon={<XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />}
             title={notFound ? EKYC_UI.invalidTitle : EKYC_UI.errorTitle}
-            body={notFound ? EKYC_UI.invalidBody : EKYC_UI.errorBody}
+            body={
+              notFound
+                ? EKYC_UI.invalidBody
+                : state.kind === 'error' && state.offline
+                  ? EKYC_UI.offline
+                  : EKYC_UI.errorBody
+            }
           />
         </Shell>
       </EkycBilingualContext.Provider>

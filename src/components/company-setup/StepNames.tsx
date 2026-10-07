@@ -29,8 +29,9 @@ interface StepNamesProps {
   onChange: (patch: Partial<DraftCompany>) => void;
   /** AI warnings from the last validate-names call (never blocking). */
   aiIssues: AiNameIssue[];
-  /** Calls the suggest-names endpoint; resolves to the suggestions (or null on failure). */
-  onSuggest: () => Promise<string[] | null>;
+  /** Calls the suggest-names endpoint; resolves to the suggestions, a failure
+   *  with its plain message, or null when there are none. */
+  onSuggest: () => Promise<string[] | { error: string } | null>;
   /**
    * False when there is not a single business activity yet: suggestions are
    * generated FROM the activities, so without them the button is disabled
@@ -97,8 +98,10 @@ export function StepNames({
     setSuggestError(null);
     try {
       const result = await onSuggest();
-      if (result && result.length > 0) {
+      if (Array.isArray(result) && result.length > 0) {
         setSuggestions(result);
+      } else if (result && !Array.isArray(result)) {
+        setSuggestError(result.error);
       } else {
         setSuggestError('We could not generate suggestions right now. Please try again.');
       }

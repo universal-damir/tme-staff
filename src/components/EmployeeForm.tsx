@@ -62,8 +62,12 @@ import {
   CANCEL_COPY_INTRO,
 } from '@/lib/staff-form-logic';
 import { buildNocText } from '@/lib/noc-letter';
-import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData } from '@/lib/supabase';
-import { calculateFullName, compressImageForAI, normalizePersonName } from '@/lib/utils';
+import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData, isUploadFailure } from '@/lib/supabase';
+import { calculateFullName, normalizePersonName } from '@/lib/utils';
+import { callAiCheck } from '@/lib/ai-check-client';
+import { FAILURE_MESSAGES } from '@/lib/request-outcome';
+import type { FailureContext } from '@/lib/client-error-log';
+import { MAX_FILE_BYTES } from '@/lib/file-validation';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { useIsMobile } from '@/lib/useIsMobile';
 import { nationalityToCountryCode, resolveExtractedNationality } from '@/lib/country-utils';
@@ -124,6 +128,9 @@ const STEP_LABELS = [
  * sponsorship track, so its guidance must stay put.
  */
 const REVIEW_STEP = 8;
+
+// The one size limit for every upload slot (10 MB), in MB for UploadSlot.
+const MAX_FILE_MB = MAX_FILE_BYTES / (1024 * 1024);
 
 // Visa category labels for display
 const VISA_CATEGORY_LABELS: Record<string, string> = {
@@ -1536,15 +1543,15 @@ export function EmployeeForm({
 
   const handlePhotoUpload = async (file: File) => {
     const result = await uploadDocument(submission.id, 'photo', file);
-    if (result) {
+    if (!isUploadFailure(result)) {
       const newDoc = { ...result, validated: false };
       setPhotoDoc(newDoc);
       photoDocRef.current = newDoc;
       setPhotoError(null);
       await saveDocRefs(buildDocRefs({ photo: newDoc }));
-      return result;
     }
-    return null;
+    // A failure goes back as is: PhotoUpload shows its reason.
+    return result;
   };
 
   // Photo manual-review fallback: after MANUAL_REVIEW_THRESHOLD AI rejections
@@ -1572,59 +1579,55 @@ export function EmployeeForm({
     setPhotoManualReviewSubmitting(false);
   };
 
-  // Passport validation helper
-  const validatePassportPageType = async (imageBase64: string, expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE') => {
-    try {
-      const compressedImage = await compressImageForAI(imageBase64);
-      const response = await fetch('/api/validate-passport-page', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // nationality selects the additional-page prompt variant (Indian
-        // family-details page vs Syrian issue-details page); ignored for
-        // cover/inside checks.
-        body: JSON.stringify({ image: compressedImage, expectedType, nationality, submissionId: submission.id, token: aiToken }),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        // Surface a specific reason (e.g. the single-page rule enforced by the
-        // AI route guard) instead of a generic failure.
-        return {
-          valid: false,
-          error:
-            (result?.error as string) ||
-            (result?.errorMessage as string) ||
-            'Unable to validate page. Please try again.',
-          infra: result?.infra === true,
-        };
-      }
-      return {
-        valid: result.matches as boolean,
-        error: result.errorMessage as string | undefined,
-        infra: result?.infra === true,
-      };
-    } catch {
-      // Network failure: the check could not run — infra, never a strike.
-      return { valid: false, error: 'Unable to validate page. Please try again.', infra: true };
+  // Logging context for one check / upload on this form.
+  const failureContext = (action: string, file?: File | null): FailureContext => ({
+    form: 'employee',
+    action,
+    ref: submission.id,
+    file: file ? { size: file.size, type: file.type } : null,
+  });
+
+  // Passport validation helper. `failed` = the check could not give a verdict
+  // (request failed or the check could not run); `countsAsStrike` says
+  // whether that failure counts toward the manual-review option.
+  const validatePassportPageType = async (
+    imageBase64: string,
+    expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE',
+    file: File
+  ): Promise<{ valid: boolean; error?: string; failed: boolean; countsAsStrike: boolean }> => {
+    const outcome = await callAiCheck<{ matches?: boolean; errorMessage?: string }>(
+      '/api/validate-passport-page',
+      // nationality selects the additional-page prompt variant (Indian
+      // family-details page vs Syrian issue-details page); ignored for
+      // cover/inside checks.
+      { expectedType, nationality, submissionId: submission.id, token: aiToken },
+      imageBase64,
+      failureContext(`check:passport-${expectedType.toLowerCase()}`, file)
+    );
+    if (!outcome.ok) {
+      // The reason is a plain message (e.g. the single-page rule enforced by
+      // the AI route guard, or "our automatic check is not working").
+      return { valid: false, error: outcome.message, failed: true, countsAsStrike: outcome.countsAsStrike };
     }
+    return {
+      valid: outcome.data.matches === true,
+      error: outcome.data.errorMessage,
+      failed: false,
+      countsAsStrike: false,
+    };
   };
 
-  // Passport data extraction helper
-  const extractPassportData = async (imageBase64: string) => {
-    try {
-      const compressedImage = await compressImageForAI(imageBase64);
-      const response = await fetch('/api/extract-passport', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, submissionId: submission.id, token: aiToken }),
-      });
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.data) return result.data as Partial<EmployeeFormData>;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+  // Passport data extraction helper. Returns null on any failure (already
+  // logged) so the person types the fields by hand.
+  const extractPassportData = async (imageBase64: string, file?: File | null) => {
+    const outcome = await callAiCheck<{ success?: boolean; data?: Partial<EmployeeFormData> }>(
+      '/api/extract-passport',
+      { submissionId: submission.id, token: aiToken },
+      imageBase64,
+      failureContext('check:passport-extract', file)
+    );
+    if (outcome.ok && outcome.data.success && outcome.data.data) return outcome.data.data;
+    return null;
   };
 
   const handlePassportExtracted = (data: Partial<EmployeeFormData> & {
@@ -1695,12 +1698,14 @@ export function EmployeeForm({
     // Both images and PDFs run through page-type validation — PDFs use
     // Claude's `document` content block (handled in passport-page-validation.ts).
     try {
-      const validation = await validatePassportPageType(preview, 'COVER');
+      const validation = await validatePassportPageType(preview, 'COVER', file);
       if (!validation.valid) {
-        // infra=true means the check could not RUN (API/model error) — never
-        // a rejection; don't burn a strike, just ask the user to retry.
-        if (validation.infra) {
-          setCoverUI({ preview, validating: false, error: "We could not check this file right now — please try again in a moment.", file });
+        // failed=true means the check gave no verdict (request failed or the
+        // check could not run). Show the reason; it still counts as a strike
+        // so the manual-review option appears and nobody retries forever.
+        if (validation.failed) {
+          if (validation.countsAsStrike) setCoverRejectionCount((c) => c + 1);
+          setCoverUI({ preview, validating: false, error: validation.error ?? FAILURE_MESSAGES.server_error, file });
           return false;
         }
         setCoverRejectionCount((c) => c + 1);
@@ -1715,18 +1720,13 @@ export function EmployeeForm({
         return false;
       }
     } catch {
-      setCoverUI({ preview, validating: false, error: "We couldn't check this file. Please try again.", file });
+      setCoverUI({ preview, validating: false, error: FAILURE_MESSAGES.server_error, file });
       return false;
     }
 
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'cover', file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setCoverUI({ preview, validating: false, error: 'Upload failed. Please check your connection and try again.', file });
+    const result = await uploadPassportPage(submission.id, 'cover', file);
+    if (isUploadFailure(result)) {
+      setCoverUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -1769,12 +1769,14 @@ export function EmployeeForm({
     // accepts PDFs natively via the `document` content block (handled in
     // passport-page-validation.ts), so no client-side rasterization needed.
     try {
-      const validation = await validatePassportPageType(preview, 'INSIDE_PAGES');
+      const validation = await validatePassportPageType(preview, 'INSIDE_PAGES', file);
       if (!validation.valid) {
-        // infra=true means the check could not RUN (API/model error) — never
-        // a rejection; don't burn a strike, just ask the user to retry.
-        if (validation.infra) {
-          setInsideUI({ preview, validating: false, error: "We could not check this file right now — please try again in a moment.", file });
+        // failed=true means the check gave no verdict (request failed or the
+        // check could not run). Show the reason; it still counts as a strike
+        // so the manual-review option appears and nobody retries forever.
+        if (validation.failed) {
+          if (validation.countsAsStrike) setInsideRejectionCount((c) => c + 1);
+          setInsideUI({ preview, validating: false, error: validation.error ?? FAILURE_MESSAGES.server_error, file });
           return false;
         }
         setInsideRejectionCount((c) => c + 1);
@@ -1791,18 +1793,13 @@ export function EmployeeForm({
         return false;
       }
     } catch {
-      setInsideUI({ preview, validating: false, error: "We couldn't check this file. Please try again.", file });
+      setInsideUI({ preview, validating: false, error: FAILURE_MESSAGES.server_error, file });
       return false;
     }
 
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'insidePages', file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setInsideUI({ preview, validating: false, error: 'Upload failed. Please check your connection and try again.', file });
+    const result = await uploadPassportPage(submission.id, 'insidePages', file);
+    if (isUploadFailure(result)) {
+      setInsideUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -1823,7 +1820,7 @@ export function EmployeeForm({
     setExtractingPassport(true);
     let extracted: Record<string, unknown> | null = null;
     try {
-      extracted = await extractPassportData(preview);
+      extracted = await extractPassportData(preview, file);
     } catch {
       extracted = null;
     }
@@ -1896,14 +1893,9 @@ export function EmployeeForm({
     // The submit button gets its own dedicated submitting flag below.
     setCoverUI({ preview: coverUI.preview, file: coverUI.file, validating: false, error: null });
     setCoverManualReviewSubmitting(true);
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'cover', coverUI.file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setCoverUI({ preview: coverUI.preview, file: coverUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    const result = await uploadPassportPage(submission.id, 'cover', coverUI.file);
+    if (isUploadFailure(result)) {
+      setCoverUI({ preview: coverUI.preview, file: coverUI.file, validating: false, error: result.error });
       setCoverManualReviewSubmitting(false);
       return;
     }
@@ -1925,14 +1917,9 @@ export function EmployeeForm({
     // submitting flag drives the manual-review button.
     setInsideUI({ preview: insideUI.preview, file: insideUI.file, validating: false, error: null });
     setInsideManualReviewSubmitting(true);
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'insidePages', insideUI.file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setInsideUI({ preview: insideUI.preview, file: insideUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    const result = await uploadPassportPage(submission.id, 'insidePages', insideUI.file);
+    if (isUploadFailure(result)) {
+      setInsideUI({ preview: insideUI.preview, file: insideUI.file, validating: false, error: result.error });
       setInsideManualReviewSubmitting(false);
       return;
     }
@@ -1949,7 +1936,7 @@ export function EmployeeForm({
     setExtractingPassport(true);
     let extracted: Record<string, unknown> | null = null;
     try {
-      extracted = await extractPassportData(insideUI.preview);
+      extracted = await extractPassportData(insideUI.preview, insideUI.file);
     } catch {
       extracted = null;
     }
@@ -1977,24 +1964,18 @@ export function EmployeeForm({
   // base64 image/PDF preview. Returns the raw extracted dict so the
   // caller can also persist it onto the page reference. Image AND PDF —
   // Claude's `document` content block handles PDFs in extractAdditionalPage.
-  const extractAdditionalPageData = async (preview: string): Promise<Record<string, unknown> | null> => {
-    try {
-      const isImg = preview.startsWith('data:image/');
-      const payload = isImg ? await compressImageForAI(preview) : preview;
-      const response = await fetch('/api/extract-passport-additional', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // nationality picks the extraction variant (Indian family-details
-        // page vs Syrian issue-details page).
-        body: JSON.stringify({ image: payload, nationality, submissionId: submission.id, token: aiToken }),
-      });
-      if (!response.ok) return null;
-      const result = await response.json();
-      if (result.success && result.data) return result.data as Record<string, unknown>;
-      return null;
-    } catch {
-      return null;
-    }
+  const extractAdditionalPageData = async (preview: string, file?: File | null): Promise<Record<string, unknown> | null> => {
+    const outcome = await callAiCheck<{ success?: boolean; data?: Record<string, unknown> }>(
+      '/api/extract-passport-additional',
+      // nationality picks the extraction variant (Indian family-details
+      // page vs Syrian issue-details page).
+      { nationality, submissionId: submission.id, token: aiToken },
+      preview,
+      failureContext('check:passport-additional-extract', file)
+    );
+    // Any failure (already logged) = no pre-fill; the person types by hand.
+    if (outcome.ok && outcome.data.success && outcome.data.data) return outcome.data.data;
+    return null;
   };
 
   // Apply extracted additional-page fields to the form. Used by both the
@@ -2039,12 +2020,14 @@ export function EmployeeForm({
     // but it still catches the common mistake of uploading the cover or
     // the data page here. Counter feeds the manual-review affordance.
     try {
-      const validation = await validatePassportPageType(preview, 'ADDITIONAL_PAGE');
+      const validation = await validatePassportPageType(preview, 'ADDITIONAL_PAGE', file);
       if (!validation.valid) {
-        // infra=true means the check could not RUN (API/model error) — never
-        // a rejection; don't burn a strike, just ask the user to retry.
-        if (validation.infra) {
-          setAdditionalPageUI({ preview, validating: false, error: "We could not check this file right now — please try again in a moment.", file });
+        // failed=true means the check gave no verdict (request failed or the
+        // check could not run). Show the reason; it still counts as a strike
+        // so the manual-review option appears and nobody retries forever.
+        if (validation.failed) {
+          if (validation.countsAsStrike) setAdditionalRejectionCount((c) => c + 1);
+          setAdditionalPageUI({ preview, validating: false, error: validation.error ?? FAILURE_MESSAGES.server_error, file });
           return false;
         }
         setAdditionalRejectionCount((c) => c + 1);
@@ -2052,18 +2035,18 @@ export function EmployeeForm({
         return false;
       }
     } catch {
-      setAdditionalPageUI({ preview, validating: false, error: "We couldn't check this file. Please try again.", file });
+      setAdditionalPageUI({ preview, validating: false, error: FAILURE_MESSAGES.server_error, file });
       return false;
     }
 
     const result = await uploadPassportPage(submission.id, 'additionalPage', file);
-    if (!result) {
-      setAdditionalPageUI({ preview, validating: false, error: 'Failed to upload file', file });
+    if (isUploadFailure(result)) {
+      setAdditionalPageUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
     setAdditionalPageUI({ preview, validating: false, error: null, file });
-    const extracted = await extractAdditionalPageData(preview);
+    const extracted = await extractAdditionalPageData(preview, file);
     if (extracted) applyAdditionalPageData(extracted);
 
     const newPage: PassportPageReference = {
@@ -2088,19 +2071,14 @@ export function EmployeeForm({
     if (!additionalPageUI.file || !additionalPageUI.preview) return;
     setAdditionalPageUI({ preview: additionalPageUI.preview, file: additionalPageUI.file, validating: false, error: null });
     setAdditionalManualReviewSubmitting(true);
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'additionalPage', additionalPageUI.file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setAdditionalPageUI({ preview: additionalPageUI.preview, file: additionalPageUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    const result = await uploadPassportPage(submission.id, 'additionalPage', additionalPageUI.file);
+    if (isUploadFailure(result)) {
+      setAdditionalPageUI({ preview: additionalPageUI.preview, file: additionalPageUI.file, validating: false, error: result.error });
       setAdditionalManualReviewSubmitting(false);
       return;
     }
 
-    const extracted = await extractAdditionalPageData(additionalPageUI.preview);
+    const extracted = await extractAdditionalPageData(additionalPageUI.preview, additionalPageUI.file);
     if (extracted) applyAdditionalPageData(extracted);
 
     setAdditionalManualReviewSubmitting(false);
@@ -2165,38 +2143,35 @@ export function EmployeeForm({
     });
     setPreviousVisaUI({ preview, validating: true, error: null, file });
 
-    try {
-      const isImage = file.type.startsWith('image/');
-      const imageData = isImage ? await compressImageForAI(preview) : preview;
-      const response = await fetch('/api/validate-visa-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, expectedCategory: 'previous_visa', submissionId: submission.id, token: aiToken }),
-      });
-      if (response.ok) {
-        const validationResult = await response.json();
-        if (!validationResult.valid) {
-          setPreviousVisaUI({
-            preview,
-            validating: false,
-            error: validationResult.errorMessage || 'This does not look like a UAE visa. You can retry or skip this upload.',
-            file,
-          });
-          // Clear any previously-validated doc so a stale green "Valid" badge
-          // can't sit next to this red error border (mirrors sponsor handlers).
-          setPreviousVisaDoc(undefined);
-          previousVisaDocRef.current = undefined;
-          await saveDocRefs(buildDocRefs());
-          return false;
-        }
+    // Optional upload with no manual-review option: a failed check (already
+    // logged) does not block it, only a real "not a visa" verdict does.
+    const outcome = await callAiCheck<{ valid?: boolean; errorMessage?: string }>(
+      '/api/validate-visa-document',
+      { expectedCategory: 'previous_visa', submissionId: submission.id, token: aiToken },
+      preview,
+      failureContext('check:previous-visa', file)
+    );
+    if (outcome.ok) {
+      const validationResult = outcome.data;
+      if (!validationResult.valid) {
+        setPreviousVisaUI({
+          preview,
+          validating: false,
+          error: validationResult.errorMessage || 'This does not look like a UAE visa. You can retry or skip this upload.',
+          file,
+        });
+        // Clear any previously-validated doc so a stale green "Valid" badge
+        // can't sit next to this red error border (mirrors sponsor handlers).
+        setPreviousVisaDoc(undefined);
+        previousVisaDocRef.current = undefined;
+        await saveDocRefs(buildDocRefs());
+        return false;
       }
-    } catch (err) {
-      console.error('Previous visa validation error:', err);
     }
 
     const result = await uploadDocument(submission.id, 'previous_visa_document', file);
-    if (!result) {
-      setPreviousVisaUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setPreviousVisaUI({ preview, validating: false, error: result.error, file });
       return false;
     }
     setPreviousVisaUI({ preview, validating: false, error: null, file });
@@ -2223,49 +2198,41 @@ export function EmployeeForm({
 
     let extractedData: Record<string, unknown> | null = null;
     if (isImage) {
-      try {
-        const compressedImage = await compressImageForAI(preview);
-        const response = await fetch('/api/extract-eid', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'front', submissionId: submission.id, token: aiToken }),
-        });
-        if (response.ok) {
-          const extractResult = await response.json();
-          // infra=true means the check could not RUN (API/model error) —
-          // never a rejection. Fall through to the upload without extracted
-          // data (mirrors the sponsor/EID-back handlers).
-          if (extractResult.infra !== true) {
-            if (extractResult.success && extractResult.data) {
-              if (!extractResult.data.emirates_id_number) {
-                setEidFrontUI({ preview, validating: false, error: 'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID.', file });
-                // Clear any previously-validated doc so a stale green "Valid"
-                // badge can't sit next to this red error border (mirrors sponsor handlers).
-                setEidFrontDoc(undefined);
-                eidFrontDocRef.current = undefined;
-                await saveDocRefs(buildDocRefs());
-                return false;
-              }
-              extractedData = extractResult.data;
-            } else {
-              setEidFrontUI({ preview, validating: false, error: 'Could not read this document. Please upload a clear photo of the front of your Emirates ID card.', file });
-              setEidFrontDoc(undefined);
-              eidFrontDocRef.current = undefined;
-              await saveDocRefs(buildDocRefs());
-              return false;
-            }
+      const outcome = await callAiCheck<{ success?: boolean; data?: Record<string, unknown> & { emirates_id_number?: string } }>(
+        '/api/extract-eid',
+        { side: 'front', submissionId: submission.id, token: aiToken },
+        preview,
+        failureContext('check:eid-front', file)
+      );
+      // A failed check (already logged) gives no verdict and this slot has no
+      // manual-review option: fall through to the upload without extracted
+      // data so a genuine EID is never blocked.
+      if (outcome.ok) {
+        const extractResult = outcome.data;
+        if (extractResult.success && extractResult.data) {
+          if (!extractResult.data.emirates_id_number) {
+            setEidFrontUI({ preview, validating: false, error: 'This does not appear to be an Emirates ID card. Please upload the front of a valid UAE Emirates ID.', file });
+            // Clear any previously-validated doc so a stale green "Valid"
+            // badge can't sit next to this red error border (mirrors sponsor handlers).
+            setEidFrontDoc(undefined);
+            eidFrontDocRef.current = undefined;
+            await saveDocRefs(buildDocRefs());
+            return false;
           }
+          extractedData = extractResult.data;
+        } else {
+          setEidFrontUI({ preview, validating: false, error: 'Could not read this document. Please upload a clear photo of the front of your Emirates ID card.', file });
+          setEidFrontDoc(undefined);
+          eidFrontDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
         }
-      } catch (err) {
-        // Validation-infra error: log + continue — must not hard-block a
-        // genuine upload (mirrors the sponsor EID handlers).
-        console.error('EID front validation error:', err);
       }
     }
 
     const result = await uploadDocument(submission.id, 'eid_front', file);
-    if (!result) {
-      setEidFrontUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setEidFrontUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -2301,33 +2268,31 @@ export function EmployeeForm({
     setEidBackUI({ preview, validating: true, error: null, file });
 
     if (isImage) {
-      try {
-        const compressedImage = await compressImageForAI(preview);
-        const response = await fetch('/api/extract-eid', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'back', submissionId: submission.id, token: aiToken }),
-        });
-        if (response.ok) {
-          const extractResult = await response.json();
-          if (!extractResult.success && !extractResult.infra) {
-            setEidBackUI({ preview, validating: false, error: 'This does not appear to be the back of an Emirates ID card. Please upload a clear photo of the back.', file });
-            // Clear any previously-validated doc so a stale green "Valid" badge
-            // can't sit next to this red error border (mirrors sponsor handlers).
-            setEidBackDoc(undefined);
-            eidBackDocRef.current = undefined;
-            await saveDocRefs(buildDocRefs());
-            return false;
-          }
+      const outcome = await callAiCheck<{ success?: boolean }>(
+        '/api/extract-eid',
+        { side: 'back', submissionId: submission.id, token: aiToken },
+        preview,
+        failureContext('check:eid-back', file)
+      );
+      // A failed check (already logged) gives no verdict and this slot has no
+      // manual-review option: fall through to the upload.
+      if (outcome.ok) {
+        const extractResult = outcome.data;
+        if (!extractResult.success) {
+          setEidBackUI({ preview, validating: false, error: 'This does not appear to be the back of an Emirates ID card. Please upload a clear photo of the back.', file });
+          // Clear any previously-validated doc so a stale green "Valid" badge
+          // can't sit next to this red error border (mirrors sponsor handlers).
+          setEidBackDoc(undefined);
+          eidBackDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
         }
-      } catch (err) {
-        console.error('EID back validation error:', err);
       }
     }
 
     const result = await uploadDocument(submission.id, 'eid_back', file);
-    if (!result) {
-      setEidBackUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setEidBackUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -2348,12 +2313,11 @@ export function EmployeeForm({
   // metadata fields remain the source of truth for the NOC. Any extracted
   // payload is used only to decide valid/invalid and is then discarded.
   //
-  // PDF-safe: mirrors handlePreviousVisaUpload — images go through
-  // compressImageForAI, PDFs pass the data URL straight to the model (the
+  // PDF-safe: callAiCheck shrinks images and PDFs for the model (the
   // validation libs accept PDF data URLs via Claude's `document` block).
-  // Soft-on-route-error: a thrown validation-infra error logs + continues
-  // (must not hard-block a genuine upload). Hard-block on an explicit
-  // invalid verdict. Two failed validations surface the manual-review
+  // Hard-block on an explicit invalid verdict. A check that gives no verdict
+  // (request failed / check could not run) shows its reason and counts as a
+  // strike too, so two failed tries always surface the manual-review
   // affordance (see handleSponsor*ManualReview below).
 
   const handleSponsorPassportUpload = async (file: File): Promise<boolean> => {
@@ -2369,45 +2333,41 @@ export function EmployeeForm({
     });
     setSponsorPassportUI({ preview, validating: true, error: null, file });
 
-    try {
-      const isImage = file.type.startsWith('image/');
-      const imageData = isImage ? await compressImageForAI(preview) : preview;
-      // Sponsor passport is validated as the photo/data page spread
-      // (INSIDE_PAGES) — that validator's VALID criteria are exactly the
-      // data page (photo + MRZ + name) plus its opposite half, which is the
-      // sponsor passport page TME needs. It does NOT write applicant fields.
-      const response = await fetch('/api/validate-passport-page', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, expectedType: 'INSIDE_PAGES', submissionId: submission.id, token: aiToken }),
+    // Sponsor passport is validated as the photo/data page spread
+    // (INSIDE_PAGES) — that validator's VALID criteria are exactly the
+    // data page (photo + MRZ + name) plus its opposite half, which is the
+    // sponsor passport page TME needs. It does NOT write applicant fields.
+    const outcome = await callAiCheck<{ matches?: boolean; errorMessage?: string }>(
+      '/api/validate-passport-page',
+      { expectedType: 'INSIDE_PAGES', submissionId: submission.id, token: aiToken },
+      preview,
+      failureContext('check:sponsor-passport', file)
+    );
+    if (!outcome.ok) {
+      if (outcome.countsAsStrike) setSponsorPassportRejectionCount((c) => c + 1);
+      setSponsorPassportUI({ preview, validating: false, error: outcome.message, file });
+      return false;
+    }
+    const validationResult = outcome.data;
+    if (!validationResult.matches) {
+      setSponsorPassportRejectionCount((c) => c + 1);
+      setSponsorPassportUI({
+        preview,
+        validating: false,
+        error: validationResult.errorMessage || "This does not look like the sponsor's passport page. Please upload the passport spread open showing the photo / data page.",
+        file,
       });
-      if (response.ok) {
-        const validationResult = await response.json();
-        // infra=true means the check could not RUN (API/model error) — never
-        // a rejection. Fall through to the upload like the catch path below.
-        if (!validationResult.matches && validationResult.infra !== true) {
-          setSponsorPassportRejectionCount((c) => c + 1);
-          setSponsorPassportUI({
-            preview,
-            validating: false,
-            error: validationResult.errorMessage || "This does not look like the sponsor's passport page. Please upload the passport spread open showing the photo / data page.",
-            file,
-          });
-          // Clear any previously-validated doc so a stale green "Valid" badge
-          // can't sit next to this red error border.
-          setSponsorPassportDoc(undefined);
-          sponsorPassportDocRef.current = undefined;
-          await saveDocRefs(buildDocRefs());
-          return false;
-        }
-      }
-    } catch (err) {
-      console.error('Sponsor passport validation error:', err);
+      // Clear any previously-validated doc so a stale green "Valid" badge
+      // can't sit next to this red error border.
+      setSponsorPassportDoc(undefined);
+      sponsorPassportDocRef.current = undefined;
+      await saveDocRefs(buildDocRefs());
+      return false;
     }
 
     const result = await uploadDocument(submission.id, 'sponsor_passport', file);
-    if (!result) {
-      setSponsorPassportUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setSponsorPassportUI({ preview, validating: false, error: result.error, file });
       return false;
     }
     const newDoc = { ...result, validated: true };
@@ -2426,15 +2386,14 @@ export function EmployeeForm({
     // Empty-guard: only fill a field the user hasn't already filled, mirroring
     // the applicant's one-time seed pattern.
     try {
-      const isImageForExtract = file.type.startsWith('image/');
-      const imageData = isImageForExtract ? await compressImageForAI(preview) : preview;
-      const extractResponse = await fetch('/api/extract-passport', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, submissionId: submission.id, token: aiToken }),
-      });
-      if (extractResponse.ok) {
-        const extractResult = await extractResponse.json();
+      const extractOutcome = await callAiCheck<{ success?: boolean; data?: Record<string, unknown> }>(
+        '/api/extract-passport',
+        { submissionId: submission.id, token: aiToken },
+        preview,
+        failureContext('check:sponsor-passport-extract', file)
+      );
+      if (extractOutcome.ok) {
+        const extractResult = extractOutcome.data;
         if (extractResult.success && extractResult.data) {
           const data = extractResult.data as {
             first_name?: string;
@@ -2492,41 +2451,39 @@ export function EmployeeForm({
     });
     setSponsorVisaUI({ preview, validating: true, error: null, file });
 
-    try {
-      const isImage = file.type.startsWith('image/');
-      const imageData = isImage ? await compressImageForAI(preview) : preview;
-      // Reuse the applicant previous-visa category ('previous_visa') — both
-      // mean "an existing UAE residence visa". Safe: no applicant writes.
-      const response = await fetch('/api/validate-visa-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, expectedCategory: 'previous_visa', submissionId: submission.id, token: aiToken }),
+    // Reuse the applicant previous-visa category ('previous_visa') — both
+    // mean "an existing UAE residence visa". Safe: no applicant writes.
+    const outcome = await callAiCheck<{ valid?: boolean; errorMessage?: string }>(
+      '/api/validate-visa-document',
+      { expectedCategory: 'previous_visa', submissionId: submission.id, token: aiToken },
+      preview,
+      failureContext('check:sponsor-visa', file)
+    );
+    if (!outcome.ok) {
+      if (outcome.countsAsStrike) setSponsorVisaRejectionCount((c) => c + 1);
+      setSponsorVisaUI({ preview, validating: false, error: outcome.message, file });
+      return false;
+    }
+    const validationResult = outcome.data;
+    if (!validationResult.valid) {
+      setSponsorVisaRejectionCount((c) => c + 1);
+      setSponsorVisaUI({
+        preview,
+        validating: false,
+        error: validationResult.errorMessage || "This does not look like the sponsor's UAE residence visa. You can retry or submit it for manual review.",
+        file,
       });
-      if (response.ok) {
-        const validationResult = await response.json();
-        if (!validationResult.valid) {
-          setSponsorVisaRejectionCount((c) => c + 1);
-          setSponsorVisaUI({
-            preview,
-            validating: false,
-            error: validationResult.errorMessage || "This does not look like the sponsor's UAE residence visa. You can retry or submit it for manual review.",
-            file,
-          });
-          // Clear any previously-validated doc so a stale green "Valid" badge
-          // can't sit next to this red error border.
-          setSponsorVisaDoc(undefined);
-          sponsorVisaDocRef.current = undefined;
-          await saveDocRefs(buildDocRefs());
-          return false;
-        }
-      }
-    } catch (err) {
-      console.error('Sponsor visa validation error:', err);
+      // Clear any previously-validated doc so a stale green "Valid" badge
+      // can't sit next to this red error border.
+      setSponsorVisaDoc(undefined);
+      sponsorVisaDocRef.current = undefined;
+      await saveDocRefs(buildDocRefs());
+      return false;
     }
 
     const result = await uploadDocument(submission.id, 'sponsor_visa', file);
-    if (!result) {
-      setSponsorVisaUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setSponsorVisaUI({ preview, validating: false, error: result.error, file });
       return false;
     }
     const newDoc = { ...result, validated: true };
@@ -2552,42 +2509,40 @@ export function EmployeeForm({
     });
     setSponsorEidFrontUI({ preview, validating: true, error: null, file });
 
-    try {
-      const isImage = file.type.startsWith('image/');
-      const imageData = isImage ? await compressImageForAI(preview) : preview;
-      // TYPE-CHECK ONLY via /api/extract-eid. Front EID is valid when the
-      // route returns success AND an EID-shaped number. The extracted data
-      // is DISCARDED — we never setValue() it onto the applicant.
-      const response = await fetch('/api/extract-eid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, side: 'front', submissionId: submission.id, token: aiToken }),
+    // TYPE-CHECK ONLY via /api/extract-eid. Front EID is valid when the
+    // route returns success AND an EID-shaped number. The extracted data
+    // is DISCARDED — we never setValue() it onto the applicant.
+    const outcome = await callAiCheck<{ success?: boolean; data?: { emirates_id_number?: string } }>(
+      '/api/extract-eid',
+      { side: 'front', submissionId: submission.id, token: aiToken },
+      preview,
+      failureContext('check:sponsor-eid-front', file)
+    );
+    if (!outcome.ok) {
+      if (outcome.countsAsStrike) setSponsorEidFrontRejectionCount((c) => c + 1);
+      setSponsorEidFrontUI({ preview, validating: false, error: outcome.message, file });
+      return false;
+    }
+    const extractResult = outcome.data;
+    if (!extractResult.success || !extractResult.data?.emirates_id_number) {
+      setSponsorEidFrontRejectionCount((c) => c + 1);
+      setSponsorEidFrontUI({
+        preview,
+        validating: false,
+        error: "This does not look like the front of the sponsor's Emirates ID. Please upload the front of a valid UAE Emirates ID, or submit it for manual review.",
+        file,
       });
-      if (response.ok) {
-        const extractResult = await response.json();
-        if (extractResult.infra !== true && (!extractResult.success || !extractResult.data?.emirates_id_number)) {
-          setSponsorEidFrontRejectionCount((c) => c + 1);
-          setSponsorEidFrontUI({
-            preview,
-            validating: false,
-            error: "This does not look like the front of the sponsor's Emirates ID. Please upload the front of a valid UAE Emirates ID, or submit it for manual review.",
-            file,
-          });
-          // Clear any previously-validated doc so a stale green "Valid" badge
-          // can't sit next to this red error border.
-          setSponsorEidFrontDoc(undefined);
-          sponsorEidFrontDocRef.current = undefined;
-          await saveDocRefs(buildDocRefs());
-          return false;
-        }
-      }
-    } catch (err) {
-      console.error('Sponsor EID front validation error:', err);
+      // Clear any previously-validated doc so a stale green "Valid" badge
+      // can't sit next to this red error border.
+      setSponsorEidFrontDoc(undefined);
+      sponsorEidFrontDocRef.current = undefined;
+      await saveDocRefs(buildDocRefs());
+      return false;
     }
 
     const result = await uploadDocument(submission.id, 'sponsor_eid_front', file);
-    if (!result) {
-      setSponsorEidFrontUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setSponsorEidFrontUI({ preview, validating: false, error: result.error, file });
       return false;
     }
     const newDoc = { ...result, validated: true };
@@ -2613,41 +2568,39 @@ export function EmployeeForm({
     });
     setSponsorEidBackUI({ preview, validating: true, error: null, file });
 
-    try {
-      const isImage = file.type.startsWith('image/');
-      const imageData = isImage ? await compressImageForAI(preview) : preview;
-      // TYPE-CHECK ONLY via /api/extract-eid (back). The back is valid when
-      // the route returns success (is_valid_back true). Data is DISCARDED.
-      const response = await fetch('/api/extract-eid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, side: 'back', submissionId: submission.id, token: aiToken }),
+    // TYPE-CHECK ONLY via /api/extract-eid (back). The back is valid when
+    // the route returns success (is_valid_back true). Data is DISCARDED.
+    const outcome = await callAiCheck<{ success?: boolean }>(
+      '/api/extract-eid',
+      { side: 'back', submissionId: submission.id, token: aiToken },
+      preview,
+      failureContext('check:sponsor-eid-back', file)
+    );
+    if (!outcome.ok) {
+      if (outcome.countsAsStrike) setSponsorEidBackRejectionCount((c) => c + 1);
+      setSponsorEidBackUI({ preview, validating: false, error: outcome.message, file });
+      return false;
+    }
+    const extractResult = outcome.data;
+    if (!extractResult.success) {
+      setSponsorEidBackRejectionCount((c) => c + 1);
+      setSponsorEidBackUI({
+        preview,
+        validating: false,
+        error: "This does not look like the back of the sponsor's Emirates ID. Please upload a clear photo of the back, or submit it for manual review.",
+        file,
       });
-      if (response.ok) {
-        const extractResult = await response.json();
-        if (!extractResult.success && !extractResult.infra) {
-          setSponsorEidBackRejectionCount((c) => c + 1);
-          setSponsorEidBackUI({
-            preview,
-            validating: false,
-            error: "This does not look like the back of the sponsor's Emirates ID. Please upload a clear photo of the back, or submit it for manual review.",
-            file,
-          });
-          // Clear any previously-validated doc so a stale green "Valid" badge
-          // can't sit next to this red error border.
-          setSponsorEidBackDoc(undefined);
-          sponsorEidBackDocRef.current = undefined;
-          await saveDocRefs(buildDocRefs());
-          return false;
-        }
-      }
-    } catch (err) {
-      console.error('Sponsor EID back validation error:', err);
+      // Clear any previously-validated doc so a stale green "Valid" badge
+      // can't sit next to this red error border.
+      setSponsorEidBackDoc(undefined);
+      sponsorEidBackDocRef.current = undefined;
+      await saveDocRefs(buildDocRefs());
+      return false;
     }
 
     const result = await uploadDocument(submission.id, 'sponsor_eid_back', file);
-    if (!result) {
-      setSponsorEidBackUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setSponsorEidBackUI({ preview, validating: false, error: result.error, file });
       return false;
     }
     const newDoc = { ...result, validated: true };
@@ -2671,8 +2624,8 @@ export function EmployeeForm({
     setSponsorPassportUI({ preview: sponsorPassportUI.preview, file: sponsorPassportUI.file, validating: false, error: null });
     setSponsorPassportManualReviewSubmitting(true);
     const result = await uploadDocument(submission.id, 'sponsor_passport', sponsorPassportUI.file);
-    if (!result) {
-      setSponsorPassportUI({ preview: sponsorPassportUI.preview, file: sponsorPassportUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    if (isUploadFailure(result)) {
+      setSponsorPassportUI({ preview: sponsorPassportUI.preview, file: sponsorPassportUI.file, validating: false, error: result.error });
       setSponsorPassportManualReviewSubmitting(false);
       return;
     }
@@ -2690,8 +2643,8 @@ export function EmployeeForm({
     setSponsorVisaUI({ preview: sponsorVisaUI.preview, file: sponsorVisaUI.file, validating: false, error: null });
     setSponsorVisaManualReviewSubmitting(true);
     const result = await uploadDocument(submission.id, 'sponsor_visa', sponsorVisaUI.file);
-    if (!result) {
-      setSponsorVisaUI({ preview: sponsorVisaUI.preview, file: sponsorVisaUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    if (isUploadFailure(result)) {
+      setSponsorVisaUI({ preview: sponsorVisaUI.preview, file: sponsorVisaUI.file, validating: false, error: result.error });
       setSponsorVisaManualReviewSubmitting(false);
       return;
     }
@@ -2709,8 +2662,8 @@ export function EmployeeForm({
     setSponsorEidFrontUI({ preview: sponsorEidFrontUI.preview, file: sponsorEidFrontUI.file, validating: false, error: null });
     setSponsorEidFrontManualReviewSubmitting(true);
     const result = await uploadDocument(submission.id, 'sponsor_eid_front', sponsorEidFrontUI.file);
-    if (!result) {
-      setSponsorEidFrontUI({ preview: sponsorEidFrontUI.preview, file: sponsorEidFrontUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    if (isUploadFailure(result)) {
+      setSponsorEidFrontUI({ preview: sponsorEidFrontUI.preview, file: sponsorEidFrontUI.file, validating: false, error: result.error });
       setSponsorEidFrontManualReviewSubmitting(false);
       return;
     }
@@ -2728,8 +2681,8 @@ export function EmployeeForm({
     setSponsorEidBackUI({ preview: sponsorEidBackUI.preview, file: sponsorEidBackUI.file, validating: false, error: null });
     setSponsorEidBackManualReviewSubmitting(true);
     const result = await uploadDocument(submission.id, 'sponsor_eid_back', sponsorEidBackUI.file);
-    if (!result) {
-      setSponsorEidBackUI({ preview: sponsorEidBackUI.preview, file: sponsorEidBackUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    if (isUploadFailure(result)) {
+      setSponsorEidBackUI({ preview: sponsorEidBackUI.preview, file: sponsorEidBackUI.file, validating: false, error: result.error });
       setSponsorEidBackManualReviewSubmitting(false);
       return;
     }
@@ -2757,45 +2710,33 @@ export function EmployeeForm({
     setPakistanIdFrontUI({ preview, validating: true, error: null, file });
 
     if (isImage) {
-      try {
-        const compressedImage = await compressImageForAI(preview);
-        const response = await fetch('/api/extract-pakistan-id', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'front', submissionId: submission.id, token: aiToken }),
-        });
-        if (response.ok) {
-          const extractResult = await response.json();
-          if (!extractResult.success && !extractResult.infra) {
-            setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
-            // Clear any previously-validated doc so a stale green "Valid" badge
-            // can't sit next to this red error border (mirrors sponsor handlers).
-            setPakistanIdFrontDoc(undefined);
-            pakistanIdFrontDocRef.current = undefined;
-            await saveDocRefs(buildDocRefs());
-            return false;
-          }
-          if (extractResult.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
-        } else {
-          setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+      const outcome = await callAiCheck<{ success?: boolean; data?: { father_name?: string } }>(
+        '/api/extract-pakistan-id',
+        { side: 'front', submissionId: submission.id, token: aiToken },
+        preview,
+        failureContext('check:pakistan-id-front', file)
+      );
+      if (outcome.ok) {
+        const extractResult = outcome.data;
+        if (!extractResult.success) {
+          setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
+          // Clear any previously-validated doc so a stale green "Valid" badge
+          // can't sit next to this red error border (mirrors sponsor handlers).
           setPakistanIdFrontDoc(undefined);
           pakistanIdFrontDocRef.current = undefined;
           await saveDocRefs(buildDocRefs());
           return false;
         }
-      } catch (err) {
-        console.error('Pakistan ID front validation error:', err);
-        setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
-        setPakistanIdFrontDoc(undefined);
-        pakistanIdFrontDocRef.current = undefined;
-        await saveDocRefs(buildDocRefs());
-        return false;
+        if (extractResult.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
       }
+      // A check that could not run (already logged) is no verdict: this slot
+      // has no "check by hand" option, so blocking here would trap the person.
+      // Upload as for a PDF (which skips the check); TME checks it on the portal.
     }
 
     const result = await uploadDocument(submission.id, 'pakistan_id_front', file);
-    if (!result) {
-      setPakistanIdFrontUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setPakistanIdFrontUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -2822,41 +2763,39 @@ export function EmployeeForm({
     setPakistanIdBackUI({ preview, validating: true, error: null, file });
 
     if (isImage) {
-      try {
-        const compressedImage = await compressImageForAI(preview);
-        const response = await fetch('/api/extract-pakistan-id', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'back', submissionId: submission.id, token: aiToken }),
-        });
-        if (response.ok) {
-          const extractResult = await response.json();
-          if (!extractResult.success && !extractResult.infra) {
-            setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
-            // Clear any previously-validated doc so a stale green "Valid" badge
-            // can't sit next to this red error border (mirrors sponsor handlers).
-            setPakistanIdBackDoc(undefined);
-            pakistanIdBackDocRef.current = undefined;
-            await saveDocRefs(buildDocRefs());
-            return false;
-          }
-          if (extractResult.data?.address) {
-            if (!getValues('home_street_address')) setValue('home_street_address', String(extractResult.data.address));
-            setValue('home_country', 'Pakistan');
-            if (extractResult.data.address_city && !getValues('home_city')) {
-              setValue('home_city', String(extractResult.data.address_city));
-            }
-            setTimeout(() => autoSave(getValues()), 100);
-          }
+      const outcome = await callAiCheck<{ success?: boolean; data?: { address?: string; address_city?: string } }>(
+        '/api/extract-pakistan-id',
+        { side: 'back', submissionId: submission.id, token: aiToken },
+        preview,
+        failureContext('check:pakistan-id-back', file)
+      );
+      // A failed check (already logged) gives no verdict and this slot has no
+      // manual-review option: fall through to the upload.
+      if (outcome.ok) {
+        const extractResult = outcome.data;
+        if (!extractResult.success) {
+          setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
+          // Clear any previously-validated doc so a stale green "Valid" badge
+          // can't sit next to this red error border (mirrors sponsor handlers).
+          setPakistanIdBackDoc(undefined);
+          pakistanIdBackDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
         }
-      } catch (err) {
-        console.error('Pakistan ID back validation error:', err);
+        if (extractResult.data?.address) {
+          if (!getValues('home_street_address')) setValue('home_street_address', String(extractResult.data.address));
+          setValue('home_country', 'Pakistan');
+          if (extractResult.data.address_city && !getValues('home_city')) {
+            setValue('home_city', String(extractResult.data.address_city));
+          }
+          setTimeout(() => autoSave(getValues()), 100);
+        }
       }
     }
 
     const result = await uploadDocument(submission.id, 'pakistan_id_back', file);
-    if (!result) {
-      setPakistanIdBackUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setPakistanIdBackUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -2997,6 +2936,7 @@ export function EmployeeForm({
           <PhotoUpload
             hideGuidance={isReview}
             submissionId={submission.id}
+            form="employee"
             value={photoDoc}
             // cancel_copy: the employee chose to replace the photo on file,
             // so the renewal "same photo again" guard does not apply.
@@ -3017,8 +2957,8 @@ export function EmployeeForm({
               if (validated) {
                 setPhotoRejectionCount(0);
               } else if (aiRejected) {
-                // Only genuine AI rejections count toward the manual-review
-                // threshold — service failures don't.
+                // A real AI rejection, or a check that could not run, counts
+                // toward the manual-review threshold (see PhotoUpload).
                 setPhotoRejectionCount((c) => c + 1);
               }
               if (photoError) setPhotoError(null);
@@ -3198,6 +3138,7 @@ export function EmployeeForm({
                 description="Spread open: front + back cover visible"
                 expectedType="COVER"
                 accept="application/pdf,image/jpeg,image/png"
+                maxSizeMB={MAX_FILE_MB}
                 file={coverUI.file}
                 preview={coverUI.preview || undefined}
                 validated={!!passportPages.cover?.validated}
@@ -3305,6 +3246,7 @@ export function EmployeeForm({
                 description="Spread open: data page + opposite page"
                 expectedType="INSIDE_PAGES"
                 accept="application/pdf,image/jpeg,image/png"
+                maxSizeMB={MAX_FILE_MB}
                 file={insideUI.file}
                 preview={insideUI.preview || undefined}
                 validated={!!passportPages.insidePages?.validated}
@@ -3580,6 +3522,7 @@ export function EmployeeForm({
                       description={additionalPageCopy.slotDescription}
                       expectedType="INSIDE_PAGES"
                       accept="application/pdf,image/jpeg,image/png"
+                      maxSizeMB={MAX_FILE_MB}
                       file={additionalPageUI.file}
                       preview={additionalPageUI.preview || undefined}
                       validated={!!passportPages.additionalPage?.validated}
@@ -3711,7 +3654,7 @@ export function EmployeeForm({
                         description="Front of Pakistan ID"
                         expectedType="INSIDE_PAGES"
                         accept="application/pdf,image/jpeg,image/png"
-                        maxSizeMB={10}
+                        maxSizeMB={MAX_FILE_MB}
                         file={pakistanIdFrontUI.file}
                         preview={pakistanIdFrontUI.preview || undefined}
                         validated={!!pakistanIdFrontDoc?.validated}
@@ -3736,7 +3679,7 @@ export function EmployeeForm({
                         description="Back of Pakistan ID"
                         expectedType="INSIDE_PAGES"
                         accept="application/pdf,image/jpeg,image/png"
-                        maxSizeMB={10}
+                        maxSizeMB={MAX_FILE_MB}
                         file={pakistanIdBackUI.file}
                         preview={pakistanIdBackUI.preview || undefined}
                         validated={!!pakistanIdBackDoc?.validated}
@@ -3902,7 +3845,7 @@ export function EmployeeForm({
                       description={`Scan or photo of your ${VISA_CATEGORY_LABELS[employeeVisaCategory!] || 'supporting document'} (PDF or image)`}
                       expectedType="INSIDE_PAGES"
                       accept="application/pdf,image/jpeg,image/png"
-                      maxSizeMB={10}
+                      maxSizeMB={MAX_FILE_MB}
                       file={visaDocUI.file}
                       preview={visaDocUI.preview || undefined}
                       validated={!!visaDoc?.validated}
@@ -3916,8 +3859,8 @@ export function EmployeeForm({
                         });
                         setVisaDocUI({ preview, validating: false, error: null, file });
                         const result = await uploadDocument(submission.id, 'visa_document', file);
-                        if (!result) {
-                          setVisaDocUI({ preview, validating: false, error: 'Failed to upload', file });
+                        if (isUploadFailure(result)) {
+                          setVisaDocUI({ preview, validating: false, error: result.error, file });
                           return false;
                         }
                         const docWithMeta = { ...result, validated: true, visa_category: employeeVisaCategory };
@@ -4035,7 +3978,7 @@ export function EmployeeForm({
                       description="Scan or photo of your previous UAE visa (PDF or image)"
                       expectedType="INSIDE_PAGES"
                       accept="application/pdf,image/jpeg,image/png"
-                      maxSizeMB={10}
+                      maxSizeMB={MAX_FILE_MB}
                       file={previousVisaUI.file}
                       preview={previousVisaUI.preview || undefined}
                       validated={!!previousVisaDoc?.validated}
@@ -4084,7 +4027,7 @@ export function EmployeeForm({
                           description="Front of Emirates ID"
                           expectedType="INSIDE_PAGES"
                           accept="application/pdf,image/jpeg,image/png"
-                          maxSizeMB={10}
+                          maxSizeMB={MAX_FILE_MB}
                           file={eidFrontUI.file}
                           preview={eidFrontUI.preview || undefined}
                           validated={!!eidFrontDoc?.validated}
@@ -4112,7 +4055,7 @@ export function EmployeeForm({
                           description="Back of Emirates ID"
                           expectedType="INSIDE_PAGES"
                           accept="application/pdf,image/jpeg,image/png"
-                          maxSizeMB={10}
+                          maxSizeMB={MAX_FILE_MB}
                           file={eidBackUI.file}
                           preview={eidBackUI.preview || undefined}
                           validated={!!eidBackDoc?.validated}
@@ -4233,7 +4176,7 @@ export function EmployeeForm({
                       description="Front of your Emirates ID"
                       expectedType="INSIDE_PAGES"
                       accept="application/pdf,image/jpeg,image/png"
-                      maxSizeMB={10}
+                      maxSizeMB={MAX_FILE_MB}
                       file={eidFrontUI.file}
                       preview={eidFrontUI.preview || undefined}
                       validated={!!eidFrontDoc?.validated}
@@ -4261,7 +4204,7 @@ export function EmployeeForm({
                       description="Back of your Emirates ID"
                       expectedType="INSIDE_PAGES"
                       accept="application/pdf,image/jpeg,image/png"
-                      maxSizeMB={10}
+                      maxSizeMB={MAX_FILE_MB}
                       file={eidBackUI.file}
                       preview={eidBackUI.preview || undefined}
                       validated={!!eidBackDoc?.validated}
@@ -4753,7 +4696,7 @@ export function EmployeeForm({
                     filename={degreeDoc?.filename}
                     onUpload={async (file) => {
                       const result = await uploadDocument(submission.id, 'degree_attested', file);
-                      if (result) {
+                      if (!isUploadFailure(result)) {
                         setDegreeDoc(result);
                         degreeDocRef.current = result;
                         await saveDocRefs(buildDocRefs());
@@ -4773,7 +4716,7 @@ export function EmployeeForm({
                     filename={transcriptDoc?.filename}
                     onUpload={async (file) => {
                       const result = await uploadDocument(submission.id, 'transcript_of_records', file);
-                      if (result) {
+                      if (!isUploadFailure(result)) {
                         setTranscriptDoc(result);
                         transcriptDocRef.current = result;
                         await saveDocRefs(buildDocRefs());
@@ -4796,7 +4739,7 @@ export function EmployeeForm({
                       filename={educationAdditionalDoc?.filename}
                       onUpload={async (file) => {
                         const result = await uploadDocument(submission.id, 'education_additional', file);
-                        if (result) {
+                        if (!isUploadFailure(result)) {
                           setEducationAdditionalDoc(result);
                           educationAdditionalDocRef.current = result;
                           await saveDocRefs(buildDocRefs());
@@ -5113,7 +5056,7 @@ export function EmployeeForm({
                   description="Scan or photo of your sponsor's passport (PDF or image)"
                   expectedType="INSIDE_PAGES"
                   accept="application/pdf,image/jpeg,image/png"
-                  maxSizeMB={10}
+                  maxSizeMB={MAX_FILE_MB}
                   file={sponsorPassportUI.file}
                   preview={sponsorPassportUI.preview || undefined}
                   validated={!!sponsorPassportDoc?.validated}
@@ -5182,7 +5125,7 @@ export function EmployeeForm({
                   description="Scan or photo of your sponsor's residence visa (PDF or image)"
                   expectedType="INSIDE_PAGES"
                   accept="application/pdf,image/jpeg,image/png"
-                  maxSizeMB={10}
+                  maxSizeMB={MAX_FILE_MB}
                   file={sponsorVisaUI.file}
                   preview={sponsorVisaUI.preview || undefined}
                   validated={!!sponsorVisaDoc?.validated}
@@ -5247,7 +5190,7 @@ export function EmployeeForm({
                     description="Front of sponsor's Emirates ID"
                     expectedType="INSIDE_PAGES"
                     accept="application/pdf,image/jpeg,image/png"
-                    maxSizeMB={10}
+                    maxSizeMB={MAX_FILE_MB}
                     file={sponsorEidFrontUI.file}
                     preview={sponsorEidFrontUI.preview || undefined}
                     validated={!!sponsorEidFrontDoc?.validated}
@@ -5308,7 +5251,7 @@ export function EmployeeForm({
                     description="Back of sponsor's Emirates ID"
                     expectedType="INSIDE_PAGES"
                     accept="application/pdf,image/jpeg,image/png"
-                    maxSizeMB={10}
+                    maxSizeMB={MAX_FILE_MB}
                     file={sponsorEidBackUI.file}
                     preview={sponsorEidBackUI.preview || undefined}
                     validated={!!sponsorEidBackDoc?.validated}

@@ -55,8 +55,8 @@ export const EKYC_UI = {
     'Bitte vervollständigen Sie vor dem Absenden Folgendes:'
   ),
   submitFailed: t(
-    'The form could not be submitted. Please try again in a moment.',
-    'Das Formular konnte nicht abgesendet werden. Bitte versuchen Sie es gleich noch einmal.'
+    'The form could not be submitted. Please try again. If it happens again, please email portal@tme-services.com.',
+    'Das Formular konnte nicht abgesendet werden. Bitte versuchen Sie es erneut. Falls es wieder passiert, schreiben Sie bitte an portal@tme-services.com.'
   ),
   submitChanged: t(
     'The form changed while it was being sent (for example a file was still uploading). Nothing is lost. Please try again.',
@@ -73,13 +73,35 @@ export const EKYC_UI = {
   uploading: t('Uploading...', 'Wird hochgeladen...'),
   onFile: t('On file', 'Hochgeladen'),
   view: t('View', 'Ansehen'),
-  maxSize: t('Each file up to 4.5 MB.', 'Jede Datei bis zu 4,5 MB.'),
+  maxSize: t('Each file up to 10 MB.', 'Jede Datei bis zu 10 MB.'),
   wrongType: t('Please upload a PDF, JPG or PNG file.', 'Bitte laden Sie eine PDF-, JPG- oder PNG-Datei hoch.'),
   tooBig: t(
-    'The file is larger than 4.5 MB. Please upload a smaller PDF or a photo.',
-    'Die Datei ist größer als 4,5 MB. Bitte laden Sie eine kleinere PDF-Datei oder ein Foto hoch.'
+    'The file is larger than 10 MB. Please upload a smaller PDF or a photo.',
+    'Die Datei ist größer als 10 MB. Bitte laden Sie eine kleinere PDF-Datei oder ein Foto hoch.'
   ),
   uploadFailed: t('The upload did not work. Please try again.', 'Das Hochladen hat nicht funktioniert. Bitte versuchen Sie es erneut.'),
+
+  // Why a request failed (one text per kind of failure, see lib/request-outcome)
+  offline: t(
+    'Your internet connection dropped while sending. Please check your connection and try again.',
+    'Ihre Internetverbindung wurde beim Senden unterbrochen. Bitte prüfen Sie Ihre Verbindung und versuchen Sie es erneut.'
+  ),
+  busy: t(
+    'Too many tries in a short time. Please wait one minute and try again.',
+    'Zu viele Versuche in kurzer Zeit. Bitte warten Sie eine Minute und versuchen Sie es dann erneut.'
+  ),
+  linkInvalid: t(
+    'This link is no longer valid. Please open the form again from the latest email we sent you, or email portal@tme-services.com.',
+    'Dieser Link ist nicht mehr gültig. Bitte öffnen Sie das Formular erneut über die letzte E-Mail, die wir Ihnen gesendet haben, oder schreiben Sie an portal@tme-services.com.'
+  ),
+  timeout: t(
+    'Our server took too long to answer. Please try again.',
+    'Unser Server hat zu lange für die Antwort gebraucht. Bitte versuchen Sie es erneut.'
+  ),
+  serverError: t(
+    'Something went wrong on our side. Please try again. If it happens again, please email portal@tme-services.com.',
+    'Bei uns ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut. Falls es wieder passiert, schreiben Sie bitte an portal@tme-services.com.'
+  ),
 
   // Signature pad (shared SignaturePad, bilingual texts)
   signDraw: t('Draw your signature', 'Bitte hier unterschreiben'),

@@ -42,8 +42,12 @@ import {
   updateDocumentReferences,
   autoSaveEmployeeData,
   getDocumentUrl,
+  isUploadFailure,
 } from '@/lib/supabase';
-import { calculateFullName, compressImageForAI, normalizePersonName } from '@/lib/utils';
+import { calculateFullName, normalizePersonName } from '@/lib/utils';
+import { callAiCheck } from '@/lib/ai-check-client';
+import { requestJson, failureMessage } from '@/lib/request-outcome';
+import type { FailureContext } from '@/lib/client-error-log';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { useIsMobile } from '@/lib/useIsMobile';
 import ExistingDocPreview from '@/components/ExistingDocPreview';
@@ -1075,15 +1079,15 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
   const handlePhotoUpload = async (file: File) => {
     const result = await uploadDocument(submission.id, 'photo', file);
-    if (result) {
-      const newDoc = { ...result, validated: false };
+    // A failure carries its own message; PhotoUpload shows it.
+    if (!isUploadFailure(result)) {
+      const newDoc = { path: result.path, filename: result.filename, validated: false };
       setPhotoDoc(newDoc);
       photoDocRef.current = newDoc;
       setPhotoError(null);
       await saveDocRefs(buildDocRefs({ photo: newDoc }));
-      return result;
     }
-    return null;
+    return result;
   };
 
   const handlePhotoManualReview = async () => {
@@ -1111,63 +1115,55 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   // Passport pages — validate, upload, extract (same routes as EmployeeForm)
   // ------------------------------------------------------------------
 
+  /** Logging context for a check or upload of `file` in this form. */
+  const fileContext = (action: string, file: File): FailureContext => ({
+    form: 'dependent',
+    action,
+    ref: submission.id,
+    file: { size: file.size, type: file.type },
+  });
+
   const validatePassportPageType = async (
     imageBase64: string,
     expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE',
-  ) => {
-    try {
-      const compressedImage = await compressImageForAI(imageBase64);
-      const response = await fetch('/api/validate-passport-page', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: compressedImage,
-          expectedType,
-          // Selects the additional-page prompt variant server-side; ignored
-          // for cover/inside checks.
-          nationality,
-          submissionId: submission.id,
-          token: aiToken,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        return {
-          valid: false,
-          error:
-            (result?.error as string) ||
-            (result?.errorMessage as string) ||
-            'Unable to validate page. Please try again.',
-          infra: result?.infra === true,
-        };
-      }
-      return {
-        valid: result.matches as boolean,
-        error: result.errorMessage as string | undefined,
-        infra: result?.infra === true,
-      };
-    } catch {
-      // Network failure: the check could not run — infra, never a strike.
-      return { valid: false, error: 'Unable to validate page. Please try again.', infra: true };
+    file: File,
+  ): Promise<{ valid: boolean; error?: string; failed?: boolean; countsAsStrike?: boolean }> => {
+    const slot = expectedType === 'COVER' ? 'cover' : expectedType === 'INSIDE_PAGES' ? 'inside' : 'additional';
+    const outcome = await callAiCheck<{ matches?: boolean; errorMessage?: string }>(
+      '/api/validate-passport-page',
+      {
+        expectedType,
+        // Selects the additional-page prompt variant server-side; ignored
+        // for cover/inside checks.
+        nationality,
+        submissionId: submission.id,
+        token: aiToken,
+      },
+      imageBase64,
+      fileContext(`check:passport-${slot}`, file)
+    );
+    if (!outcome.ok) {
+      // The check did not give a verdict (or the route refused it with its
+      // own reason, e.g. the single-page rule). The message names why.
+      return { valid: false, error: outcome.message, failed: true, countsAsStrike: outcome.countsAsStrike };
     }
+    return {
+      valid: outcome.data.matches === true,
+      error: outcome.data.errorMessage,
+    };
   };
 
-  const extractPassportData = async (imageBase64: string) => {
-    try {
-      const compressedImage = await compressImageForAI(imageBase64);
-      const response = await fetch('/api/extract-passport', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: compressedImage, submissionId: submission.id, token: aiToken }),
-      });
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.data) return result.data as Record<string, unknown>;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+  // Returns null on any failure: the sponsor then types the data by hand
+  // (callAiCheck already logged the failure).
+  const extractPassportData = async (imageBase64: string, file: File) => {
+    const outcome = await callAiCheck<{ success?: boolean; data?: Record<string, unknown> }>(
+      '/api/extract-passport',
+      { submissionId: submission.id, token: aiToken },
+      imageBase64,
+      fileContext('extract:passport-inside', file)
+    );
+    if (outcome.ok && outcome.data.success && outcome.data.data) return outcome.data.data;
+    return null;
   };
 
   /**
@@ -1220,12 +1216,13 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setCoverUI({ preview, validating: true, error: null, file });
 
     try {
-      const validation = await validatePassportPageType(preview, 'COVER');
+      const validation = await validatePassportPageType(preview, 'COVER', file);
       if (!validation.valid) {
-        // infra=true means the check could not RUN (API/model error) — never
-        // a rejection; don't burn a strike, just ask the user to retry.
-        if (validation.infra) {
-          setCoverUI({ preview, validating: false, error: 'We could not check this file right now — please try again in a moment.', file });
+        // The check itself failed: show why, and count it toward the
+        // manual-review option so the sponsor is never stuck retrying.
+        if (validation.failed) {
+          if (validation.countsAsStrike) setCoverRejectionCount((c) => c + 1);
+          setCoverUI({ preview, validating: false, error: validation.error ?? null, file });
           return false;
         }
         setCoverRejectionCount((c) => c + 1);
@@ -1244,14 +1241,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       return false;
     }
 
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'cover', file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setCoverUI({ preview, validating: false, error: 'Upload failed. Please check your connection and try again.', file });
+    const result = await uploadPassportPage(submission.id, 'cover', file);
+    if (isUploadFailure(result)) {
+      setCoverUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -1286,10 +1278,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setInsideUI({ preview, validating: true, error: null, file });
 
     try {
-      const validation = await validatePassportPageType(preview, 'INSIDE_PAGES');
+      const validation = await validatePassportPageType(preview, 'INSIDE_PAGES', file);
       if (!validation.valid) {
-        if (validation.infra) {
-          setInsideUI({ preview, validating: false, error: 'We could not check this file right now — please try again in a moment.', file });
+        if (validation.failed) {
+          if (validation.countsAsStrike) setInsideRejectionCount((c) => c + 1);
+          setInsideUI({ preview, validating: false, error: validation.error ?? null, file });
           return false;
         }
         setInsideRejectionCount((c) => c + 1);
@@ -1307,14 +1300,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       return false;
     }
 
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'insidePages', file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setInsideUI({ preview, validating: false, error: 'Upload failed. Please check your connection and try again.', file });
+    const result = await uploadPassportPage(submission.id, 'insidePages', file);
+    if (isUploadFailure(result)) {
+      setInsideUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -1333,7 +1321,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setExtractingPassport(true);
     let extracted: Record<string, unknown> | null = null;
     try {
-      extracted = await extractPassportData(preview);
+      extracted = await extractPassportData(preview, file);
     } catch {
       extracted = null;
     }
@@ -1392,14 +1380,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     // slot's "Validating..." badge would be misleading.
     setCoverUI({ preview: coverUI.preview, file: coverUI.file, validating: false, error: null });
     setCoverManualReviewSubmitting(true);
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'cover', coverUI.file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setCoverUI({ preview: coverUI.preview, file: coverUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    const result = await uploadPassportPage(submission.id, 'cover', coverUI.file);
+    if (isUploadFailure(result)) {
+      setCoverUI({ preview: coverUI.preview, file: coverUI.file, validating: false, error: result.error });
       setCoverManualReviewSubmitting(false);
       return;
     }
@@ -1417,14 +1400,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     if (!insideUI.file || !insideUI.preview) return;
     setInsideUI({ preview: insideUI.preview, file: insideUI.file, validating: false, error: null });
     setInsideManualReviewSubmitting(true);
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'insidePages', insideUI.file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setInsideUI({ preview: insideUI.preview, file: insideUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    const result = await uploadPassportPage(submission.id, 'insidePages', insideUI.file);
+    if (isUploadFailure(result)) {
+      setInsideUI({ preview: insideUI.preview, file: insideUI.file, validating: false, error: result.error });
       setInsideManualReviewSubmitting(false);
       return;
     }
@@ -1435,7 +1413,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setExtractingPassport(true);
     let extracted: Record<string, unknown> | null = null;
     try {
-      extracted = await extractPassportData(insideUI.preview);
+      extracted = await extractPassportData(insideUI.preview, insideUI.file);
     } catch {
       extracted = null;
     }
@@ -1459,24 +1437,19 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
   };
 
-  const extractAdditionalPageData = async (preview: string): Promise<Record<string, unknown> | null> => {
-    try {
-      const isImg = preview.startsWith('data:image/');
-      const payload = isImg ? await compressImageForAI(preview) : preview;
-      const response = await fetch('/api/extract-passport-additional', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // nationality picks the extraction variant (Indian family-details page
-        // vs Syrian issue-details page).
-        body: JSON.stringify({ image: payload, nationality, submissionId: submission.id, token: aiToken }),
-      });
-      if (!response.ok) return null;
-      const result = await response.json();
-      if (result.success && result.data) return result.data as Record<string, unknown>;
-      return null;
-    } catch {
-      return null;
-    }
+  // Returns null on any failure: the sponsor then types the data by hand
+  // (callAiCheck already logged the failure).
+  const extractAdditionalPageData = async (preview: string, file: File): Promise<Record<string, unknown> | null> => {
+    const outcome = await callAiCheck<{ success?: boolean; data?: Record<string, unknown> }>(
+      '/api/extract-passport-additional',
+      // nationality picks the extraction variant (Indian family-details page
+      // vs Syrian issue-details page).
+      { nationality, submissionId: submission.id, token: aiToken },
+      preview,
+      fileContext('extract:passport-additional', file)
+    );
+    if (outcome.ok && outcome.data.success && outcome.data.data) return outcome.data.data;
+    return null;
   };
 
   /**
@@ -1513,10 +1486,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setAdditionalPageUI({ preview, validating: true, error: null, file });
 
     try {
-      const validation = await validatePassportPageType(preview, 'ADDITIONAL_PAGE');
+      const validation = await validatePassportPageType(preview, 'ADDITIONAL_PAGE', file);
       if (!validation.valid) {
-        if (validation.infra) {
-          setAdditionalPageUI({ preview, validating: false, error: 'We could not check this file right now — please try again in a moment.', file });
+        if (validation.failed) {
+          if (validation.countsAsStrike) setAdditionalRejectionCount((c) => c + 1);
+          setAdditionalPageUI({ preview, validating: false, error: validation.error ?? null, file });
           return false;
         }
         setAdditionalRejectionCount((c) => c + 1);
@@ -1529,13 +1503,13 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     }
 
     const result = await uploadPassportPage(submission.id, 'additionalPage', file);
-    if (!result) {
-      setAdditionalPageUI({ preview, validating: false, error: 'Failed to upload file', file });
+    if (isUploadFailure(result)) {
+      setAdditionalPageUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
     setAdditionalPageUI({ preview, validating: false, error: null, file });
-    const extracted = await extractAdditionalPageData(preview);
+    const extracted = await extractAdditionalPageData(preview, file);
     if (extracted) applyAdditionalPageData(extracted);
 
     const updatedPages = {
@@ -1559,19 +1533,14 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     if (!additionalPageUI.file || !additionalPageUI.preview) return;
     setAdditionalPageUI({ preview: additionalPageUI.preview, file: additionalPageUI.file, validating: false, error: null });
     setAdditionalManualReviewSubmitting(true);
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, 'additionalPage', additionalPageUI.file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setAdditionalPageUI({ preview: additionalPageUI.preview, file: additionalPageUI.file, validating: false, error: 'Upload failed. Please check your connection and try again.' });
+    const result = await uploadPassportPage(submission.id, 'additionalPage', additionalPageUI.file);
+    if (isUploadFailure(result)) {
+      setAdditionalPageUI({ preview: additionalPageUI.preview, file: additionalPageUI.file, validating: false, error: result.error });
       setAdditionalManualReviewSubmitting(false);
       return;
     }
 
-    const extracted = await extractAdditionalPageData(additionalPageUI.preview);
+    const extracted = await extractAdditionalPageData(additionalPageUI.preview, additionalPageUI.file);
     if (extracted) applyAdditionalPageData(extracted);
 
     setAdditionalManualReviewSubmitting(false);
@@ -1647,53 +1616,40 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     // contract, mirrors how the passport ref carries its extracted_data).
     let extractedCnic: string | null = null;
     if (isImage) {
-      try {
-        const compressedImage = await compressImageForAI(preview);
-        const response = await fetch('/api/extract-pakistan-id', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'front', submissionId: submission.id, token: aiToken }),
-        });
-        if (response.ok) {
-          const extractResult = await response.json();
-          if (!extractResult.success && !extractResult.infra) {
-            setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
-            // Clear any previously-validated doc so a stale green "Valid"
-            // badge can't sit next to this red error border.
-            setPakistanIdFrontDoc(undefined);
-            pakistanIdFrontDocRef.current = undefined;
-            await saveDocRefs(buildDocRefs());
-            return false;
-          }
-          if (extractResult.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
-          if (typeof extractResult.data?.cnic_number === 'string' && extractResult.data.cnic_number) {
-            extractedCnic = extractResult.data.cnic_number;
-          }
-        } else {
-          setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
-          setPakistanIdFrontDoc(undefined);
-          pakistanIdFrontDocRef.current = undefined;
-          await saveDocRefs(buildDocRefs());
-          return false;
-        }
-      } catch (err) {
-        console.error('Pakistan ID front validation error:', err);
-        setPakistanIdFrontUI({ preview, validating: false, error: 'Verification failed. Please try again.', file });
+      const outcome = await callAiCheck<{ success?: boolean; data?: { father_name?: string; cnic_number?: unknown } }>(
+        '/api/extract-pakistan-id',
+        { side: 'front', submissionId: submission.id, token: aiToken },
+        preview,
+        fileContext('check:pakistan-id-front', file)
+      );
+      // A check that could not run (already logged) is no verdict: this slot
+      // has no "check by hand" option, so blocking here would trap the person.
+      // Upload as for a PDF (which skips the check); TME checks it on the portal.
+      const extractResult = outcome.ok ? outcome.data : null;
+      if (extractResult && !extractResult.success) {
+        setPakistanIdFrontUI({ preview, validating: false, error: 'This does not appear to be a Pakistani National ID card (CNIC/NICOP). Please upload the correct document.', file });
+        // Clear any previously-validated doc so a stale green "Valid"
+        // badge can't sit next to this red error border.
         setPakistanIdFrontDoc(undefined);
         pakistanIdFrontDocRef.current = undefined;
         await saveDocRefs(buildDocRefs());
         return false;
       }
+      if (extractResult?.data?.father_name) setValue('father_full_name', extractResult.data.father_name);
+      if (typeof extractResult?.data?.cnic_number === 'string' && extractResult.data.cnic_number) {
+        extractedCnic = extractResult.data.cnic_number;
+      }
     }
 
     const result = await uploadDocument(submission.id, 'pakistan_id_front', file);
-    if (!result) {
-      setPakistanIdFrontUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setPakistanIdFrontUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
     const newDoc = {
-      ...result,
+      path: result.path,
+      filename: result.filename,
       validated: true,
       // Never attach an empty extracted_data object — the portal treats the
       // key's presence as "extraction ran".
@@ -1724,43 +1680,41 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setPakistanIdBackUI({ preview, validating: true, error: null, file });
 
     if (isImage) {
-      try {
-        const compressedImage = await compressImageForAI(preview);
-        const response = await fetch('/api/extract-pakistan-id', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, side: 'back', submissionId: submission.id, token: aiToken }),
-        });
-        if (response.ok) {
-          const extractResult = await response.json();
-          if (!extractResult.success && !extractResult.infra) {
-            setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
-            setPakistanIdBackDoc(undefined);
-            pakistanIdBackDocRef.current = undefined;
-            await saveDocRefs(buildDocRefs());
-            return false;
-          }
-          if (extractResult.data?.address) {
-            if (!getValues('home_street_address')) setValue('home_street_address', String(extractResult.data.address));
-            setValue('home_country', 'Pakistan');
-            if (extractResult.data.address_city && !getValues('home_city')) {
-              setValue('home_city', String(extractResult.data.address_city));
-            }
-            setTimeout(() => autoSave(getValues()), 100);
-          }
+      // A failed check stays soft here, as before: the upload goes ahead
+      // (callAiCheck already logged the failure).
+      const outcome = await callAiCheck<{ success?: boolean; data?: { address?: unknown; address_city?: unknown } }>(
+        '/api/extract-pakistan-id',
+        { side: 'back', submissionId: submission.id, token: aiToken },
+        preview,
+        fileContext('check:pakistan-id-back', file)
+      );
+      if (outcome.ok) {
+        const extractResult = outcome.data;
+        if (!extractResult.success) {
+          setPakistanIdBackUI({ preview, validating: false, error: 'This does not appear to be the back of a Pakistani National ID card. Please upload the correct document.', file });
+          setPakistanIdBackDoc(undefined);
+          pakistanIdBackDocRef.current = undefined;
+          await saveDocRefs(buildDocRefs());
+          return false;
         }
-      } catch (err) {
-        console.error('Pakistan ID back validation error:', err);
+        if (extractResult.data?.address) {
+          if (!getValues('home_street_address')) setValue('home_street_address', String(extractResult.data.address));
+          setValue('home_country', 'Pakistan');
+          if (extractResult.data.address_city && !getValues('home_city')) {
+            setValue('home_city', String(extractResult.data.address_city));
+          }
+          setTimeout(() => autoSave(getValues()), 100);
+        }
       }
     }
 
     const result = await uploadDocument(submission.id, 'pakistan_id_back', file);
-    if (!result) {
-      setPakistanIdBackUI({ preview, validating: false, error: 'Failed to upload', file });
+    if (isUploadFailure(result)) {
+      setPakistanIdBackUI({ preview, validating: false, error: result.error, file });
       return false;
     }
 
-    const newDoc = { ...result, validated: true };
+    const newDoc = { path: result.path, filename: result.filename, validated: true };
     setPakistanIdBackDoc(newDoc);
     pakistanIdBackDocRef.current = newDoc;
     setPakistanIdBackUI({ preview, validating: false, error: null, file });
@@ -1806,9 +1760,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
   const handlePlainUpload = (key: PlainDocKey) => async (file: File) => {
     const result = await uploadDocument(submission.id, key, file);
-    if (result) {
-      PLAIN_SETTERS[key].ref.current = result;
-      PLAIN_SETTERS[key].set(result);
+    // A failure carries its own message; FileUploadSlot shows it.
+    if (!isUploadFailure(result)) {
+      const doc = { path: result.path, filename: result.filename };
+      PLAIN_SETTERS[key].ref.current = doc;
+      PLAIN_SETTERS[key].set(doc);
       await saveDocRefs(buildDocRefs());
     }
     return result;
@@ -1911,28 +1867,23 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const response = await fetch('/api/submit-dependent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: submission.id, dependentData: data, signature }),
-      });
-      if (response.ok) {
+      const outcome = await requestJson(
+        '/api/submit-dependent',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: submission.id, dependentData: data, signature }),
+        },
+        { form: 'dependent', action: 'submit', ref: submission.id }
+      );
+      if (outcome.ok) {
         onSubmitted();
         return;
       }
       // Surface the server's reason (e.g. the required-documents gate listing
-      // what's missing) instead of a generic failure.
-      let message = 'Failed to submit. Please try again.';
-      try {
-        const body = await response.json();
-        if (typeof body?.error === 'string' && body.error) message = body.error;
-      } catch {
-        // Non-JSON error body — keep the generic message.
-      }
-      setSubmitError(message);
-    } catch (err) {
-      console.error('Error submitting dependent form:', err);
-      setSubmitError('An error occurred. Please try again.');
+      // what's missing) when it sent one, otherwise the plain message for
+      // this kind of failure.
+      setSubmitError(failureMessage(outcome));
     } finally {
       setSubmitting(false);
     }
@@ -2046,6 +1997,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         >
           <PhotoUpload
             submissionId={submission.id}
+            form="dependent"
             value={photoDoc}
             // Renewal only: shows the photo on file and enables the SHA-256 +
             // vision reuse protection. A first registration has none.
@@ -2070,8 +2022,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               if (validated) {
                 setPhotoRejectionCount(0);
               } else if (aiRejected) {
-                // Only genuine AI rejections count toward the manual-review
-                // threshold — service failures don't.
+                // A real AI rejection, or a check that could not run, counts
+                // toward the manual-review threshold (see PhotoUpload).
                 setPhotoRejectionCount((c) => c + 1);
               }
               if (photoError) setPhotoError(null);

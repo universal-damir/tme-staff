@@ -5,6 +5,7 @@ import { TME_COLORS } from '@/lib/constants';
 import { Input, CustomDropdown, CurrencyInput } from '@/components/ui';
 import { AlertTriangle } from 'lucide-react';
 import { InfoNote } from './chrome';
+import { isUploadFailure, type UploadResult } from '@/lib/supabase';
 import { PlainDocSlot, type DocSlot } from './StepPeopleDocuments';
 import type { DraftCompany } from './draft';
 import {
@@ -40,7 +41,7 @@ interface StepVisaFacilityProps {
     personIndex: number,
     slot: DocSlot,
     file: File,
-  ) => Promise<{ path: string; filename: string } | null>;
+  ) => Promise<UploadResult>;
 }
 
 export function StepVisaFacility({
@@ -60,7 +61,8 @@ export function StepVisaFacility({
 
   const uploadCertificate = async (index: number, file: File) => {
     const uploaded = await uploadFile(index, 'education_certificate', file);
-    if (!uploaded) return null;
+    // A failure goes back to the slot as is; it shows the reason.
+    if (isUploadFailure(uploaded)) return uploaded;
     onDocumentChange(index, 'education_certificate', {
       path: uploaded.path,
       filename: uploaded.filename,

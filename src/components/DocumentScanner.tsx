@@ -114,7 +114,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
   // Desktop bypass: auto-confirm with the original file and render nothing.
   // Lets every caller (useScannerIntercept and the direct-JSX usages in
-  // EmployeeForm cover/inside + PassportMultiUpload) drop the scanner UI
+  // EmployeeForm cover/inside) drop the scanner UI
   // automatically without touching their code.
   useEffect(() => {
     if (!isMobile && !desktopBypassFiredRef.current) {

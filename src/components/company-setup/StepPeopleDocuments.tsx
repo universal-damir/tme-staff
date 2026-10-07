@@ -40,7 +40,8 @@ import {
   passportAdditionalPageVariant,
   type PassportAdditionalPageVariant,
 } from '@/lib/staff-form-logic';
-import { compressImageForAI } from '@/lib/utils';
+import { callAiCheck, UNREADABLE_FILE_MESSAGE, type AiCheckFailure } from '@/lib/ai-check-client';
+import { isUploadFailure, type UploadResult } from '@/lib/supabase';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 import {
@@ -202,7 +203,7 @@ interface StepPeopleDocumentsProps {
     personIndex: number,
     slot: DocSlot,
     file: File,
-  ) => Promise<{ path: string; filename: string } | null>;
+  ) => Promise<UploadResult>;
   /** Flush the autosave right after an extraction prefill lands. */
   onExtractionApplied: () => void;
 }
@@ -364,21 +365,21 @@ export function StepPeopleDocuments({
   ) => {
     patchState(personIndex, 'passport', { extracting: true });
     try {
-      const res = await fetch(`/api/company-setup/${token}/extract-passport`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: aiImage }),
-      });
-      const result = (await res.json().catch(() => null)) as {
+      const outcome = await callAiCheck<{
         success?: boolean;
         data?: PassportExtractionData;
-      } | null;
+      }>(`/api/company-setup/${token}/extract-passport`, {}, aiImage, {
+        form: 'company-setup',
+        action: 'extract:passport',
+        ref: token,
+      });
+      const result = outcome.ok ? outcome.data : null;
 
       // Abort if the client removed/replaced the passport while we read it.
       const current = documentsRef.current[String(personIndex)]?.passport;
       if (!current || current.path !== ref.path) return;
 
-      if (res.ok && result?.success && result.data) {
+      if (result?.success && result.data) {
         // Compute FIRST against the live person, then patch with a pure merge.
         const person = personsRef.current[personIndex];
         if (!person) return;
@@ -403,9 +404,8 @@ export function StepPeopleDocuments({
         onDocumentChange(personIndex, 'passport', refWithData);
         onExtractionApplied();
       }
-      // Extraction failing is silent — the fields below stay manual.
-    } catch {
-      // Network failure — same silence, manual entry covers it.
+      // Extraction failing is silent (callAiCheck logged it): the fields
+      // below stay manual.
     } finally {
       patchState(personIndex, 'passport', { extracting: false });
     }
@@ -420,21 +420,21 @@ export function StepPeopleDocuments({
   ) => {
     patchState(personIndex, 'passport_additional', { extracting: true });
     try {
-      const res = await fetch(`/api/company-setup/${token}/extract-passport-additional`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: aiImage, nationality }),
-      });
-      const result = (await res.json().catch(() => null)) as {
+      const outcome = await callAiCheck<{
         success?: boolean;
         data?: AdditionalPageExtractionData;
-      } | null;
+      }>(`/api/company-setup/${token}/extract-passport-additional`, { nationality }, aiImage, {
+        form: 'company-setup',
+        action: 'extract:passport_additional',
+        ref: token,
+      });
+      const result = outcome.ok ? outcome.data : null;
 
       // Abort if the client removed/replaced the page while we read it.
       const current = documentsRef.current[String(personIndex)]?.passport_additional;
       if (!current || current.path !== ref.path) return;
 
-      if (res.ok && result?.success && result.data) {
+      if (result?.success && result.data) {
         const person = personsRef.current[personIndex];
         if (!person) return;
         const outcome = applyAdditionalPageExtraction(person, result.data);
@@ -448,8 +448,7 @@ export function StepPeopleDocuments({
           onExtractionApplied();
         }
       }
-    } catch {
-      // Silent — the fields stay manual.
+      // Failing is silent (callAiCheck logged it): the fields stay manual.
     } finally {
       patchState(personIndex, 'passport_additional', { extracting: false });
     }
@@ -478,31 +477,27 @@ export function StepPeopleDocuments({
     try {
       dataUrl = await readFileAsDataUrl(file);
     } catch {
-      patchState(personIndex, slot, {
-        error: 'Could not read this file. Please try again.',
-      });
+      patchState(personIndex, slot, { error: UNREADABLE_FILE_MESSAGE });
       return false;
     }
 
     const uploaded = await uploadFile(personIndex, slot, file);
-    if (!uploaded) {
-      patchState(personIndex, slot, {
-        error: 'Upload failed. Please try again.',
-      });
+    if (isUploadFailure(uploaded)) {
+      patchState(personIndex, slot, { error: uploaded.error });
       return false;
     }
     patchState(personIndex, slot, { preview: dataUrl, validating: true });
 
     // Vision check runs against an image: PDFs are flattened to page 1 first
-    // (same approach as the staff onboarding forms).
+    // (same approach as the staff onboarding forms). callAiCheck makes it
+    // small enough to send.
     let aiImage = dataUrl;
     try {
       if (file.type === 'application/pdf') {
         aiImage = await renderPdfFirstPage(dataUrl);
       }
-      aiImage = await compressImageForAI(aiImage);
     } catch {
-      // Fall through with whatever we have — the route rejects if unusable.
+      // Fall through with the PDF itself; callAiCheck shrinks it.
     }
 
     const endpoint =
@@ -516,35 +511,33 @@ export function StepPeopleDocuments({
     // this very upload) — pass it only when prefill/extraction already set it.
     const body =
       slot === 'photo'
-        ? { image: aiImage }
+        ? {}
         : slot === 'proof_of_address'
           ? {
-              image: aiImage,
               expectedName: person.fullName?.trim() || undefined,
               expectedAddress: person.fullAddress?.trim() || undefined,
             }
           : {
-              image: aiImage,
               nationality: person.nationality || undefined,
               expectedType: slot === 'passport_additional' ? 'ADDITIONAL_PAGE' : 'INSIDE_PAGES',
             };
 
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const result = await res.json().catch(() => ({}));
+    const outcome = await callAiCheck(endpoint, body, aiImage, {
+      form: 'company-setup',
+      action: `check:${slot}`,
+      ref: token,
+      file: { size: file.size, type: file.type },
+    });
 
-      const infra = result?.infra === true || !res.ok;
-
-      // Infra first: the proof-of-address route reports an unrunnable check as
-      // valid=true + infra, so an accepted-before-infra order would file it as
-      // verified when nothing was verified.
-      if (infra) {
-        // The check could not run — never strand the client on our
-        // infrastructure: accept the upload flagged for manual review.
+    if (!outcome.ok) {
+      // The file is stored but our check could not run on it (AI down, file
+      // too large or unreadable for the check): never strand the client on
+      // our side. Accept it flagged for manual review, as before.
+      if (
+        outcome.kind === 'check_unavailable' ||
+        outcome.kind === 'too_large_for_check' ||
+        outcome.kind === 'unreadable_file'
+      ) {
         onDocumentChange(personIndex, slot, {
           path: uploaded.path,
           filename: uploaded.filename,
@@ -552,129 +545,149 @@ export function StepPeopleDocuments({
           needsReview: true,
           validationErrors: ['Automatic check unavailable. Flagged for manual review.'],
         });
-        patchState(personIndex, slot, {
-          validating: false,
-          error: undefined,
-          warnings: undefined,
-        });
+        patchState(personIndex, slot, { validating: false, error: undefined, warnings: undefined });
         return true;
       }
+      // Anything the client can act on (connection, link, too many tries):
+      // show the reason. It counts as a strike where a hand check can help,
+      // so after two the client can send the file to our team.
+      failCheck(personIndex, slot, outcome, uploaded);
+      return false;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = outcome.data as any;
 
-      const accepted =
-        slot === 'photo' || slot === 'proof_of_address'
-          ? result?.valid === true
-          : result?.matches === true;
+    const accepted =
+      slot === 'photo' || slot === 'proof_of_address'
+        ? result?.valid === true
+        : result?.matches === true;
 
-      if (accepted) {
-        const warnings: string[] =
-          slot === 'proof_of_address' && Array.isArray(result?.warnings) ? result.warnings : [];
-        // The bank statement is ALWAYS a human decision (3-month rule, address
-        // match): it stays needsReview whatever the model said, and any
-        // warning travels with the ref so the portal review drawer shows it.
-        // The address the statement actually prints rides along on the ref:
-        // the form offers it as a one-click fix for the home address, and that
-        // offer has to survive a reload or a resumed draft.
-        const printedAddress =
-          slot === 'proof_of_address' &&
-          typeof result?.observations?.address_on_document === 'string'
-            ? result.observations.address_on_document.trim()
-            : '';
-        const newRef: CompanySetupDocRef =
-          slot === 'proof_of_address'
-            ? {
-                path: uploaded.path,
-                filename: uploaded.filename,
-                uploadedAt: new Date().toISOString(),
-                needsReview: true,
-                ...(warnings.length > 0 ? { validationErrors: warnings } : {}),
-                ...(printedAddress
-                  ? { extractedData: { [STATEMENT_ADDRESS_KEY]: printedAddress } }
-                  : {}),
-              }
-            : {
-                path: uploaded.path,
-                filename: uploaded.filename,
-                uploadedAt: new Date().toISOString(),
-              };
-        if (slot === 'passport' || slot === 'passport_additional') {
-          // A replaced page must not leave the OLD auto-fill behind: clear the
-          // fields the previous extraction filled and the client never edited,
-          // then read the new scan.
-          const prevRef = documentsRef.current[String(personIndex)]?.[slot];
-          if (slot === 'passport') {
-            const prevApplied = extractedDataOf(prevRef);
-            if (prevApplied) {
-              onPatchPerson(personIndex, (p) => clearAppliedExtraction(p, prevApplied));
+    if (accepted) {
+      const warnings: string[] =
+        slot === 'proof_of_address' && Array.isArray(result?.warnings) ? result.warnings : [];
+      // The bank statement is ALWAYS a human decision (3-month rule, address
+      // match): it stays needsReview whatever the model said, and any
+      // warning travels with the ref so the portal review drawer shows it.
+      // The address the statement actually prints rides along on the ref:
+      // the form offers it as a one-click fix for the home address, and that
+      // offer has to survive a reload or a resumed draft.
+      const printedAddress =
+        slot === 'proof_of_address' &&
+        typeof result?.observations?.address_on_document === 'string'
+          ? result.observations.address_on_document.trim()
+          : '';
+      const newRef: CompanySetupDocRef =
+        slot === 'proof_of_address'
+          ? {
+              path: uploaded.path,
+              filename: uploaded.filename,
+              uploadedAt: new Date().toISOString(),
+              needsReview: true,
+              ...(warnings.length > 0 ? { validationErrors: warnings } : {}),
+              ...(printedAddress
+                ? { extractedData: { [STATEMENT_ADDRESS_KEY]: printedAddress } }
+                : {}),
             }
-          } else {
-            const prevApplied = additionalPageDataOf(prevRef);
-            if (prevApplied) {
-              onPatchPerson(personIndex, (p) => clearAppliedAdditionalPage(p, prevApplied));
-            }
+          : {
+              path: uploaded.path,
+              filename: uploaded.filename,
+              uploadedAt: new Date().toISOString(),
+            };
+      if (slot === 'passport' || slot === 'passport_additional') {
+        // A replaced page must not leave the OLD auto-fill behind: clear the
+        // fields the previous extraction filled and the client never edited,
+        // then read the new scan.
+        const prevRef = documentsRef.current[String(personIndex)]?.[slot];
+        if (slot === 'passport') {
+          const prevApplied = extractedDataOf(prevRef);
+          if (prevApplied) {
+            onPatchPerson(personIndex, (p) => clearAppliedExtraction(p, prevApplied));
+          }
+        } else {
+          const prevApplied = additionalPageDataOf(prevRef);
+          if (prevApplied) {
+            onPatchPerson(personIndex, (p) => clearAppliedAdditionalPage(p, prevApplied));
           }
         }
-        onDocumentChange(personIndex, slot, newRef);
-        patchState(personIndex, slot, {
-          validating: false,
-          error: undefined,
-          strikes: 0,
-          warnings: warnings.length > 0 ? warnings : undefined,
-        });
-        if (slot === 'passport') {
-          void runExtraction(personIndex, aiImage, newRef);
-        }
-        if (slot === 'passport_additional') {
-          void runAdditionalExtraction(personIndex, aiImage, newRef, person.nationality);
-        }
-        return true;
       }
-
-      const errors: string[] =
-        slot === 'photo'
-          ? Array.isArray(result?.errors) && result.errors.length > 0
-            ? result.errors
-            : ['The photo did not pass the automatic check.']
-          : slot === 'proof_of_address'
-            ? Array.isArray(result?.warnings) && result.warnings.length > 0
-              ? result.warnings
-              : ['This document did not pass the automatic check.']
-            : [result?.errorMessage || 'The passport page did not pass the automatic check.'];
-
-      // Rejection: clear the recorded ref AND the preview — a file that is
-      // not recorded must not sit on screen looking accepted. Count a
-      // strike and surface the reasons.
-      onDocumentChange(personIndex, slot, undefined);
-      setSlotState((prev) => {
-        const key = stateKey(personIndex, slot);
-        const current = prev[key] ?? { strikes: 0 };
-        return {
-          ...prev,
-          [key]: {
-            ...current,
-            preview: undefined,
-            validating: false,
-            warnings: undefined,
-            error: errors.join(' '),
-            strikes: current.strikes + 1,
-            lastErrors: errors,
-          },
-        };
+      onDocumentChange(personIndex, slot, newRef);
+      patchState(personIndex, slot, {
+        validating: false,
+        error: undefined,
+        strikes: 0,
+        warnings: warnings.length > 0 ? warnings : undefined,
       });
-      // Remember the upload so a manual-review submit can reference it.
-      pendingUploads.current[stateKey(personIndex, slot)] = uploaded;
-      return false;
-    } catch {
-      // Network failure mid-check — treat like infra.
-      onDocumentChange(personIndex, slot, {
-        path: uploaded.path,
-        filename: uploaded.filename,
-        uploadedAt: new Date().toISOString(),
-        needsReview: true,
-        validationErrors: ['Automatic check unavailable. Flagged for manual review.'],
-      });
-      patchState(personIndex, slot, { validating: false, error: undefined });
+      if (slot === 'passport') {
+        void runExtraction(personIndex, aiImage, newRef);
+      }
+      if (slot === 'passport_additional') {
+        void runAdditionalExtraction(personIndex, aiImage, newRef, person.nationality);
+      }
       return true;
     }
+
+    const errors: string[] =
+      slot === 'photo'
+        ? Array.isArray(result?.errors) && result.errors.length > 0
+          ? result.errors
+          : ['The photo did not pass the automatic check.']
+        : slot === 'proof_of_address'
+          ? Array.isArray(result?.warnings) && result.warnings.length > 0
+            ? result.warnings
+            : ['This document did not pass the automatic check.']
+          : [result?.errorMessage || 'The passport page did not pass the automatic check.'];
+
+    // Rejection: clear the recorded ref AND the preview — a file that is
+    // not recorded must not sit on screen looking accepted. Count a
+    // strike and surface the reasons.
+    onDocumentChange(personIndex, slot, undefined);
+    setSlotState((prev) => {
+      const key = stateKey(personIndex, slot);
+      const current = prev[key] ?? { strikes: 0 };
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          preview: undefined,
+          validating: false,
+          warnings: undefined,
+          error: errors.join(' '),
+          strikes: current.strikes + 1,
+          lastErrors: errors,
+        },
+      };
+    });
+    // Remember the upload so a manual-review submit can reference it.
+    pendingUploads.current[stateKey(personIndex, slot)] = uploaded;
+    return false;
+  };
+
+  /** A check that could not run: same clean-up as a rejection, with the
+   *  failure's own message; a strike only when a hand check can help. */
+  const failCheck = (
+    personIndex: number,
+    slot: AiSlot,
+    failure: AiCheckFailure,
+    uploaded: { path: string; filename: string },
+  ) => {
+    onDocumentChange(personIndex, slot, undefined);
+    setSlotState((prev) => {
+      const key = stateKey(personIndex, slot);
+      const current = prev[key] ?? { strikes: 0 };
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          preview: undefined,
+          validating: false,
+          warnings: undefined,
+          error: failure.message,
+          strikes: failure.countsAsStrike ? current.strikes + 1 : current.strikes,
+          lastErrors: ['Automatic check unavailable. Flagged for manual review.'],
+        },
+      };
+    });
+    pendingUploads.current[stateKey(personIndex, slot)] = uploaded;
   };
 
   const submitForManualReview = (personIndex: number, slot: AiSlot) => {
@@ -727,9 +740,10 @@ export function StepPeopleDocuments({
     personIndex: number,
     slot: PlainSlot,
     file: File,
-  ): Promise<{ path: string; filename: string } | null> => {
+  ): Promise<UploadResult> => {
     const uploaded = await uploadFile(personIndex, slot, file);
-    if (!uploaded) return null;
+    // A failure goes back to the slot as is; it shows the reason.
+    if (isUploadFailure(uploaded)) return uploaded;
     onDocumentChange(personIndex, slot, {
       path: uploaded.path,
       filename: uploaded.filename,
@@ -1690,7 +1704,7 @@ export function PlainDocSlot({
   description: string;
   staffProvided: boolean;
   docRef: CompanySetupDocRef | undefined;
-  onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
+  onUpload: (file: File) => Promise<UploadResult | null>;
   onRemove: () => void;
 }) {
   // The form asks the client to confirm our file is correct, so it also has to

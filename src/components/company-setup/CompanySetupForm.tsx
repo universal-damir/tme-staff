@@ -27,6 +27,9 @@ import {
   type DraftCompany,
 } from './draft';
 import { validateCompanyName } from '@/lib/company-setup-name-validation';
+import { requestJson, failureMessage, FAILURE_MESSAGES } from '@/lib/request-outcome';
+import { uploadFileToRoute } from '@/lib/upload-client';
+import type { UploadResult } from '@/lib/supabase';
 import { Input, PhoneInput } from '@/components/ui';
 import {
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
@@ -181,13 +184,17 @@ export function CompanySetupForm({
     let retryScheduled = false;
     setSaveState('saving');
     try {
-      const res = await fetch(`/api/company-setup/${token}/autosave`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: autosaveBody(),
-      });
-      if (handleClosedStatus(res.status)) return;
-      if (res.ok) {
+      const outcome = await requestJson(
+        `/api/company-setup/${token}/autosave`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: autosaveBody(),
+        },
+        { form: 'company-setup', action: 'autosave', ref: token }
+      );
+      if (!outcome.ok && outcome.status !== null && handleClosedStatus(outcome.status)) return;
+      if (outcome.ok) {
         retryDelay.current = AUTOSAVE_RETRY_BASE_MS;
         // Only the newest save may paint "Saved".
         if (mySeq === seq.current) {
@@ -199,23 +206,20 @@ export function CompanySetupForm({
       // Failure: the work is NOT saved — put it back on the dirty pile.
       dirty.current = true;
       setSaveState('error');
+      const tooLarge = outcome.kind === 'too_large';
+      // A wrong link will not fix itself: say so instead of "retrying".
       setSaveMessage(
-        res.status === 413
+        tooLarge
           ? 'Your entries have grown too large to save automatically. Please remove a document you uploaded twice, or contact your TME consultant.'
-          : null
+          : outcome.kind === 'link_invalid'
+            ? failureMessage(outcome)
+            : null
       );
-      if (res.status !== 413) {
+      if (!tooLarge && outcome.kind !== 'link_invalid') {
         scheduleSaveIn(retryDelay.current);
         retryScheduled = true;
         retryDelay.current = Math.min(retryDelay.current * 2, AUTOSAVE_RETRY_MAX_MS);
       }
-    } catch {
-      dirty.current = true;
-      setSaveState('error');
-      setSaveMessage(null);
-      scheduleSaveIn(retryDelay.current);
-      retryScheduled = true;
-      retryDelay.current = Math.min(retryDelay.current * 2, AUTOSAVE_RETRY_MAX_MS);
     } finally {
       inFlight.current = false;
       // Something changed while we were saving — save again.
@@ -338,28 +342,19 @@ export function CompanySetupForm({
   );
 
   const uploadFile = useCallback(
-    async (
-      personIndex: number,
-      slot: DocSlot,
-      file: File
-    ): Promise<{ path: string; filename: string } | null> => {
-      try {
-        const fd = new FormData();
-        fd.append('personIndex', String(personIndex));
-        fd.append('slot', slot);
-        fd.append('file', file);
-        const res = await fetch(`/api/company-setup/${token}/upload`, {
-          method: 'POST',
-          body: fd,
-        });
-        if (handleClosedStatus(res.status)) return null;
-        if (!res.ok) return null;
-        const j = (await res.json()) as { path?: string; filename?: string };
-        if (!j.path) return null;
-        return { path: j.path, filename: j.filename ?? file.name };
-      } catch {
-        return null;
+    async (personIndex: number, slot: DocSlot, file: File): Promise<UploadResult> => {
+      const outcome = await uploadFileToRoute<{ path?: string; filename?: string }>(
+        `/api/company-setup/${token}/upload`,
+        { personIndex: String(personIndex), slot },
+        file,
+        { form: 'company-setup', action: `upload:${slot}`, ref: token }
+      );
+      if (!outcome.ok) {
+        if (outcome.status !== null) handleClosedStatus(outcome.status);
+        return { error: failureMessage(outcome) };
       }
+      if (!outcome.data?.path) return { error: FAILURE_MESSAGES.server_error };
+      return { path: outcome.data.path, filename: outcome.data.filename ?? file.name };
     },
     [token, handleClosedStatus]
   );
@@ -370,31 +365,30 @@ export function CompanySetupForm({
     if (names.length !== COMPANY_SETUP_NAME_OPTIONS_REQUIRED) return false;
     setCheckingNames(true);
     try {
-      const res = await fetch(`/api/company-setup/${token}/validate-names`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ names }),
-      });
-      if (handleClosedStatus(res.status)) return false;
-      if (!res.ok) {
-        // Advisory check — an infra failure never blocks.
+      const outcome = await requestJson<{
+        results?: Array<{ name: string; ok: boolean; issues: string[] }>;
+      }>(
+        `/api/company-setup/${token}/validate-names`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ names }),
+        },
+        { form: 'company-setup', action: 'check:names', ref: token }
+      );
+      if (!outcome.ok) {
+        if (outcome.status !== null && handleClosedStatus(outcome.status)) return false;
+        // Advisory check: a failure never blocks (requestJson logged it).
         setAiIssues([]);
         setAiChecked(true);
         return true;
       }
-      const j = (await res.json()) as {
-        results?: Array<{ name: string; ok: boolean; issues: string[] }>;
-      };
-      const issues = (j.results ?? [])
+      const issues = (outcome.data?.results ?? [])
         .filter((r) => !r.ok && r.issues.length > 0)
         .map((r) => ({ name: r.name, issues: r.issues }));
       setAiIssues(issues);
       setAiChecked(true);
       return issues.length === 0;
-    } catch {
-      setAiIssues([]);
-      setAiChecked(true);
-      return true;
     } finally {
       setCheckingNames(false);
     }
@@ -412,10 +406,11 @@ export function CompanySetupForm({
     [draft.company.activities]
   );
 
-  const suggestNames = useCallback(async (): Promise<string[] | null> => {
+  const suggestNames = useCallback(async (): Promise<string[] | { error: string } | null> => {
     if (groundedActivities.length === 0) return null;
-    try {
-      const res = await fetch(`/api/company-setup/${token}/suggest-names`, {
+    const outcome = await requestJson<{ suggestions?: string[] }>(
+      `/api/company-setup/${token}/suggest-names`,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -423,14 +418,14 @@ export function CompanySetupForm({
           licenseType: draft.company.licenseType,
           businessDescription: draft.company.businessDescription?.trim() || undefined,
         }),
-      });
-      if (handleClosedStatus(res.status)) return null;
-      if (!res.ok) return null;
-      const j = (await res.json()) as { suggestions?: string[] };
-      return j.suggestions ?? null;
-    } catch {
-      return null;
+      },
+      { form: 'company-setup', action: 'suggest-names', ref: token }
+    );
+    if (!outcome.ok) {
+      if (outcome.status !== null && handleClosedStatus(outcome.status)) return null;
+      return { error: failureMessage(outcome) };
     }
+    return outcome.data?.suggestions ?? null;
   }, [
     groundedActivities,
     draft.company.licenseType,
@@ -537,26 +532,30 @@ export function CompanySetupForm({
         contact: draft.contact,
         confirmedAt: new Date().toISOString(), // server overwrites with its own stamp
       } as CompanySetupSubmittedData;
-      const res = await fetch(`/api/company-setup/${token}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ submittedData, documents, confirmed: true }),
-      });
-      if (handleClosedStatus(res.status)) {
+      const outcome = await requestJson(
+        `/api/company-setup/${token}/submit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ submittedData, documents, confirmed: true }),
+        },
+        { form: 'company-setup', action: 'submit', ref: token }
+      );
+      if (!outcome.ok && outcome.status !== null && handleClosedStatus(outcome.status)) {
         setSubmitting(false);
         return;
       }
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          errors?: string[];
-          missingDocuments?: string[];
-        };
-        const details = [...(j.errors ?? []), ...(j.missingDocuments ?? [])];
+      if (!outcome.ok) {
+        const strings = (v: unknown): string[] =>
+          Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+        // A 422 lists what to fix (field errors + missing documents).
+        const details = [...strings(outcome.body?.errors), ...strings(outcome.body?.missingDocuments)];
         setSubmitError(
           details.length > 0
             ? `Please fix the following before submitting: ${details.join(' · ')}`
-            : 'Could not submit. Please check your entries and try again.'
+            : outcome.kind === 'rejected' && !outcome.serverMessage
+              ? 'Could not submit. Please check your entries and try again.'
+              : failureMessage(outcome)
         );
         setSubmitting(false);
         return;
@@ -567,7 +566,7 @@ export function CompanySetupForm({
       if (timer.current) clearTimeout(timer.current);
       onSubmitted();
     } catch {
-      setSubmitError('Submission failed. Please check your connection and try again.');
+      setSubmitError(FAILURE_MESSAGES.server_error);
       setSubmitting(false);
     }
   };

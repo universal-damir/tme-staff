@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
 import { CustomDropdown } from '@/components/ui';
+import { requestJson, failureMessage, FAILURE_MESSAGES } from '@/lib/request-outcome';
+import { uploadFileToRoute } from '@/lib/upload-client';
 import {
   Loader2,
   CheckCircle,
@@ -137,30 +139,35 @@ export default function EInvoicingIntakePage() {
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Why the form could not be loaded (offline, server error, ...).
+  const [loadError, setLoadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch(`/api/e-invoicing/${token}`);
-        if (cancelled) return;
-        if (res.status === 404) return setState('not_found');
-        if (res.status === 410) return setState('closed');
-        if (!res.ok) return setState('error');
-        const json: IntakeData = await res.json();
-        setData(json);
-        setFiles(json.files ?? []);
-        setSoftware(json.accounting_software ?? '');
-        setSoftwareOther(json.accounting_software_other ?? '');
-        setNoInvoices(json.no_invoices_issued === true);
-        if (json.status === 'submitted' || json.status === 'synced') {
-          setState('already_submitted');
-        } else {
-          setState('form');
-        }
-      } catch {
-        if (!cancelled) setState('error');
+      const outcome = await requestJson<IntakeData>(
+        `/api/e-invoicing/${token}`,
+        {},
+        { form: 'e-invoicing', action: 'load', ref: token }
+      );
+      if (cancelled) return;
+      if (!outcome.ok) {
+        if (outcome.status === 404) return setState('not_found');
+        if (outcome.status === 410) return setState('closed');
+        setLoadError(failureMessage(outcome));
+        return setState('error');
+      }
+      const json = outcome.data;
+      setData(json);
+      setFiles(json.files ?? []);
+      setSoftware(json.accounting_software ?? '');
+      setSoftwareOther(json.accounting_software_other ?? '');
+      setNoInvoices(json.no_invoices_issued === true);
+      if (json.status === 'submitted' || json.status === 'synced') {
+        setState('already_submitted');
+      } else {
+        setState('form');
       }
     })();
     return () => {
@@ -175,31 +182,28 @@ export default function EInvoicingIntakePage() {
       setUploading(true);
       try {
         for (const file of Array.from(fileList)) {
-          const fd = new FormData();
-          fd.append('file', file);
-          const res = await fetch(`/api/e-invoicing/${token}/upload`, {
-            method: 'POST',
-            body: fd,
-          });
-          if (!res.ok) {
-            const j = await res.json().catch(() => ({}));
-            const code = j?.error ?? 'upload_failed';
+          const outcome = await uploadFileToRoute<{ files?: UploadedFile[] }>(
+            `/api/e-invoicing/${token}/upload`,
+            {},
+            file,
+            { form: 'e-invoicing', action: 'upload:invoice', ref: token }
+          );
+          if (!outcome.ok) {
             const msg =
-              code === 'unsupported_file_type'
-                ? `"${file.name}" isn't a PDF, image, or XML invoice.`
-                : code === 'file_size_out_of_range'
-                ? `"${file.name}" is too large (max 15 MB).`
-                : code === 'too_many_files'
+              outcome.code === 'unsupported_file_type' || outcome.kind === 'wrong_file'
+                ? `"${file.name}" is not a PDF, image or XML invoice.`
+                : outcome.kind === 'too_large'
+                ? `"${file.name}" is too large. Please upload a file smaller than 10 MB.`
+                : outcome.code === 'too_many_files'
                 ? 'You can upload at most 10 invoices.'
-                : `Could not upload "${file.name}". Please try again.`;
+                : `Could not upload "${file.name}". ${failureMessage(outcome)}`;
             setError(msg);
             break;
           }
-          const j: { files: UploadedFile[] } = await res.json();
-          setFiles(j.files ?? []);
+          setFiles(outcome.data?.files ?? []);
         }
       } catch {
-        setError('Upload failed — please check your connection and try again.');
+        setError(FAILURE_MESSAGES.server_error);
       } finally {
         setUploading(false);
         if (inputRef.current) inputRef.current.value = '';
@@ -213,17 +217,16 @@ export default function EInvoicingIntakePage() {
       setError(null);
       setDeletingIndex(index);
       try {
-        const res = await fetch(`/api/e-invoicing/${token}/upload?index=${index}`, {
-          method: 'DELETE',
-        });
-        if (!res.ok) {
-          setError('Could not remove that file — please try again.');
+        const outcome = await requestJson<{ files?: UploadedFile[] }>(
+          `/api/e-invoicing/${token}/upload?index=${index}`,
+          { method: 'DELETE' },
+          { form: 'e-invoicing', action: 'remove:invoice', ref: token }
+        );
+        if (!outcome.ok) {
+          setError(`Could not remove that file. ${failureMessage(outcome)}`);
           return;
         }
-        const j: { files: UploadedFile[] } = await res.json();
-        setFiles(j.files ?? []);
-      } catch {
-        setError('Could not remove that file — please check your connection and try again.');
+        setFiles(outcome.data?.files ?? []);
       } finally {
         setDeletingIndex(null);
       }
@@ -251,8 +254,9 @@ export default function EInvoicingIntakePage() {
     if (!canSubmit) return;
     setError(null);
     setSubmitting(true);
-    try {
-      const res = await fetch(`/api/e-invoicing/${token}/submit`, {
+    const outcome = await requestJson(
+      `/api/e-invoicing/${token}/submit`,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -261,24 +265,21 @@ export default function EInvoicingIntakePage() {
           price_agreed: priceAgreed,
           no_invoices_issued: noInvoices,
         }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(
-          j?.error === 'no_invoices_uploaded'
-            ? 'Please upload at least one invoice before submitting.'
-            : j?.error === 'price_not_agreed'
-              ? 'Please agree to the pre-assessment fee before submitting.'
-              : 'Could not submit — please try again.'
-        );
-        setSubmitting(false);
-        return;
-      }
-      setState('success');
-    } catch {
-      setError('Submission failed — please try again.');
+      },
+      { form: 'e-invoicing', action: 'submit', ref: token }
+    );
+    if (!outcome.ok) {
+      setError(
+        outcome.code === 'no_invoices_uploaded'
+          ? 'Please upload at least one invoice before submitting.'
+          : outcome.code === 'price_not_agreed'
+            ? 'Please agree to the pre-assessment fee before submitting.'
+            : `Could not submit. ${failureMessage(outcome)}`
+      );
       setSubmitting(false);
+      return;
     }
+    setState('success');
   }, [canSubmit, token, software, softwareOther, priceAgreed, noInvoices]);
 
   if (state === 'loading') {
@@ -292,7 +293,21 @@ export default function EInvoicingIntakePage() {
     );
   }
 
-  if (state === 'not_found' || state === 'error') {
+  if (state === 'error') {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center py-12 text-center">
+          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+            We could not open the form
+          </h2>
+          <p className="text-gray-600">{loadError}</p>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (state === 'not_found') {
     return (
       <Shell>
         <div className="flex flex-col items-center py-12 text-center">

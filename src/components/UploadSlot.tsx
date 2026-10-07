@@ -6,6 +6,8 @@ import { Upload, CheckCircle, AlertCircle, Loader2, FileText, RefreshCw, X } fro
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 import { useIsMobile } from '@/lib/useIsMobile';
+import { MAX_FILE_BYTES } from '@/lib/file-validation';
+import { FAILURE_MESSAGES } from '@/lib/request-outcome';
 
 interface UploadSlotProps {
   label: string;
@@ -84,7 +86,7 @@ export function UploadSlot({
   error,
   preview,
   accept = 'application/pdf,image/jpeg,image/png',
-  maxSizeMB = 5,
+  maxSizeMB = MAX_FILE_BYTES / (1024 * 1024),
   needsReview = false,
   removable = false,
   providedByStaff = false,
@@ -136,6 +138,12 @@ export function UploadSlot({
       preview.toLowerCase().endsWith('.pdf'));
 
   const MAX_FILE_SIZE = maxSizeMB * 1024 * 1024;
+  // The form-wide limit has one shared sentence; a slot with its own
+  // smaller limit names that limit.
+  const tooLargeMessage =
+    MAX_FILE_SIZE === MAX_FILE_BYTES
+      ? FAILURE_MESSAGES.too_large
+      : `This file is too large. Please upload a file smaller than ${maxSizeMB} MB.`;
 
   // Render the first page of a PDF preview to an inline thumbnail. Re-runs
   // whenever the previewed PDF changes; cancels cleanly if it changes again
@@ -194,23 +202,28 @@ export function UploadSlot({
   // The lightbox enlarges the actual image, or the rendered PDF page.
   const lightboxSrc = isPdfPreview ? pdfThumb : preview;
 
+  // Same checks for the file picker and drag-and-drop. Returns false (after
+  // telling the person why) when the file cannot be uploaded.
+  const checkFile = (selectedFile: File): boolean => {
+    const acceptedTypes = effectiveAccept.split(',').map(t => t.trim());
+    const typeOk = acceptedTypes.includes(selectedFile.type);
+    if (!typeOk) {
+      const friendly = isMobile
+        ? 'On mobile, please upload a scanned PDF. Camera photos and image files are not accepted. Use a scanner app, or upload a PDF/JPEG/PNG from a computer.'
+        : 'Please upload a PDF, JPEG (.jpg / .jpeg), or PNG.';
+      alert(friendly);
+      return false;
+    }
+    if (selectedFile.size > MAX_FILE_SIZE) {
+      alert(tooLargeMessage);
+      return false;
+    }
+    return true;
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      const acceptedTypes = effectiveAccept.split(',').map(t => t.trim());
-      const typeOk = acceptedTypes.includes(selectedFile.type);
-      if (!typeOk) {
-        const friendly = isMobile
-          ? 'On mobile, please upload a scanned PDF. Camera photos and image files are not accepted. Use a scanner app, or upload a PDF/JPEG/PNG from a computer.'
-          : 'Please upload a PDF, JPEG (.jpg / .jpeg), or PNG.';
-        alert(friendly);
-        if (inputRef.current) inputRef.current.value = '';
-        return;
-      }
-      if (selectedFile.size > MAX_FILE_SIZE) {
-        alert(`File too large. Maximum size is ${maxSizeMB}MB.`);
-        return;
-      }
+    if (selectedFile && checkFile(selectedFile)) {
       await onUpload(selectedFile);
     }
     // Reset input
@@ -223,12 +236,8 @@ export function UploadSlot({
     e.preventDefault();
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files[0];
-    const acceptedTypes = effectiveAccept.split(',').map(t => t.trim());
-    if (droppedFile && acceptedTypes.includes(droppedFile.type)) {
-      if (droppedFile.size > MAX_FILE_SIZE) {
-        alert(`File too large. Maximum size is ${maxSizeMB}MB.`);
-        return;
-      }
+    // A dropped file of the wrong type used to be ignored silently.
+    if (droppedFile && checkFile(droppedFile)) {
       await onUpload(droppedFile);
     }
   };

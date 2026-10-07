@@ -3,8 +3,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
-import { compressImageForAI, topEdgeLooksClipped } from '@/lib/utils';
-import { getDocumentUrl } from '@/lib/supabase';
+import { topEdgeLooksClipped } from '@/lib/utils';
+import { getDocumentUrl, isUploadFailure, type UploadResult } from '@/lib/supabase';
+import { callAiCheck } from '@/lib/ai-check-client';
+import { MAX_FILE_BYTES } from '@/lib/file-validation';
+import { FAILURE_MESSAGES } from '@/lib/request-outcome';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
@@ -14,11 +17,16 @@ interface PhotoUploadProps {
   /** Onboarding submission id; passed to the server-side AI guard. */
   submissionId: string;
   value?: { path: string; filename: string; validated: boolean; needsReview?: boolean };
-  onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
+  /** Returns the stored ref, or `{ error }` with the reason the upload failed. */
+  onUpload: (file: File) => Promise<UploadResult | null>;
+  /** Form name for the failure log ('employee', 'dependent', 'document-request'). */
+  form?: string;
   /**
-   * `aiRejected` is true only when the AI validator actually judged the photo
-   * invalid — service failures report validated=false with aiRejected=false so
-   * they don't count toward the manual-review strike counter.
+   * `aiRejected` is true when the attempt counts toward the manual-review
+   * strike counter: a real AI rejection, or a check that could not run
+   * (so a person whose check keeps failing is never stuck). Failures a hand
+   * check cannot fix (closed form, wrong link, too many tries) report
+   * validated=false with aiRejected=false.
    * `flags.samePhoto` is true when the vision comparison judged the upload to
    * be the same capture as the photo on file — callers persist it so the
    * portal can flag a manual-review submit of a suspected reused photo.
@@ -62,7 +70,7 @@ async function sha256Hex(file: File): Promise<string | null> {
   }
 }
 
-export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error, existingPhoto, hideGuidance = false }: PhotoUploadProps) {
+export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemove, error, existingPhoto, hideGuidance = false, form = 'staff-onboarding' }: PhotoUploadProps) {
   const aiToken = useSearchParams().get('token');
   const [preview, setPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -87,9 +95,10 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
       return;
     }
 
-    // Validate file size (max 5MB - Claude API limit)
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError('File size must be less than 5MB');
+    // Validate file size. Large files upload directly and the AI check gets
+    // a resized copy, so the one form-wide limit applies.
+    if (file.size > MAX_FILE_BYTES) {
+      setUploadError(FAILURE_MESSAGES.too_large);
       return;
     }
 
@@ -156,32 +165,28 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     setIsUploading(true);
     setIsValidating(true);
 
-    const uploadPromise = (async () => {
+    // onUpload never throws for upload failures (it returns `{ error }`);
+    // a throw here is a bug in the caller, shown as our own error.
+    const uploadPromise: Promise<UploadResult | null> = (async () => {
       try {
         return await onUpload(file);
       } catch {
-        return null;
+        return { error: FAILURE_MESSAGES.server_error };
       }
     })();
 
-    // Compress once, share between validation and the same-photo comparison.
-    const compressedPromise = compressImageForAI(previewDataUrl).catch(() => null);
-
-    const validatePromise = (async () => {
-      try {
-        const compressedImage = await compressedPromise;
-        if (!compressedImage) return null;
-        const response = await fetch('/api/validate-photo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, submissionId, token: aiToken }),
-        });
-        return await response.json();
-      } catch (err) {
-        console.error('Photo validation API error:', err);
-        return null;
-      }
-    })();
+    // callAiCheck shrinks the image for the AI and names every failure.
+    const fileInfo = { size: file.size, type: file.type };
+    const validatePromise = callAiCheck<{
+      valid?: boolean;
+      errors?: string[];
+      suggestions?: string[];
+    }>(
+      '/api/validate-photo',
+      { submissionId, token: aiToken },
+      previewDataUrl,
+      { form, action: 'check:photo', ref: submissionId, file: fileInfo }
+    );
 
     // Renewal photo-reuse guard, vision path: the server compares the upload
     // against the photo on file (fetched server-side from storage) and judges
@@ -190,22 +195,16 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     // photo on file; failures degrade to "no verdict" (never a strike).
     const comparePromise = (async () => {
       if (!existingPhoto) return null;
-      try {
-        const compressedImage = await compressedPromise;
-        if (!compressedImage) return null;
-        const response = await fetch('/api/compare-photo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: compressedImage, submissionId, token: aiToken }),
-        });
-        return await response.json();
-      } catch (err) {
-        console.error('Photo compare API error:', err);
-        return null;
-      }
+      const outcome = await callAiCheck<{ samePhoto?: boolean }>(
+        '/api/compare-photo',
+        { submissionId, token: aiToken },
+        previewDataUrl,
+        { form, action: 'check:photo-compare', ref: submissionId, file: fileInfo }
+      );
+      return outcome.ok ? outcome.data : null;
     })();
 
-    const [uploadResult, validation, comparison] = await Promise.all([
+    const [uploadResult, validationOutcome, comparison] = await Promise.all([
       uploadPromise,
       validatePromise,
       comparePromise,
@@ -214,27 +213,28 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     setIsUploading(false);
     setIsValidating(false);
 
-    if (!uploadResult) {
-      setUploadError('Failed to upload file');
+    if (isUploadFailure(uploadResult)) {
+      setUploadError(uploadResult?.error ?? FAILURE_MESSAGES.server_error);
       return;
     }
 
     // Same-photo verdict wins over everything else: even a technically
     // compliant photo is useless if it's the one the authority already has.
-    // A compare infra/skip result (or failed fetch) is NOT a verdict — fall
-    // through to normal validation; the SHA-256 fast path and the portal's
-    // sync-time backstop still stand.
-    const samePhoto = !!comparison?.samePhoto && !comparison?.infra;
+    // A failed compare is NOT a verdict (comparison is null): fall through
+    // to normal validation; the SHA-256 fast path and the portal's sync-time
+    // backstop still stand.
+    const samePhoto = !!comparison?.samePhoto;
     if (samePhoto) {
       const messages = [
         'This appears to be the same photo we already have on file from your previous application. UAE authorities require a newly taken photo (within the last 6 months) — please upload a new one.',
       ];
       // If the fresh upload ALSO failed quality validation, surface those
       // errors too so the client fixes everything in one go.
-      if (validation && !validation.infra && validation.valid === false) {
+      if (validationOutcome.ok && validationOutcome.data.valid === false) {
+        const v = validationOutcome.data;
         messages.push(
-          ...(validation.errors as string[]).map((err: string, i: number) => {
-            const suggestion = validation.suggestions?.[i];
+          ...(v.errors ?? []).map((err: string, i: number) => {
+            const suggestion = v.suggestions?.[i];
             return suggestion ? `${err} - ${suggestion}` : err;
           })
         );
@@ -244,26 +244,20 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
       return;
     }
 
-    if (!validation) {
-      setValidationErrors(['Unable to validate photo. Please try again.']);
-      onValidated?.(false, ['Validation service unavailable'], false);
+    // The check could not run (or the request failed): never a pass. It
+    // counts as a strike unless a hand check could not help either.
+    if (!validationOutcome.ok) {
+      setValidationErrors([validationOutcome.message]);
+      onValidated?.(false, [validationOutcome.message], validationOutcome.countsAsStrike);
       return;
     }
-
-    // infra=true means the check could not RUN (API/model error) — never a
-    // rejection. Take the same soft path as a failed fetch (aiRejected=false)
-    // so it doesn't count toward the manual-review strike counter.
-    if (validation.infra) {
-      setValidationErrors(['We could not check the photo right now — please try again in a moment.']);
-      onValidated?.(false, ['Validation service unavailable'], false);
-      return;
-    }
+    const validation = validationOutcome.data;
 
     if (validation.valid) {
       setValidationErrors([]);
       onValidated?.(true, [], false, { samePhoto: false });
     } else {
-      const errorMessages = (validation.errors as string[]).map(
+      const errorMessages = (validation.errors ?? []).map(
         (err: string, i: number) => {
           const suggestion = validation.suggestions?.[i];
           return suggestion ? `${err} - ${suggestion}` : err;
@@ -385,7 +379,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
             <Upload className="w-8 h-8 text-gray-400" />
           </div>
           <p className="text-gray-600 mb-2">Upload your studio passport photo</p>
-          <p className="text-sm text-gray-400">JPEG (.jpg / .jpeg), PNG, or PDF, up to 5MB. Studio-quality only — self-taken phone photos will be rejected.</p>
+          <p className="text-sm text-gray-400">JPEG (.jpg / .jpeg), PNG, or PDF, up to 10 MB. Studio-quality only — self-taken phone photos will be rejected.</p>
           <input
             ref={inputRef}
             type="file"

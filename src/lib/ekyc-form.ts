@@ -63,13 +63,11 @@ export const EKYC_MAX_PEOPLE_ROWS = 50;
 export const EKYC_MAX_SIGNATURE_CHARS = 200_000;
 
 /**
- * Largest upload (browser and server). Netlify cuts request bodies at about
- * 6 MB before the route runs, so the cap sits well under it, multipart
- * overhead included. The browser shrinks large photos to fit first
- * (shrinkImageToBudget, the same helper the onboarding uploads use); a PDF
- * cannot be shrunk and is refused above the cap with a clear message.
+ * Largest upload (browser and server), the same 10 MB as every other form.
+ * Netlify cuts request bodies at about 6 MB, so files over ~4 MB travel by
+ * direct upload straight to Supabase (lib/upload-client.ts).
  */
-export const EKYC_MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024;
+export const EKYC_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 const SIGNATURE_RE = /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/;
 

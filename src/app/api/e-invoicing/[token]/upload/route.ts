@@ -3,6 +3,13 @@ import { randomUUID } from 'crypto';
 import { getSupabaseAdmin, GAP_INTAKE_BUCKET } from '@/lib/supabase-server';
 import { verifyGapIntakeAccess, type GapIntakeFileRef } from '@/lib/gap-intake-token';
 import { detectInvoiceFile, MAX_FILE_BYTES } from '@/lib/invoice-file-validation';
+import {
+  isDirectUploadRequest,
+  readDirectUploadRequest,
+  startDirectUpload,
+  readDirectUpload,
+  removeDirectUpload,
+} from '@/lib/direct-upload';
 
 export const runtime = 'nodejs';
 
@@ -29,6 +36,29 @@ export async function POST(
   }
   const row = access.row;
 
+  if ((row.invoice_files ?? []).length >= MAX_FILES_PER_SUBMISSION) {
+    return NextResponse.json({ error: 'too_many_files' }, { status: 409 });
+  }
+
+  // Large files (over ~4 MB) cannot pass Netlify as multipart: the browser
+  // sends them straight to Supabase (see lib/direct-upload.ts).
+  if (isDirectUploadRequest(req.headers.get('content-type'))) {
+    const body = await readDirectUploadRequest(req);
+    if (!body) return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
+    if (body.step === 'start') {
+      const started = await startDirectUpload(GAP_INTAKE_BUCKET, row.id, body.size, MAX_FILE_BYTES);
+      if (!started.ok) return NextResponse.json({ error: started.error }, { status: started.status });
+      return NextResponse.json({ uploadUrl: started.uploadUrl, uploadId: started.uploadId });
+    }
+    const received = await readDirectUpload(GAP_INTAKE_BUCKET, row.id, body.uploadId, MAX_FILE_BYTES);
+    if (!received.ok) return NextResponse.json({ error: received.error }, { status: received.status });
+    try {
+      return await storeAndAppend(row.id, row.invoice_files ?? [], received.bytes, String(body.filename ?? 'invoice'));
+    } finally {
+      await removeDirectUpload(GAP_INTAKE_BUCKET, row.id, body.uploadId);
+    }
+  }
+
   let form: FormData;
   try {
     form = await req.formData();
@@ -47,12 +77,17 @@ export async function POST(
     return NextResponse.json({ error: 'file_size_out_of_range' }, { status: 413 });
   }
 
-  const existing = row.invoice_files ?? [];
-  if (existing.length >= MAX_FILES_PER_SUBMISSION) {
-    return NextResponse.json({ error: 'too_many_files' }, { status: 409 });
-  }
-
   const buf = new Uint8Array(await file.arrayBuffer());
+  return storeAndAppend(row.id, row.invoice_files ?? [], buf, String(file.name));
+}
+
+/** Detect the file type, store it, append the ref. Same for both upload paths. */
+async function storeAndAppend(
+  rowId: string,
+  existing: GapIntakeFileRef[],
+  buf: Uint8Array,
+  originalName: string
+): Promise<NextResponse> {
   const detected = detectInvoiceFile(buf);
   if (!detected) {
     return NextResponse.json({ error: 'unsupported_file_type' }, { status: 415 });
@@ -60,7 +95,7 @@ export async function POST(
 
   const supabase = getSupabaseAdmin();
   const opaqueName = `${randomUUID()}${detected.ext}`;
-  const path = `${row.id}/${opaqueName}`;
+  const path = `${rowId}/${opaqueName}`;
 
   const { error: upErr } = await supabase.storage
     .from(GAP_INTAKE_BUCKET)
@@ -75,7 +110,7 @@ export async function POST(
     return NextResponse.json({ error: 'upload_failed' }, { status: 500 });
   }
 
-  const displayName = String(file.name)
+  const displayName = originalName
     .replace(/[^a-zA-Z0-9.\-_ ]/g, '_')
     .slice(0, 200);
 
@@ -91,7 +126,7 @@ export async function POST(
   const { error: updErr } = await supabase
     .from('gap_intake_submissions')
     .update({ invoice_files: updatedFiles })
-    .eq('id', row.id);
+    .eq('id', rowId);
 
   if (updErr) {
     console.error('e-invoicing/upload: failed to append file ref');

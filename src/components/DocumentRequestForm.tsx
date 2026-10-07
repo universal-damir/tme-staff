@@ -27,9 +27,11 @@ import {
   uploadDocument,
   uploadPassportPage,
   updateDocumentReferences,
+  isUploadFailure,
   PassportPageKey,
 } from '@/lib/supabase';
-import { compressImageForAI } from '@/lib/utils';
+import { callAiCheck } from '@/lib/ai-check-client';
+import { requestJson, failureMessage } from '@/lib/request-outcome';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
 import { AlertTriangle, Camera, CreditCard, FileText, GraduationCap } from 'lucide-react';
 import { SampleImageToggle } from '@/components/SampleImageToggle';
@@ -472,11 +474,11 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
 
   const handlePhotoUpload = async (file: File) => {
     const result = await uploadDocument(submission.id, 'photo', file);
-    if (result) {
-      await setFlatDoc('photo', { ...result, validated: false });
-      return result;
+    // A failure carries its own message; PhotoUpload shows it.
+    if (!isUploadFailure(result)) {
+      await setFlatDoc('photo', { path: result.path, filename: result.filename, validated: false });
     }
-    return null;
+    return result;
   };
 
   // Whether the vision comparison judged the CURRENT photo upload to be the
@@ -504,8 +506,8 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     if (validated) {
       setRejections((prev) => ({ ...prev, photo: 0 }));
     } else if (aiRejected) {
-      // Only genuine AI rejections count toward the manual-review
-      // threshold — service failures don't.
+      // A real AI rejection, or a check that could not run, counts
+      // toward the manual-review threshold (see PhotoUpload).
       bumpRejection('photo');
     }
   };
@@ -540,45 +542,32 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
 
   const validatePassportPageType = async (
     imageBase64: string,
-    expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE'
-  ) => {
-    try {
-      const compressedImage = await compressImageForAI(imageBase64);
-      const response = await fetch('/api/validate-passport-page', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: compressedImage,
-          expectedType,
-          // Selects the additional-page prompt variant server-side; ignored
-          // for cover/inside checks.
-          nationality,
-          submissionId: submission.id,
-          token: aiToken,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        // Surface a specific reason (e.g. the single-page rule enforced by
-        // the AI route guard) instead of a generic failure.
-        return {
-          valid: false,
-          error:
-            (result?.error as string) ||
-            (result?.errorMessage as string) ||
-            'Unable to validate page. Please try again.',
-          infra: result?.infra === true,
-        };
-      }
-      return {
-        valid: result.matches as boolean,
-        error: result.errorMessage as string | undefined,
-        infra: result?.infra === true,
-      };
-    } catch {
-      // Network failure: the check could not run — infra, never a strike.
-      return { valid: false, error: 'Unable to validate page. Please try again.', infra: true };
+    expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE',
+    key: PassportRequestKey,
+    file: File
+  ): Promise<{ valid: boolean; error?: string; failed?: boolean; countsAsStrike?: boolean }> => {
+    const outcome = await callAiCheck<{ matches?: boolean; errorMessage?: string }>(
+      '/api/validate-passport-page',
+      {
+        expectedType,
+        // Selects the additional-page prompt variant server-side; ignored
+        // for cover/inside checks.
+        nationality,
+        submissionId: submission.id,
+        token: aiToken,
+      },
+      imageBase64,
+      { form: 'document-request', action: `check:${key}`, ref: submission.id, file: { size: file.size, type: file.type } }
+    );
+    if (!outcome.ok) {
+      // The check did not give a verdict (or the route refused it with its
+      // own reason, e.g. the single-page rule). The message names why.
+      return { valid: false, error: outcome.message, failed: true, countsAsStrike: outcome.countsAsStrike };
     }
+    return {
+      valid: outcome.data.matches === true,
+      error: outcome.data.errorMessage,
+    };
   };
 
   const handlePassportUpload = (key: PassportRequestKey) => async (file: File): Promise<boolean> => {
@@ -604,12 +593,13 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     setSlot(key, { preview, validating: true, error: null, file });
 
     try {
-      const validation = await validatePassportPageType(preview, cfg.expectedType);
+      const validation = await validatePassportPageType(preview, cfg.expectedType, key, file);
       if (!validation.valid) {
-        // infra=true means the check could not RUN (API/model error) — never
-        // a rejection; don't burn a strike, just ask the user to retry.
-        if (validation.infra) {
-          setSlot(key, { preview, validating: false, error: "We could not check this file right now — please try again in a moment.", file });
+        // The check itself failed: show why, and count it toward the
+        // manual-review option so a person is never stuck retrying.
+        if (validation.failed) {
+          if (validation.countsAsStrike) bumpRejection(key);
+          setSlot(key, { preview, validating: false, error: validation.error ?? null, file });
           return false;
         }
         bumpRejection(key);
@@ -624,14 +614,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       return false;
     }
 
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, cfg.pageKey, file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setSlot(key, { preview, validating: false, error: 'Upload failed. If the file is larger than 4MB (common with PDFs), please compress it or upload a JPEG/PNG — otherwise check your connection and try again.', file });
+    const result = await uploadPassportPage(submission.id, cfg.pageKey, file);
+    if (isUploadFailure(result)) {
+      setSlot(key, { preview, validating: false, error: result.error, file });
       return false;
     }
 
@@ -649,14 +634,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     // slot's "Validating..." badge would be misleading (mirrors EmployeeForm).
     setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: null });
     setReviewSubmitting((prev) => ({ ...prev, [key]: true }));
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadPassportPage(submission.id, cfg.pageKey, ui.file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: 'Upload failed. If the file is larger than 4MB (common with PDFs), please compress it or upload a JPEG/PNG — otherwise check your connection and try again.' });
+    const result = await uploadPassportPage(submission.id, cfg.pageKey, ui.file);
+    if (isUploadFailure(result)) {
+      setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: result.error });
       setReviewSubmitting((prev) => ({ ...prev, [key]: false }));
       return;
     }
@@ -668,8 +648,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   // ------------------------------------------------------------------
   // Emirates ID — type-check via /api/extract-eid (validate-then-store,
   // extracted data kept on the ref like EmployeeForm; no form fields to
-  // fill here). Soft on route/infra errors, hard on an explicit invalid
-  // verdict, with the 2-strike manual-review fallback per side.
+  // fill here). Hard on an explicit invalid verdict and on a failed check
+  // (the failure counts as a strike), with the 2-strike manual-review
+  // fallback per side.
   // ------------------------------------------------------------------
 
   const handleEidUpload = (key: EidRequestKey) => async (file: File): Promise<boolean> => {
@@ -695,51 +676,46 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     setSlot(key, { preview, validating: true, error: null, file });
 
     let extractedData: Record<string, unknown> | null = null;
-    try {
-      const isImage = file.type.startsWith('image/');
-      const imageData = isImage ? await compressImageForAI(preview) : preview;
-      const response = await fetch('/api/extract-eid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, side: cfg.side, submissionId: submission.id, token: aiToken }),
-      });
-      if (response.ok) {
-        const extractResult = await response.json();
-        const invalid =
-          cfg.side === 'front'
-            ? !extractResult.success || !extractResult.data?.emirates_id_number
-            : !extractResult.success;
-        // infra=true means the check could not RUN (API/model error) — never
-        // a rejection. Fall through to the upload like the catch path below;
-        // counting infra failures as strikes locked users out for weeks when
-        // the extraction model was retired upstream.
-        if (invalid && !extractResult.infra) {
-          bumpRejection(key);
-          setSlot(key, { preview, validating: false, error: cfg.rejectCopy, file });
-          // Clear any previously-validated doc so a stale green "Valid" badge
-          // can't sit next to this red error border (mirrors EmployeeForm).
-          await setFlatDoc(key, undefined);
-          return false;
-        }
-        if (cfg.side === 'front' && extractResult.success && extractResult.data) {
-          extractedData = extractResult.data as Record<string, unknown>;
-        }
-      }
-    } catch (err) {
-      // Validation-infra error: log + continue — must not hard-block a
-      // genuine upload (mirrors the sponsor EID handlers).
-      console.error(`EID ${cfg.side} validation error:`, err);
+    const outcome = await callAiCheck<{ success?: boolean; data?: Record<string, unknown> & { emirates_id_number?: string } }>(
+      '/api/extract-eid',
+      { side: cfg.side, submissionId: submission.id, token: aiToken },
+      preview,
+      { form: 'document-request', action: `check:${key}`, ref: submission.id, file: { size: file.size, type: file.type } }
+    );
+    if (!outcome.ok) {
+      // The check did not give a verdict: show why, and count it toward the
+      // manual-review option so a person is never stuck retrying.
+      if (outcome.countsAsStrike) bumpRejection(key);
+      setSlot(key, { preview, validating: false, error: outcome.message, file });
+      return false;
+    }
+    const extractResult = outcome.data;
+    const invalid =
+      cfg.side === 'front'
+        ? !extractResult.success || !extractResult.data?.emirates_id_number
+        : !extractResult.success;
+    if (invalid) {
+      bumpRejection(key);
+      setSlot(key, { preview, validating: false, error: cfg.rejectCopy, file });
+      // Clear any previously-validated doc so a stale green "Valid" badge
+      // can't sit next to this red error border (mirrors EmployeeForm).
+      await setFlatDoc(key, undefined);
+      return false;
+    }
+    if (cfg.side === 'front' && extractResult.success && extractResult.data) {
+      extractedData = extractResult.data;
     }
 
     const result = await uploadDocument(submission.id, key, file);
-    if (!result) {
-      setSlot(key, { preview, validating: false, error: 'Upload failed. If the file is larger than 4MB (common with PDFs), please compress it or upload a JPEG/PNG instead.', file });
+    if (isUploadFailure(result)) {
+      setSlot(key, { preview, validating: false, error: result.error, file });
       return false;
     }
 
     setSlot(key, { preview, validating: false, error: null, file });
     await setFlatDoc(key, {
-      ...result,
+      path: result.path,
+      filename: result.filename,
       validated: true,
       ...(extractedData ? { extracted_data: extractedData } : {}),
     });
@@ -752,14 +728,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     if (!ui?.file || !ui.preview) return;
     setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: null });
     setReviewSubmitting((prev) => ({ ...prev, [key]: true }));
-    let result: { path: string; filename: string } | null;
-    try {
-      result = await uploadDocument(submission.id, key, ui.file);
-    } catch {
-      result = null;
-    }
-    if (!result) {
-      setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: 'Upload failed. If the file is larger than 4MB (common with PDFs), please compress it or upload a JPEG/PNG — otherwise check your connection and try again.' });
+    const result = await uploadDocument(submission.id, key, ui.file);
+    if (isUploadFailure(result)) {
+      setSlot(key, { preview: ui.preview, file: ui.file, validating: false, error: result.error });
       setReviewSubmitting((prev) => ({ ...prev, [key]: false }));
       return;
     }
@@ -775,8 +746,9 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
 
   const handlePlainUpload = (key: PlainRequestKey) => async (file: File) => {
     const result = await uploadDocument(submission.id, key, file);
-    if (result) {
-      await setFlatDoc(key, result);
+    // A failure carries its own message; FileUploadSlot shows it.
+    if (!isUploadFailure(result)) {
+      await setFlatDoc(key, { path: result.path, filename: result.filename });
     }
     return result;
   };
@@ -815,7 +787,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
           ? 'visa_document'
           : (key as GenericRequestKey);
       const result = await uploadDocument(submission.id, storageType, file);
-      if (result) {
+      if (!isUploadFailure(result)) {
         await setExtraDoc(key, { path: result.path, filename: result.filename, needsReview: true });
       }
       return result;
@@ -877,26 +849,22 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const response = await fetch('/api/submit-document-request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: submission.id }),
-      });
-      if (response.ok) {
+      const outcome = await requestJson(
+        '/api/submit-document-request',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: submission.id }),
+        },
+        { form: 'document-request', action: 'submit', ref: submission.id }
+      );
+      if (outcome.ok) {
         onSubmitted();
         return;
       }
-      let message = 'Failed to submit. Please try again.';
-      try {
-        const body = await response.json();
-        if (typeof body?.error === 'string' && body.error) message = body.error;
-      } catch {
-        // Non-JSON error body — keep the generic message.
-      }
-      setSubmitError(message);
-    } catch (err) {
-      console.error('Error submitting document request:', err);
-      setSubmitError('An error occurred. Please try again.');
+      // The server's own sentence (e.g. documents still missing) when it
+      // sent one, otherwise the plain message for this kind of failure.
+      setSubmitError(failureMessage(outcome));
     } finally {
       setSubmitting(false);
     }
@@ -958,6 +926,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
         <>
           <PhotoUpload
             submissionId={submission.id}
+            form="document-request"
             value={photoDoc}
             existingPhoto={submission.existing_documents?.photo}
             onUpload={handlePhotoUpload}

@@ -30,13 +30,13 @@ test.describe('EmployeeForm — structure and conditional rendering', () => {
   });
 
   test('renewal form opens at employee step without crashing', async ({ page }) => {
-    // Renewals share the same 8-step structure; this test guards against
-    // renewal-specific regressions (e.g. the onboarding_type branch).
+    // Renewals skip the "Identity & Visa Documents" step (7 steps); this test
+    // guards against renewal-specific regressions (the onboarding_type branch).
     const sub = await seedSubmission({ step: 'employee', renewal: true });
     try {
       await mockAllAi(page);
       await page.goto(sub.url);
-      await expect(page.getByText(/of\s*8/).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(/of\s*7/).first()).toBeVisible({ timeout: 10_000 });
     } finally {
       await sub.cleanup();
     }

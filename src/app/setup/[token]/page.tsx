@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { TME_COLORS } from '@/lib/constants';
 import { CompanySetupForm } from '@/components/company-setup/CompanySetupForm';
+import { requestJson, failureMessage } from '@/lib/request-outcome';
 import type {
   CompanySetupDocuments,
   CompanySetupPrefillData,
@@ -68,27 +69,30 @@ export default function CompanySetupIntakePage() {
 
   const [state, setState] = useState<PageState>('loading');
   const [data, setData] = useState<IntakePayload | null>(null);
+  // Why the form could not be loaded (offline, server error, ...).
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch(`/api/company-setup/${token}`);
-        if (cancelled) return;
-        if (res.status === 404) return setState('not_found');
-        if (res.status === 410) {
+      const outcome = await requestJson<IntakePayload>(
+        `/api/company-setup/${token}`,
+        {},
+        { form: 'company-setup', action: 'load', ref: token }
+      );
+      if (cancelled) return;
+      if (!outcome.ok) {
+        if (outcome.status === 404) return setState('not_found');
+        if (outcome.status === 410) {
           // The route names the reason — cancelled and expired are different
           // situations for the client and get different copy.
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
-          return setState(body.error === 'cancelled' ? 'cancelled' : 'expired');
+          return setState(outcome.code === 'cancelled' ? 'cancelled' : 'expired');
         }
-        if (!res.ok) return setState('error');
-        const json: IntakePayload = await res.json();
-        setData(json);
-        setState(json.status === 'submitted' ? 'already_submitted' : 'form');
-      } catch {
-        if (!cancelled) setState('error');
+        setLoadError(failureMessage(outcome));
+        return setState('error');
       }
+      setData(outcome.data);
+      setState(outcome.data.status === 'submitted' ? 'already_submitted' : 'form');
     })();
     return () => {
       cancelled = true;
@@ -106,7 +110,21 @@ export default function CompanySetupIntakePage() {
     );
   }
 
-  if (state === 'not_found' || state === 'error') {
+  if (state === 'error') {
+    return (
+      <Shell>
+        <CenterCard>
+          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />
+          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+            We could not open the form
+          </h2>
+          <p className="text-gray-600 max-w-md">{loadError}</p>
+        </CenterCard>
+      </Shell>
+    );
+  }
+
+  if (state === 'not_found') {
     return (
       <Shell>
         <CenterCard>

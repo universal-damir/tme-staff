@@ -16,6 +16,8 @@
  */
 
 import type { StaffDocumentReferences, EmployeeFormData } from '@/types';
+import { uploadFileToRoute } from './upload-client';
+import { failureMessage, requestJson } from './request-outcome';
 
 // ===================================================================
 // AUTO-SAVE EMPLOYEE DATA (partial save without signature/completion)
@@ -26,22 +28,21 @@ export async function autoSaveEmployeeData(
   data: Partial<EmployeeFormData>,
   token?: string | null,
 ): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/onboarding/${encodeURIComponent(id)}/autosave`, {
+  // requestJson never throws; a failure is named and logged (client-error-log).
+  const outcome = await requestJson(
+    `/api/onboarding/${encodeURIComponent(id)}/autosave`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: token ?? null, employeeData: data }),
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      console.error('[autoSaveEmployeeData] save failed:', res.status, detail);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.error('[autoSaveEmployeeData] network error:', err);
+    },
+    { form: 'staff-onboarding', action: 'autosave', ref: id }
+  );
+  if (!outcome.ok) {
+    console.error('[autoSaveEmployeeData] save failed:', outcome.kind, outcome.status, outcome.code);
     return false;
   }
+  return true;
 }
 
 // ===================================================================
@@ -105,24 +106,53 @@ export async function shrinkImageToBudget(file: File): Promise<File> {
   }
 }
 
+/** A stored file. Spread-safe: only the fields saved on a document ref. */
+export interface UploadedRef {
+  path: string;
+  filename: string;
+}
+
+/** Why an upload failed, as a plain sentence for the person. */
+export interface UploadFailure {
+  error: string;
+}
+
+export type UploadResult = UploadedRef | UploadFailure;
+
+export function isUploadFailure(result: UploadResult | null | undefined): result is UploadFailure {
+  return !result || typeof (result as UploadFailure).error === 'string';
+}
+
+type DocumentType = 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional' | 'job_offer_letter' | 'visa_document' | 'previous_visa_document' | 'eid_front' | 'eid_back' | 'pakistan_id_front' | 'pakistan_id_back' | 'sponsor_passport' | 'sponsor_visa' | 'sponsor_eid_front' | 'sponsor_eid_back' | 'visa' | 'employment_contract' | 'work_permit' | 'health_insurance' | 'iloe_insurance' | 'driving_license' | 'custom' | 'relationship_certificate' | 'previous_visa' | 'previous_eid_front' | 'previous_eid_back' | 'marriage_certificate' | 'divorce_certificate' | 'death_certificate' | 'noc_unmarried';
+
+async function uploadToStorage(
+  submissionId: string,
+  fields: Record<string, string>,
+  file: File,
+  action: string
+): Promise<UploadResult> {
+  let toSend: File;
+  try {
+    toSend = await shrinkImageToBudget(file);
+  } catch {
+    toSend = file;
+  }
+  const outcome = await uploadFileToRoute<{ path: string; filename: string }>(
+    '/api/storage/upload',
+    { submissionId, ...fields },
+    toSend,
+    { form: 'staff-onboarding', action, ref: submissionId }
+  );
+  if (!outcome.ok) return { error: failureMessage(outcome) };
+  return { path: outcome.data.path, filename: outcome.data.filename };
+}
+
 export async function uploadDocument(
   submissionId: string,
-  type: 'photo' | 'passport' | 'eid' | 'degree_attested' | 'transcript_of_records' | 'education_additional' | 'job_offer_letter' | 'visa_document' | 'previous_visa_document' | 'eid_front' | 'eid_back' | 'pakistan_id_front' | 'pakistan_id_back' | 'sponsor_passport' | 'sponsor_visa' | 'sponsor_eid_front' | 'sponsor_eid_back' | 'visa' | 'employment_contract' | 'work_permit' | 'health_insurance' | 'iloe_insurance' | 'driving_license' | 'custom' | 'relationship_certificate' | 'previous_visa' | 'previous_eid_front' | 'previous_eid_back' | 'marriage_certificate' | 'divorce_certificate' | 'death_certificate' | 'noc_unmarried',
+  type: DocumentType,
   file: File
-): Promise<{ path: string; filename: string } | null> {
-  const fd = new FormData();
-  fd.append('submissionId', submissionId);
-  fd.append('type', type);
-  fd.append('file', await shrinkImageToBudget(file));
-
-  const res = await fetch('/api/storage/upload', { method: 'POST', body: fd });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    console.error('Error uploading document:', res.status, detail);
-    return null;
-  }
-  const json = await res.json();
-  return { path: json.path as string, filename: json.filename as string };
+): Promise<UploadResult> {
+  return uploadToStorage(submissionId, { type }, file, `upload:${type}`);
 }
 
 // ===================================================================
@@ -135,21 +165,13 @@ export async function uploadPassportPage(
   submissionId: string,
   pageKey: PassportPageKey,
   file: File
-): Promise<{ path: string; filename: string } | null> {
-  const fd = new FormData();
-  fd.append('submissionId', submissionId);
-  fd.append('type', 'passport');
-  fd.append('passportPage', pageKey);
-  fd.append('file', await shrinkImageToBudget(file));
-
-  const res = await fetch('/api/storage/upload', { method: 'POST', body: fd });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    console.error('Error uploading passport page:', res.status, detail);
-    return null;
-  }
-  const json = await res.json();
-  return { path: json.path as string, filename: json.filename as string };
+): Promise<UploadResult> {
+  return uploadToStorage(
+    submissionId,
+    { type: 'passport', passportPage: pageKey },
+    file,
+    `upload:passport-${pageKey}`
+  );
 }
 
 // ===================================================================
@@ -162,22 +184,29 @@ export async function updateDocumentReferences(
   token?: string | null,
   employerToken?: string | null,
 ): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/onboarding/${encodeURIComponent(id)}/documents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: token ?? null, employerToken: employerToken ?? null, documents }),
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      console.error('[updateDocumentReferences] save failed:', res.status, detail);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.error('[updateDocumentReferences] network error:', err);
+  const send = () =>
+    requestJson(
+      `/api/onboarding/${encodeURIComponent(id)}/documents`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token ?? null, employerToken: employerToken ?? null, documents }),
+      },
+      { form: employerToken ? 'employer' : 'staff-onboarding', action: 'save-documents', ref: id }
+    );
+  let outcome = await send();
+  // A dropped connection or a busy server is usually gone a moment later:
+  // retry once, so an upload is not left off the saved list. (The submit
+  // route checks the saved list and names anything missing.)
+  if (!outcome.ok && (outcome.kind === 'offline' || outcome.kind === 'timeout' || outcome.kind === 'server_error')) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    outcome = await send();
+  }
+  if (!outcome.ok) {
+    console.error('[updateDocumentReferences] save failed:', outcome.kind, outcome.status, outcome.code);
     return false;
   }
+  return true;
 }
 
 // ===================================================================

@@ -35,6 +35,7 @@ import {
   validateAnswers,
 } from '@/lib/supplier-policy-validation';
 import { DEMO_INTAKE, isDemoToken } from './demo';
+import { requestJson, failureMessage, FAILURE_MESSAGES } from '@/lib/request-outcome';
 
 type PageState =
   | 'loading'
@@ -1038,6 +1039,8 @@ export default function SupplierPolicyIntakePage() {
   const [showErrors, setShowErrors] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Why the form could not be loaded (offline, server error, ...).
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [serverMessages, setServerMessages] = useState<string[]>([]);
   // Bumped on every failed submit so the error summary takes focus again.
   const [summaryFocus, setSummaryFocus] = useState(0);
@@ -1051,12 +1054,19 @@ export default function SupplierPolicyIntakePage() {
         if (isDemoToken(token)) {
           json = DEMO_INTAKE;
         } else {
-          const res = await fetch(`/api/supplier-checks/${token}`);
+          const outcome = await requestJson<IntakeData>(
+            `/api/supplier-checks/${token}`,
+            {},
+            { form: 'supplier-checks', action: 'load', ref: token }
+          );
           if (cancelled) return;
-          if (res.status === 404) return setState('not_found');
-          if (res.status === 410) return setState('closed');
-          if (!res.ok) return setState('error');
-          json = await res.json();
+          if (!outcome.ok) {
+            if (outcome.status === 404) return setState('not_found');
+            if (outcome.status === 410) return setState('closed');
+            setLoadError(failureMessage(outcome));
+            return setState('error');
+          }
+          json = outcome.data;
         }
         setData(json);
         setPeople(initialPeople(json));
@@ -1155,42 +1165,49 @@ export default function SupplierPolicyIntakePage() {
       return;
     }
     try {
-      const res = await fetch(`/api/supplier-checks/${token}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...answers, dutyAcknowledged, shownPriceAed: data?.priceAed ?? null }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        if (res.status === 409 && j?.error === 'price_changed') {
+      const outcome = await requestJson(
+        `/api/supplier-checks/${token}/submit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...answers, dutyAcknowledged, shownPriceAed: data?.priceAed ?? null }),
+        },
+        { form: 'supplier-checks', action: 'submit', ref: token }
+      );
+      if (!outcome.ok) {
+        const failure = outcome;
+        const messages = Array.isArray(failure.body?.messages)
+          ? failure.body.messages.filter((m): m is string => typeof m === 'string')
+          : null;
+        if (failure.status === 409 && failure.code === 'price_changed') {
           setError('The price was updated while this page was open. Please reload the page, check the price and submit again.');
           setSubmitting(false);
           return;
         }
-        if (res.status === 409) {
+        if (failure.status === 409) {
           setState('already_submitted');
           return;
         }
-        if (res.status === 410) {
+        if (failure.status === 410) {
           setState('closed');
           return;
         }
-        if (j?.error === 'invalid_answers' && Array.isArray(j.messages)) {
-          setServerMessages(j.messages as string[]);
+        if (failure.code === 'invalid_answers' && messages) {
+          setServerMessages(messages);
           setSummaryFocus((n) => n + 1);
-        } else if (j?.error === 'duty_not_acknowledged') {
+        } else if (failure.code === 'duty_not_acknowledged') {
           setError('Please tick the box to confirm that checking suppliers stays with your company.');
-        } else if (j?.error === 'price_not_agreed') {
+        } else if (failure.code === 'price_not_agreed') {
           setError('Please tick the box to agree to the price before you submit.');
         } else {
-          setError('Could not submit. Please try again.');
+          setError(`Could not submit. ${failureMessage(failure)}`);
         }
         setSubmitting(false);
         return;
       }
       setState('success');
     } catch {
-      setError('Submission failed. Please check your connection and try again.');
+      setError(`Could not submit. ${FAILURE_MESSAGES.server_error}`);
       setSubmitting(false);
     }
   }, [answers, data, dutyAcknowledged, problems, submitting, token]);
@@ -1212,11 +1229,11 @@ export default function SupplierPolicyIntakePage() {
         <div className="flex flex-col items-center py-12 text-center">
           <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} aria-hidden="true" />
           <h2 className="text-xl font-semibold mb-2" style={{ color: NAVY }}>
-            {state === 'error' ? 'Something went wrong' : 'This link is not valid'}
+            {state === 'error' ? 'We could not open the form' : 'This link is not valid'}
           </h2>
           <p className="text-gray-600">
             {state === 'error'
-              ? 'Please try again in a few minutes. If it still does not open, reply to the email we sent you.'
+              ? loadError
               : 'The link may be incorrect. Please use the link from your TME email, or reply to that email.'}
           </p>
         </div>

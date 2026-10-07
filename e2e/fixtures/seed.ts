@@ -30,9 +30,11 @@ function getSupabase(): SupabaseClient {
   }
 
   const url = env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Service key: the anon RLS policies on staff_onboarding_submissions were
+  // dropped (migration 0246), so the anon key can no longer insert or delete.
+  const key = env.SUPABASE_SERVICE_KEY;
   if (!url || !key) throw new Error('Missing Supabase env vars in .env.local');
-  cachedClient = createClient(url, key);
+  cachedClient = createClient(url, key, { auth: { persistSession: false } });
   return cachedClient;
 }
 
@@ -73,7 +75,11 @@ export async function seedSubmission(opts: SeedOptions = {}): Promise<SeededSubm
     job_title_company: 'Test Engineer',
     department: 'IT',
     working_location: 'Dubai',
-    sponsor: 'Test Sponsor',
+    // The employee form derives the sponsorship type from this pick, so it
+    // must match sponsorshipType (an unknown value reads as company).
+    sponsor: { company: 'Company', family: 'Spouse', self_gcc: 'Self-sponsored' }[
+      opts.sponsorshipType ?? 'company'
+    ],
     salary_currency: 'AED',
     salary_total: 15000,
     salary_basic: 10000,
@@ -122,6 +128,7 @@ export async function seedSubmission(opts: SeedOptions = {}): Promise<SeededSubm
     complete: { status: 'complete', current_step: 'complete' },
   }[step];
 
+  const rowId = randomUUID();
   const row = {
     tme_request_id: randomUUID(),
     client_code: 'E2E_TEST',
@@ -141,6 +148,14 @@ export async function seedSubmission(opts: SeedOptions = {}): Promise<SeededSubm
     documents: null,
     existing_documents: null,
     synced_to_tme: false,
+    // Dev, prod and sandbox share this table and each portal syncs only its
+    // own origin_env. Without a tag the row defaults to 'production', and the
+    // live portal could import it and email the fake employee.
+    origin_env: 'e2e',
+    // The form URL carries the rotatable link_token, not the row id. Same
+    // value as the id, like backfilled rows, so `sub.id` is in the URL.
+    id: rowId,
+    link_token: rowId,
     ...statusFor,
   };
 
@@ -152,7 +167,7 @@ export async function seedSubmission(opts: SeedOptions = {}): Promise<SeededSubm
     .single();
   if (error) throw new Error(`Seed failed: ${error.message}`);
 
-  const url = `/onboard/${data.id}${data.employee_access_token ? `?token=${data.employee_access_token}` : ''}`;
+  const url = `/onboard/${data.link_token}${data.employee_access_token ? `?token=${data.employee_access_token}` : ''}`;
 
   return {
     id: data.id,

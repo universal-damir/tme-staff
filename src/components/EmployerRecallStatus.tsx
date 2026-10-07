@@ -13,6 +13,7 @@ import { TME_COLORS } from '@/lib/constants';
 import { Button } from '@/components/ui';
 import { formatDubaiDateShort } from '@/lib/utils';
 import type { EmployerStatusView } from '@/types';
+import { requestJson, failureMessage, FAILURE_MESSAGES } from '@/lib/request-outcome';
 
 interface EmployerRecallStatusProps {
   view: EmployerStatusView;
@@ -40,32 +41,40 @@ export function EmployerRecallStatus({
     setSending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/onboarding/${encodeURIComponent(linkToken)}/recall`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employerToken }),
-      });
-      const body = (await res.json().catch(() => null)) as
-        | { success?: boolean; error?: string }
-        | null;
-      if (res.ok && body?.success) {
+      const outcome = await requestJson<{ success?: boolean }>(
+        `/api/onboarding/${encodeURIComponent(linkToken)}/recall`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employerToken }),
+        },
+        { form: 'employer', action: 'recall', ref: linkToken }
+      );
+      if (outcome.ok && outcome.data?.success) {
         onRecalled();
         return;
       }
-      if (body?.error === 'already_submitted') {
+      const code = outcome.ok ? null : outcome.code;
+      if (code === 'already_submitted') {
         setError(
           `${nameStart} has already submitted their part. The form can no longer be recalled. Please contact TME Services if something needs to change.`,
         );
-      } else if (body?.error === 'unauthorized') {
+      } else if (code === 'unauthorized') {
         setError(
           'This link cannot recall the form. Please use the link from your latest email from TME Services.',
         );
+      } else if (code === 'not_recallable') {
+        setError(
+          'This form cannot be recalled from this page. If something needs to change, please email portal@tme-services.com.',
+        );
+      } else if (code === 'conflict') {
+        setError('The form changed while you were recalling it. Please reload the page and try again.');
       } else {
-        setError('Something went wrong. Please reload the page and try again.');
+        setError(outcome.ok ? FAILURE_MESSAGES.server_error : failureMessage(outcome));
       }
       setConfirming(false);
     } catch {
-      setError('Something went wrong. Please reload the page and try again.');
+      setError(FAILURE_MESSAGES.server_error);
       setConfirming(false);
     } finally {
       setSending(false);

@@ -48,6 +48,8 @@ import {
 } from '@/lib/ekyc-steps';
 import type { EkycClientDocuments, EkycClientPayload } from '@/lib/ekyc-token';
 import { shrinkImageToBudget } from '@/lib/supabase';
+import { requestJson, type RequestFailure } from '@/lib/request-outcome';
+import { uploadFileToRoute } from '@/lib/upload-client';
 import { Bi, BiIntro, BiLabel, BiNotice, BiTitle, hasGermanLine, useEkycBilingual } from './Bi';
 import { EkycField, ekycFieldIsWide, FieldHint } from './EkycField';
 import { ekycCountryIso } from './EkycInputs';
@@ -67,6 +69,31 @@ import { EKYC_UI } from './texts';
 const AUTOSAVE_DEBOUNCE_MS = 2000;
 const AUTOSAVE_RETRY_BASE_MS = 4000;
 const AUTOSAVE_RETRY_MAX_MS = 60_000;
+
+/**
+ * The form's own EN/DE text for a failed request (kinds from
+ * lib/request-outcome). `fallback` covers a refusal with no clear reason.
+ */
+function ekycFailureText(failure: RequestFailure, fallback: EkycText, tooLarge: EkycText): EkycText {
+  switch (failure.kind) {
+    case 'offline':
+      return EKYC_UI.offline;
+    case 'too_large':
+      return tooLarge;
+    case 'wrong_file':
+      return EKYC_UI.wrongType;
+    case 'busy':
+      return EKYC_UI.busy;
+    case 'link_invalid':
+      return EKYC_UI.linkInvalid;
+    case 'timeout':
+      return EKYC_UI.timeout;
+    case 'server_error':
+      return EKYC_UI.serverError;
+    default:
+      return fallback;
+  }
+}
 
 /** The view before step 1 (what you need, how long it takes). */
 const START = -1;
@@ -445,17 +472,16 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
   const saveNowRef = useRef<() => Promise<void>>(async () => {});
 
   const handleClosedStatus = useCallback(
-    async (res: Response): Promise<boolean> => {
-      if (res.status !== 409 && res.status !== 410) return false;
+    (failure: RequestFailure): boolean => {
+      if (failure.status !== 409 && failure.status !== 410) return false;
       if (closed.current) return true;
       closed.current = true;
       dirty.current = false;
       if (timer.current) clearTimeout(timer.current);
-      if (res.status === 409) {
+      if (failure.status === 409) {
         onClosed('submitted');
       } else {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        onClosed(body.error === 'cancelled' ? 'cancelled' : 'expired');
+        onClosed(failure.code === 'cancelled' ? 'cancelled' : 'expired');
       }
       return true;
     },
@@ -477,29 +503,27 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
     setSaveState('saving');
     const sent = latest.current;
     try {
-      const res = await fetch(`/api/kyc/${token}/autosave`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ formData: sent }),
-      });
-      if (await handleClosedStatus(res)) return;
-      if (res.ok) {
+      const outcome = await requestJson(
+        `/api/kyc/${token}/autosave`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ formData: sent }),
+        },
+        { form: 'ekyc', action: 'autosave', ref: token }
+      );
+      if (!outcome.ok && handleClosedStatus(outcome)) return;
+      if (outcome.ok) {
         savedSignature.current = String(getEkycValue(sent, 'declaration.signature') ?? '');
         retryDelay.current = AUTOSAVE_RETRY_BASE_MS;
         if (mySeq === seq.current) setSaveState(dirty.current ? 'idle' : 'saved');
         return;
       }
       dirty.current = true;
-      if (res.status === 413) {
+      if (outcome.kind === 'too_large') {
         setSaveState('too_large');
         return;
       }
-      setSaveState('error');
-      scheduleSaveIn(retryDelay.current);
-      retryScheduled = true;
-      retryDelay.current = Math.min(retryDelay.current * 2, AUTOSAVE_RETRY_MAX_MS);
-    } catch {
-      dirty.current = true;
       setSaveState('error');
       scheduleSaveIn(retryDelay.current);
       retryScheduled = true;
@@ -613,25 +637,29 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
     async (slot: EkycDocumentSlot, picked: File): Promise<EkycUploadResult> => {
       setBusySlots((prev) => ({ ...prev, [slot]: true }));
       try {
-        // A large photo is shrunk in the browser first (Netlify cuts bodies at ~6 MB).
+        // A large photo is shrunk in the browser first; a large PDF goes by
+        // direct upload (uploadFileToRoute).
         const file = await shrinkImageToBudget(picked);
-        if (file.size > EKYC_MAX_UPLOAD_BYTES) return { ok: false, message: EKYC_UI.tooBig };
-        const form = new FormData();
-        form.append('slot', slot);
-        form.append('file', file);
-        const res = await fetch(`/api/kyc/${token}/upload`, { method: 'POST', body: form });
-        if (await handleClosedStatus(res)) return { ok: false, closedStatus: res.status, message: EKYC_UI.uploadFailed };
-        if (res.status === 415) return { ok: false, message: EKYC_UI.wrongType };
-        if (res.status === 413) return { ok: false, message: EKYC_UI.tooBig };
-        if (!res.ok) return { ok: false, message: EKYC_UI.uploadFailed };
-        const body = (await res.json()) as { document?: EkycClientDocuments[EkycDocumentSlot] };
-        if (!body.document) return { ok: false, message: EKYC_UI.uploadFailed };
-        const doc = body.document;
+        const outcome = await uploadFileToRoute<{ document?: EkycClientDocuments[EkycDocumentSlot] }>(
+          `/api/kyc/${token}/upload`,
+          { slot },
+          file,
+          { form: 'ekyc', action: `upload:${slot}`, ref: token },
+          EKYC_MAX_UPLOAD_BYTES
+        );
+        if (!outcome.ok) {
+          if (handleClosedStatus(outcome)) {
+            return { ok: false, closedStatus: outcome.status ?? undefined, message: EKYC_UI.uploadFailed };
+          }
+          return { ok: false, message: ekycFailureText(outcome, EKYC_UI.uploadFailed, EKYC_UI.tooBig) };
+        }
+        if (!outcome.data?.document) return { ok: false, message: EKYC_UI.serverError };
+        const doc = outcome.data.document;
         setDocuments((prev) => ({ ...prev, [slot]: doc }));
         setServerErrors(null);
         return { ok: true, document: doc };
       } catch {
-        return { ok: false, message: EKYC_UI.uploadFailed };
+        return { ok: false, message: EKYC_UI.serverError };
       } finally {
         setBusySlots((prev) => ({ ...prev, [slot]: false }));
       }
@@ -731,46 +759,48 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
     closed.current = true;
     if (timer.current) clearTimeout(timer.current);
     try {
-      const res = await fetch(`/api/kyc/${token}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ formData: data }),
-      });
-      if (res.ok) {
+      const outcome = await requestJson(
+        `/api/kyc/${token}/submit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ formData: data }),
+        },
+        { form: 'ekyc', action: 'submit', ref: token }
+      );
+      if (outcome.ok) {
         setConfirmOpen(false);
         onSubmitted(data, documents);
         return;
       }
-      if (res.status === 409) {
-        const body = (await res.clone().json().catch(() => ({}))) as { error?: string };
-        if (body.error === 'changed') {
-          // Another write landed in between (an upload or a draft save). Nothing
-          // is lost: keep the answers, save them as a draft, ask to try again.
-          closed.current = false;
-          closeConfirm();
-          setSubmitError(EKYC_UI.submitChanged);
-          dirty.current = true;
-          scheduleSaveIn(AUTOSAVE_DEBOUNCE_MS);
-          return;
-        }
-      }
-      if (res.status === 409 || res.status === 410) {
+      const failure = outcome;
+      const fieldErrors = Array.isArray(failure.body?.errors)
+        ? (failure.body.errors as EkycValidationError[])
+        : [];
+      if (failure.status === 409 && failure.code === 'changed') {
+        // Another write landed in between (an upload or a draft save). Nothing
+        // is lost: keep the answers, save them as a draft, ask to try again.
         closed.current = false;
-        await handleClosedStatus(res);
+        closeConfirm();
+        setSubmitError(EKYC_UI.submitChanged);
+        dirty.current = true;
+        scheduleSaveIn(AUTOSAVE_DEBOUNCE_MS);
+        return;
+      }
+      if (failure.status === 409 || failure.status === 410) {
+        closed.current = false;
+        handleClosedStatus(failure);
         return;
       }
       closed.current = false;
       setConfirmOpen(false);
-      if (res.status === 400) {
-        const body = (await res.json().catch(() => ({}))) as { errors?: EkycValidationError[] };
-        if (Array.isArray(body.errors) && body.errors.length > 0) {
-          setServerErrors(body.errors);
-          focusSummary();
-          return;
-        }
+      if (failure.status === 400 && fieldErrors.length > 0) {
+        setServerErrors(fieldErrors);
+        focusSummary();
+        return;
       }
       closeConfirm();
-      setSubmitError(EKYC_UI.submitFailed);
+      setSubmitError(ekycFailureText(failure, EKYC_UI.submitFailed, EKYC_UI.tooLarge));
     } catch {
       closed.current = false;
       closeConfirm();

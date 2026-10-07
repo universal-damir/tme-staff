@@ -18,6 +18,22 @@ import type {
 import { Loader2, CheckCircle, XCircle, AlertTriangle, Lock, Info } from 'lucide-react';
 import { RECALLED_MESSAGE } from '@/lib/submit-validation';
 import { sponsorshipTypeFromSponsor } from '@/lib/staff-form-logic';
+import {
+  requestJson,
+  failureMessage,
+  FAILURE_MESSAGES,
+  type RequestFailure,
+} from '@/lib/request-outcome';
+import { reportClientFailure } from '@/lib/client-error-log';
+
+/**
+ * The submit routes send their own sentence for the cases people can act on
+ * (already signed, withdrawn link, missing documents). Show that; otherwise
+ * the plain message for the kind of failure.
+ */
+function submitFailureMessage(failure: RequestFailure): string {
+  return failure.serverMessage ?? failureMessage(failure);
+}
 
 type PageState =
   | 'loading'
@@ -107,31 +123,46 @@ function OnboardingPageInner() {
     if (!UUID_REGEX.test(id)) return;
 
     async function fetchSubmission() {
+      const loadContext = {
+        form: employerToken ? 'employer' : 'employee',
+        action: 'load',
+        ref: id,
+      };
       try {
         const qs = new URLSearchParams();
         if (token) qs.set('token', token);
         if (employerToken) qs.set('e', employerToken);
         const query = qs.toString();
         const url = query ? `/api/onboarding/${id}?${query}` : `/api/onboarding/${id}`;
-        const res = await fetch(url, { cache: 'no-store' });
-        const body = await res.json().catch(() => null) as { status?: string; view?: string } | null;
-
-        if (res.status === 404) {
-          setPageState('not_found');
+        const outcome = await requestJson<{ status?: string; view?: string; id?: string }>(
+          url,
+          { cache: 'no-store' }
+        );
+        if (!outcome.ok) {
+          // These statuses have their own screens; they are not failures to log.
+          const status = outcome.body?.status;
+          if (outcome.status === 404) {
+            setPageState('not_found');
+            return;
+          }
+          if (outcome.status === 403) {
+            setPageState(status === 'recalled' ? 'recalled' : 'token_required');
+            return;
+          }
+          if (outcome.status === 410) {
+            setPageState(status === 'expired' ? 'expired' : 'cancelled');
+            return;
+          }
+          reportClientFailure(loadContext, outcome);
+          setError(failureMessage(outcome));
+          setPageState('error');
           return;
         }
-        if (res.status === 403) {
-          setPageState(body?.status === 'recalled' ? 'recalled' : 'token_required');
-          return;
-        }
-        if (res.status === 410) {
-          if (body?.status === 'cancelled') setPageState('cancelled');
-          else if (body?.status === 'expired') setPageState('expired');
-          else setPageState('cancelled');
-          return;
-        }
-        if (!res.ok) {
-          setError('Failed to load onboarding form');
+        const body = outcome.data;
+        // A 200 with an empty answer is our fault, not a missing form.
+        if (!body) {
+          reportClientFailure(loadContext, { kind: 'server_error', status: outcome.status });
+          setError(FAILURE_MESSAGES.server_error);
           setPageState('error');
           return;
         }
@@ -206,7 +237,8 @@ function OnboardingPageInner() {
         }
       } catch (err) {
         console.error('Error fetching submission:', err);
-        setError('Failed to load onboarding form');
+        reportClientFailure(loadContext, { kind: 'server_error' });
+        setError(FAILURE_MESSAGES.server_error);
         setPageState('error');
       }
     }
@@ -227,25 +259,28 @@ function OnboardingPageInner() {
       setIsSubmitting(true);
       setError(null);
 
+      const submitContext = { form: 'employer', action: 'submit', ref: id };
+      const submitInit: RequestInit = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          employerData: data,
+          signature,
+          employerToken,
+        }),
+      };
+
       try {
         if (submission.is_same_person) {
           // Persist employer data + signature server-side so a refresh
           // doesn't lose them. The portal-side employer-complete webhook
           // recognises is_same_person and skips the employee invite email,
           // it just flips current_step to 'employee' and logs the status.
-          const response = await fetch('/api/submit-employer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id,
-              employerData: data,
-              signature,
-              employerToken,
-            }),
-          });
+          const outcome = await requestJson('/api/submit-employer', submitInit, submitContext);
 
-          if (!response.ok) {
-            setError('Failed to save form. Please try again.');
+          if (!outcome.ok) {
+            setError(submitFailureMessage(outcome));
             return;
           }
 
@@ -264,43 +299,27 @@ function OnboardingPageInner() {
           });
         } else {
           // Regular flow - save AND notify via server-side API (guaranteed delivery)
-          const response = await fetch('/api/submit-employer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id,
-              employerData: data,
-              signature,
-              employerToken,
-            }),
-          });
+          const outcome = await requestJson<{ employeeNotified?: boolean } | null>(
+            '/api/submit-employer',
+            submitInit,
+            submitContext
+          );
 
-          if (response.ok) {
+          if (outcome.ok) {
             // false = the portal answered but no employee email went out
             // (e.g. no employee email on record): TME sends the link instead.
-            try {
-              const okBody = await response.json();
-              setEmployeeNotified(okBody?.employeeNotified === false ? false : undefined);
-            } catch {
-              setEmployeeNotified(undefined);
-            }
+            setEmployeeNotified(outcome.data?.employeeNotified === false ? false : undefined);
             setPageState('success');
           } else {
             // Show the server's plain-English reason (e.g. already signed,
             // or the link is not the latest one) instead of a generic error.
-            let message = 'Failed to save form. Please try again.';
-            try {
-              const errBody = await response.json();
-              if (typeof errBody?.error === 'string' && errBody.error) message = errBody.error;
-            } catch {
-              // Non-JSON error body — keep the generic message.
-            }
-            setError(message);
+            setError(submitFailureMessage(outcome));
           }
         }
       } catch (err) {
         console.error('Error submitting employer form:', err);
-        setError('An error occurred. Please try again.');
+        reportClientFailure(submitContext, { kind: 'server_error' });
+        setError(FAILURE_MESSAGES.server_error);
       } finally {
         setIsSubmitting(false);
       }
@@ -316,50 +335,49 @@ function OnboardingPageInner() {
       setIsSubmitting(true);
       setError(null);
 
+      const submitContext = { form: 'employee', action: 'submit', ref: id };
       try {
         // Save AND notify via server-side API (guaranteed delivery)
-        const response = await fetch('/api/submit-employee', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id,
-            employeeData: data,
-            signature,
-            isSamePerson: submission.is_same_person,
-            // Refresh after the employer step wipes local `employerData`; in
-            // that case the server already has the authoritative copy in
-            // submission.employer_data, so fall back to it.
-            employerData: submission.is_same_person
-              ? (employerData || submission.employer_data)
-              : undefined,
-            employerSignature: submission.is_same_person ? submission.employer_signature_data : undefined,
-            // Employee access token from the invitation link — the server
-            // checks it so a withdrawn (recalled) link cannot submit.
-            token,
-          }),
-        });
+        const outcome = await requestJson(
+          '/api/submit-employee',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id,
+              employeeData: data,
+              signature,
+              isSamePerson: submission.is_same_person,
+              // Refresh after the employer step wipes local `employerData`; in
+              // that case the server already has the authoritative copy in
+              // submission.employer_data, so fall back to it.
+              employerData: submission.is_same_person
+                ? (employerData || submission.employer_data)
+                : undefined,
+              employerSignature: submission.is_same_person ? submission.employer_signature_data : undefined,
+              // Employee access token from the invitation link — the server
+              // checks it so a withdrawn (recalled) link cannot submit.
+              token,
+            }),
+          },
+          submitContext
+        );
 
-        if (response.ok) {
+        if (outcome.ok) {
           setPageState('success');
+        } else if (outcome.serverMessage === RECALLED_MESSAGE) {
+          // The route sends RECALLED_MESSAGE (with code 'recalled') when the
+          // employer took the form back.
+          setPageState('recalled');
         } else {
           // Surface the server's reason (e.g. the required-documents gate
           // listing what's missing) instead of a generic failure.
-          let message = 'Failed to save form. Please try again.';
-          try {
-            const body = await response.json();
-            if (body?.code === 'recalled') {
-              setPageState('recalled');
-              return;
-            }
-            if (typeof body?.error === 'string' && body.error) message = body.error;
-          } catch {
-            // Non-JSON error body — keep the generic message.
-          }
-          setError(message);
+          setError(submitFailureMessage(outcome));
         }
       } catch (err) {
         console.error('Error submitting employee form:', err);
-        setError('An error occurred. Please try again.');
+        reportClientFailure(submitContext, { kind: 'server_error' });
+        setError(FAILURE_MESSAGES.server_error);
       } finally {
         setIsSubmitting(false);
       }

@@ -4,11 +4,15 @@ import React, { useState, useRef } from 'react';
 import { TME_COLORS } from '@/lib/constants';
 import { Upload, FileText, CheckCircle, X, Loader2 } from 'lucide-react';
 import { useIsMobile } from '@/lib/useIsMobile';
+import { isUploadFailure, type UploadResult } from '@/lib/supabase';
+import { FAILURE_MESSAGES } from '@/lib/request-outcome';
+import { MAX_FILE_BYTES } from '@/lib/file-validation';
 
 interface FileUploadSlotProps {
   label: string;
   description?: string;
-  onUpload: (file: File) => Promise<{ path: string; filename: string } | null>;
+  /** Resolves to the stored file, or `{ error }` with the reason to show. */
+  onUpload: (file: File) => Promise<UploadResult | null>;
   onRemove: () => void;
   uploaded: boolean;
   filename?: string;
@@ -52,9 +56,8 @@ export function FileUploadSlot({
       return;
     }
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File size must be less than 10MB');
+    if (file.size > MAX_FILE_BYTES) {
+      setError(FAILURE_MESSAGES.too_large);
       return;
     }
 
@@ -62,11 +65,11 @@ export function FileUploadSlot({
     setIsUploading(true);
     try {
       const result = await onUpload(file);
-      if (!result) {
-        setError('Failed to upload file');
+      if (isUploadFailure(result)) {
+        setError(result?.error ?? FAILURE_MESSAGES.server_error);
       }
     } catch {
-      setError('Failed to upload file');
+      setError(FAILURE_MESSAGES.server_error);
     } finally {
       setIsUploading(false);
       // Reset input so the same file can be re-selected

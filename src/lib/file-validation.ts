@@ -1,4 +1,6 @@
-export const MAX_FILE_BYTES = 15 * 1024 * 1024;
+// Largest file any form accepts. Matches the staff-documents bucket limit
+// (10 MB); files over ~4 MB travel by direct upload (lib/direct-upload.ts).
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export type AllowedExt = '.jpg' | '.jpeg' | '.png' | '.webp' | '.pdf' | '.heic';
 

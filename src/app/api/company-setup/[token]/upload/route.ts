@@ -9,6 +9,13 @@ import {
 import { MAX_FILE_BYTES, detectExtFromMagic, mimeForExt } from '@/lib/file-validation';
 import { getClientIp, rateLimitCheck } from '@/lib/ai-route-guard';
 import type { CompanySetupDocuments } from '@/types/company-setup';
+import {
+  isDirectUploadRequest,
+  readDirectUploadRequest,
+  startDirectUpload,
+  readDirectUpload,
+  removeDirectUpload,
+} from '@/lib/direct-upload';
 
 export const runtime = 'nodejs';
 
@@ -87,6 +94,35 @@ export async function POST(
   }
   const row = access.row;
 
+  // Large files (over ~4 MB) cannot pass Netlify as multipart: the browser
+  // sends them straight to Supabase (see lib/direct-upload.ts).
+  if (isDirectUploadRequest(req.headers.get('content-type'))) {
+    const body = await readDirectUploadRequest(req);
+    if (!body) return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
+    const personIndex = String(body.personIndex ?? '');
+    const slot = String(body.slot ?? '');
+    const fieldError = checkFields(personIndex, slot);
+    if (fieldError) return fieldError;
+
+    if (body.step === 'start') {
+      const quotaError = checkQuota(row.id, row.documents, Number(body.size) || 0);
+      if (quotaError) return quotaError;
+      const started = await startDirectUpload(COMPANY_SETUP_BUCKET, row.id, body.size, MAX_FILE_BYTES);
+      if (!started.ok) return NextResponse.json({ error: started.error }, { status: started.status });
+      return NextResponse.json({ uploadUrl: started.uploadUrl, uploadId: started.uploadId });
+    }
+
+    const received = await readDirectUpload(COMPANY_SETUP_BUCKET, row.id, body.uploadId, MAX_FILE_BYTES);
+    if (!received.ok) return NextResponse.json({ error: received.error }, { status: received.status });
+    try {
+      const quotaError = checkQuota(row.id, row.documents, received.bytes.length);
+      if (quotaError) return quotaError;
+      return await storeBytes(row.id, personIndex, slot, received.bytes, String(body.filename ?? 'document'));
+    } finally {
+      await removeDirectUpload(COMPANY_SETUP_BUCKET, row.id, body.uploadId);
+    }
+  }
+
   let form: FormData;
   try {
     form = await req.formData();
@@ -98,12 +134,8 @@ export async function POST(
   const slot = String(form.get('slot') ?? '');
   const file = form.get('file');
 
-  if (!isCompanySetupPersonIndex(personIndex)) {
-    return NextResponse.json({ error: 'invalid_person_index' }, { status: 400 });
-  }
-  if (!isCompanySetupDocSlot(slot)) {
-    return NextResponse.json({ error: 'invalid_slot' }, { status: 400 });
-  }
+  const fieldError = checkFields(personIndex, slot);
+  if (fieldError) return fieldError;
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'missing_file' }, { status: 400 });
   }
@@ -111,27 +143,57 @@ export async function POST(
     return NextResponse.json({ error: 'file_size_out_of_range' }, { status: 413 });
   }
 
-  // Per-submission ceiling — one link must not be able to fill the bucket.
-  const tally = getTally(row.id, countRecordedRefs(row.documents));
+  const quotaError = checkQuota(row.id, row.documents, file.size);
+  if (quotaError) return quotaError;
+
+  const buf = new Uint8Array(await file.arrayBuffer());
+  return storeBytes(row.id, personIndex, slot, buf, String(file.name));
+}
+
+function checkFields(personIndex: string, slot: string): NextResponse | null {
+  if (!isCompanySetupPersonIndex(personIndex)) {
+    return NextResponse.json({ error: 'invalid_person_index' }, { status: 400 });
+  }
+  if (!isCompanySetupDocSlot(slot)) {
+    return NextResponse.json({ error: 'invalid_slot' }, { status: 400 });
+  }
+  return null;
+}
+
+// Per-submission ceiling — one link must not be able to fill the bucket.
+function checkQuota(
+  rowId: string,
+  documents: CompanySetupDocuments | null,
+  size: number
+): NextResponse | null {
+  const tally = getTally(rowId, countRecordedRefs(documents));
   if (tally.files + 1 > MAX_SUBMISSION_FILES) {
     return NextResponse.json({ error: 'too_many_files' }, { status: 413 });
   }
-  if (tally.bytes + file.size > MAX_SUBMISSION_BYTES) {
+  if (tally.bytes + size > MAX_SUBMISSION_BYTES) {
     return NextResponse.json({ error: 'submission_quota_exceeded' }, { status: 413 });
   }
+  return null;
+}
 
-  const buf = new Uint8Array(await file.arrayBuffer());
+/** Magic-byte check, then store under an opaque name. Same for both upload paths. */
+async function storeBytes(
+  rowId: string,
+  personIndex: string,
+  slot: string,
+  buf: Uint8Array,
+  originalName: string
+): Promise<NextResponse> {
   const detected = detectExtFromMagic(buf);
   if (!detected) {
     return NextResponse.json({ error: 'unsupported_file_type' }, { status: 415 });
   }
 
-  const supabase = getSupabaseAdmin();
   const opaqueName = `${randomUUID()}${detected}`;
-  const path = `${row.id}/${personIndex}/${slot}/${opaqueName}`;
+  const path = `${rowId}/${personIndex}/${slot}/${opaqueName}`;
 
-  const { error: upErr } = await supabase.storage
-    .from(COMPANY_SETUP_BUCKET)
+  const { error: upErr } = await getSupabaseAdmin()
+    .storage.from(COMPANY_SETUP_BUCKET)
     .upload(path, buf, {
       contentType: mimeForExt(detected),
       cacheControl: '3600',
@@ -143,13 +205,14 @@ export async function POST(
     return NextResponse.json({ error: 'upload_failed' }, { status: 500 });
   }
 
-  tally.bytes += file.size;
+  const tally = getTally(rowId, 0);
+  tally.bytes += buf.length;
   tally.files += 1;
 
   // Preserve the original (sanitised) display filename in the response so the
   // form can still show "passport.pdf" to the user, while the on-storage name
   // is opaque.
-  const displayName = String(file.name).replace(/[^a-zA-Z0-9.\-_ ]/g, '_').slice(0, 200);
+  const displayName = originalName.replace(/[^a-zA-Z0-9.\-_ ]/g, '_').slice(0, 200);
 
   return NextResponse.json({ path, filename: displayName });
 }

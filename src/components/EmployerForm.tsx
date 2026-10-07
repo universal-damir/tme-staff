@@ -15,7 +15,7 @@ import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
 import { CANCEL_COPY_INTRO, employerApplicantInUaeForSubmit, isDmccAuthority, pluralizePeriod } from '@/lib/staff-form-logic';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
-import { uploadDocument, updateDocumentReferences } from '@/lib/supabase';
+import { uploadDocument, updateDocumentReferences, isUploadFailure } from '@/lib/supabase';
 import type { StaffDocumentReferences } from '@/types';
 import { Briefcase, Banknote, Calendar, FileSignature, Copy, FileText, Globe, Info } from 'lucide-react';
 
@@ -762,7 +762,8 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
               filename={jobOfferLetterDoc?.filename}
               onUpload={async (file) => {
                 const result = await uploadDocument(submission.id, 'job_offer_letter', file);
-                if (result) {
+                // A failure carries its own message; FileUploadSlot shows it.
+                if (!isUploadFailure(result)) {
                   setJobOfferLetterDoc(result);
                   const currentDocs: StaffDocumentReferences = submission.documents || {};
                   await updateDocumentReferences(submission.id, { ...currentDocs, job_offer_letter: result }, null, employerToken);
