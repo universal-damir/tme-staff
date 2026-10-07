@@ -133,7 +133,6 @@ function fieldId(role: SvpRoleKey, field: PersonField): string {
 }
 
 const RECORDS_LOCATION_ID = 'svp-records-location';
-const NOTE_ID = 'svp-note';
 const PRICE_ID = 'svp-price-agreed';
 const DUTY_ID = 'svp-duty-acknowledged';
 const TRN_ID = 'svp-change-trn';
@@ -171,7 +170,6 @@ function mapProblem(message: string): FieldProblem {
     return { message, target: field ? fieldId(role, field) : null, inline };
   }
   if (prefix === 'Records location') return { message, target: RECORDS_LOCATION_ID, inline };
-  if (prefix === 'Note') return { message, target: NOTE_ID, inline };
   if (prefix === 'Price') return { message, target: PRICE_ID, inline };
   if (prefix === 'VAT number') return { message, target: TRN_ID, inline };
   if (prefix === 'VAT periods') return { message, target: VAT_PERIODS_ID, inline };
@@ -1026,7 +1024,6 @@ export default function SupplierPolicyIntakePage() {
   });
   const [atOffice, setAtOffice] = useState(true);
   const [location, setLocation] = useState('');
-  const [note, setNote] = useState('');
   // A key is present while the client corrects that company detail.
   const [changes, setChanges] = useState<SvpCompanyChanges>({});
   const [periodsOther, setPeriodsOther] = useState(false);
@@ -1066,7 +1063,6 @@ export default function SupplierPolicyIntakePage() {
         if (json.submitted) {
           setAtOffice(json.submitted.recordsLocationIsRegisteredOffice !== false);
           setLocation(json.submitted.recordsLocation ?? '');
-          setNote(json.submitted.note ?? '');
         }
         if (json.status === 'submitted' || json.status === 'synced') {
           setState('already_submitted');
@@ -1133,10 +1129,9 @@ export default function SupplierPolicyIntakePage() {
       recordsLocationIsRegisteredOffice: atOffice,
       recordsLocation: atOffice ? '' : location,
       priceAgreed,
-      ...(note.trim() ? { note: note.trim() } : {}),
       ...(Object.keys(companyChanges).length > 0 ? { companyChanges } : {}),
     }),
-    [people, atOffice, location, note, priceAgreed, companyChanges]
+    [people, atOffice, location, priceAgreed, companyChanges]
   );
 
   // The same checks the server runs; shown once the client tries to submit.
@@ -1451,69 +1446,49 @@ export default function SupplierPolicyIntakePage() {
         <VariantNote people={people} />
       </Step>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-10">
-        <Step
-          number={3}
-          title="Where are the records kept?"
-          hint="The supplier files, check forms and proof for each purchase. On paper or electronically."
-        >
-          <fieldset className="space-y-2">
-            <legend className="sr-only">Where the records are kept</legend>
-            <RadioCard checked={atOffice} onChange={() => setAtOffice(true)} disabled={submitting}>
-              {companyChanges.registeredAddress || prefill?.registeredAddress || 'Our registered office'}
-              <span className="block text-xs text-gray-500 mt-0.5">
-                As on your Tax Registration Certificate
-              </span>
-            </RadioCard>
-            <RadioCard checked={!atOffice} onChange={() => setAtOffice(false)} disabled={submitting}>
-              Another place
-            </RadioCard>
-            {!atOffice && (
-              <div className="pt-2">
-                <Field
-                  id={RECORDS_LOCATION_ID}
-                  label="Where?"
-                  hint="For example our warehouse in Al Quoz, or our cloud drive"
-                  error={fieldErrors[RECORDS_LOCATION_ID]}
-                >
-                  {(describedBy) => (
-                    <TextInput
-                      id={RECORDS_LOCATION_ID}
-                      value={location}
-                      maxLength={SVP_LIMITS.recordsLocation}
-                      disabled={submitting}
-                      hasError={!!fieldErrors[RECORDS_LOCATION_ID]}
-                      describedBy={describedBy}
-                      onChange={setLocation}
-                    />
-                  )}
-                </Field>
-              </div>
-            )}
-          </fieldset>
-        </Step>
+      <Step
+        number={3}
+        title="Where are the records kept?"
+        hint="The supplier files, check forms and proof for each purchase. On paper or electronically."
+      >
+        <fieldset className="space-y-2">
+          <legend className="sr-only">Where the records are kept</legend>
+          <RadioCard checked={atOffice} onChange={() => setAtOffice(true)} disabled={submitting}>
+            {companyChanges.registeredAddress || prefill?.registeredAddress || 'Our registered office'}
+            <span className="block text-xs text-gray-500 mt-0.5">
+              As on your Tax Registration Certificate
+            </span>
+          </RadioCard>
+          <RadioCard checked={!atOffice} onChange={() => setAtOffice(false)} disabled={submitting}>
+            Another place
+          </RadioCard>
+          {!atOffice && (
+            <div className="pt-2">
+              <Field
+                id={RECORDS_LOCATION_ID}
+                label="Where?"
+                hint="For example our warehouse in Al Quoz, or our cloud drive"
+                error={fieldErrors[RECORDS_LOCATION_ID]}
+              >
+                {(describedBy) => (
+                  <TextInput
+                    id={RECORDS_LOCATION_ID}
+                    value={location}
+                    maxLength={SVP_LIMITS.recordsLocation}
+                    disabled={submitting}
+                    hasError={!!fieldErrors[RECORDS_LOCATION_ID]}
+                    describedBy={describedBy}
+                    onChange={setLocation}
+                  />
+                )}
+              </Field>
+            </div>
+          )}
+        </fieldset>
+      </Step>
 
-        <Step number={4} title="Anything we should know?">
-          <Field id={NOTE_ID} label="Your note" optional error={fieldErrors[NOTE_ID]}>
-            {(describedBy) => (
-              <textarea
-                id={NOTE_ID}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                maxLength={SVP_LIMITS.note}
-                rows={4}
-                disabled={submitting}
-                aria-describedby={describedBy}
-                className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
-                onFocus={(e) => (e.currentTarget.style.borderColor = NAVY)}
-                onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
-              />
-            )}
-          </Field>
-        </Step>
-      </div>
 
-      <Step number={5} title={noCharge ? 'Confirm' : 'Agree to the price and confirm'}>
+      <Step number={4} title={noCharge ? 'Confirm' : 'Agree to the price and confirm'}>
         <div className={`grid grid-cols-1 gap-6 ${noCharge ? '' : 'lg:grid-cols-2'}`}>
           {!noCharge && (
             <div>
