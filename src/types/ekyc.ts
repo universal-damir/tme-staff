@@ -1848,7 +1848,7 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   {
     id: 'issuedShareCapital',
     number: '22',
-    label: { en: 'What is the issued share capital of your institution?', de: 'Wie hoch ist das ausgegebene Stammkapital Ihres Unternehmens?' },
+    label: { en: 'What is the issued share capital of your institution?', de: 'Wie hoch ist das eingezahlte Stammkapital Ihres Unternehmens?' },
     hint: plainHint(
       'The capital the shareholders actually hold. Often the same as the authorized capital.',
       'Das Kapital, das die Gesellschafter tatsächlich halten. Oft gleich hoch wie das genehmigte Stammkapital.'
@@ -1982,12 +1982,8 @@ export const CORPORATE_FIELDS: readonly EkycFieldDef<CorporateKycData, Corporate
   question(
     '36',
     'Is the entity involved in any offshore business / banking activities?',
-    'Ist das Unternehmen an Offshore-Geschäften oder Offshore-Bankaktivitäten beteiligt?',
-    // Tina 06.10.2026 (replaces Renji's 05.10 sentence).
-    plainHint(
-      'If the company is a legal entity registered in a country or jurisdiction other than where it conducts its core commercial operations, or if it trades, has affiliates or is involved in banking activities in offshore jurisdictions.',
-      'Wenn das Unternehmen eine juristische Person ist, die in einem anderen Land oder Rechtsgebiet eingetragen ist als dort, wo es seine Hauptgeschäftstätigkeit ausübt, oder wenn es in Offshore-Rechtsgebieten Handel treibt, verbundene Unternehmen hat oder Bankgeschäfte tätigt.'
-    )
+    'Ist das Unternehmen an Offshore-Geschäften oder Offshore-Bankaktivitäten beteiligt?'
+    // No help text (Tina 07.10.2026: the explanation does not make sense).
   ),
   ...closingFields<CorporateKycData>(
     plainHint(
