@@ -2,17 +2,22 @@
 //   /vat-files/demo-customs   accounting client, customs request
 //   /vat-files/demo-files     non-accounting client, files request
 //   /vat-files/demo-files-customs  files request with point 8 (customs) + the FTA list
-//   /vat-files/demo-closed    a closed request
+//   /vat-files/demo-closed    a closed request, read-only: the customs table with
+//                             the answers, a split import, a TME question with
+//                             its reply, the files sent and the comment
+//   /vat-files/demo-closed-files  a closed files request (no table), read-only
 //   /vat-files/demo-customs-table       round 3: the customs table (7 imports,
 //                                       real FTA CSV values of a Pennypress-like
 //                                       client; one answered by TME, one with
 //                                       two TME questions, "Same as last quarter")
 //   /vat-files/demo-customs-table-sent  the table after a Send (4 SPG-like imports)
 //   /vat-files/demo-customs-table-long  150 imports, to check the page stays fast
+//   /vat-files/demo-code       round 4 B: "Who are you?" + email code first (code 123456),
+//                              then the customs table page ("Not you?" goes back)
 // Uploads, autosave and Send stay in the browser: no API call, nothing is saved.
 // Only in `next dev`; a production build treats these like any unknown link.
 
-import type { VatCustomsPageLine, VatFilesPagePayload } from '@/types/vat-files';
+import type { VatCustomsPageLine, VatFilesCodeAddress, VatFilesPagePayload } from '@/types/vat-files';
 
 // The REAL points, as the portal writes them to requested_items (page
 // wording: portal src/lib/vat-filing/email-templates.ts customsRequestItems('page')
@@ -116,6 +121,25 @@ SPG_LINES[0].hasInvoice = true;
 
 const SPG_SENT_AT = '2026-10-10T11:42:00.000Z';
 
+// demo-closed: the same SPG-like imports, all answered and sent, then closed by TME.
+const CLOSED_LINES = demoLines(6301, [
+  ['20260803', '1010135960026', '6505210394', 252203.24, 12610.16],
+  ['20260819', '1010146613726', '6507604297', 6472.57, 323.63],
+  ['20260923', '1010169929426', '6511897684', 265416.02, 13270.8],
+  ['20260924', '1010170952926', '6511904860', 228916.43, 11445.82],
+]);
+CLOSED_LINES[0].hasBoe = true;
+CLOSED_LINES[0].hasInvoice = true;
+CLOSED_LINES[2].questions = [
+  {
+    id: 911,
+    text: 'The invoice shows EXW Milan. Who paid the freight to Dubai?',
+    askedAt: '2026-10-10T12:30:00.000Z',
+  },
+];
+const CLOSED_SENT_AT = '2026-10-10T11:42:00.000Z';
+const CLOSED_REPLY_AT = '2026-10-10T14:05:00.000Z';
+
 function longLines(): VatCustomsPageLine[] {
   const rows: CsvLine[] = [];
   for (let i = 0; i < 150; i++) {
@@ -179,6 +203,56 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
     ...NO_TABLE,
   },
   'demo-closed': {
+    kind: 'customs',
+    status: 'closed',
+    companyCode: '99996',
+    companyName: 'Sample Projects General Trading LLC',
+    periodKey: '2607-2609',
+    periodLabel: 'Jul - Sep 2026 (2607-2609)',
+    deadline: '2026-10-20',
+    requestedItems: CUSTOMS_TABLE_POINTS,
+    hasCustomsList: true,
+    customsListName: 'FTA import list 99996 2607-2609.xlsx',
+    expired: false,
+    files: [
+      { name: 'BOE 1010146613726.pdf', size: 182_300, uploadedAt: CLOSED_SENT_AT },
+      { name: 'Invoice INV-2207.pdf', size: 96_120, uploadedAt: CLOSED_SENT_AT },
+      { name: 'Invoice INV-2208.pdf', size: 88_410, uploadedAt: CLOSED_SENT_AT },
+      { name: 'BOE 1010169929426.pdf', size: 201_877, uploadedAt: CLOSED_REPLY_AT },
+      { name: 'Freight invoice DHL 55120.pdf', size: 64_310, uploadedAt: CLOSED_REPLY_AT },
+    ],
+    clientComment: 'The September imports are machines for our own workshop. The freight for import 3 was paid by us to DHL, invoice attached.',
+    customsLines: CLOSED_LINES,
+    customsAnswers: {
+      '6301': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'outside_uae', deliveryPlace: 'Shanghai, China' }], updatedAt: CLOSED_SENT_AT },
+      '6302': {
+        parts: [
+          { invoiceRef: 'INV-2207', purpose: 'sale_stock', payment: 'paid', incoterm: 'DAP', delivery: 'uae_premises' },
+          { invoiceRef: 'INV-2208', purpose: 'samples', payment: 'foc', incoterm: 'DAP', delivery: 'uae_premises' },
+        ],
+        updatedAt: CLOSED_SENT_AT,
+      },
+      '6303': {
+        parts: [{ purpose: 'fixed_asset', payment: 'will_be_paid', incoterm: 'EXW', delivery: 'outside_uae', deliveryPlace: 'Milan, Italy' }],
+        replies: { '911': 'We paid DHL directly. The DHL invoice is in the files.' },
+        updatedAt: CLOSED_REPLY_AT,
+      },
+      '6304': {
+        parts: [{ purpose: 'other', purposeOther: 'Spare parts for a client project', payment: 'other', paymentOther: 'Paid 50% now, 50% on delivery', incoterm: 'not_stated' }],
+        updatedAt: CLOSED_REPLY_AT,
+      },
+    },
+    customsDefaults: null,
+    customsAnswersSentAt: CLOSED_REPLY_AT,
+    lineFiles: [
+      { lineId: 6302, docKind: 'boe', name: 'BOE 1010146613726.pdf', uploadedAt: CLOSED_SENT_AT },
+      { lineId: 6302, docKind: 'invoice', name: 'Invoice INV-2207.pdf', uploadedAt: CLOSED_SENT_AT },
+      { lineId: 6302, docKind: 'invoice', name: 'Invoice INV-2208.pdf', uploadedAt: CLOSED_SENT_AT },
+      { lineId: 6303, docKind: 'boe', name: 'BOE 1010169929426.pdf', uploadedAt: CLOSED_REPLY_AT },
+      { lineId: 6303, docKind: 'other', name: 'Freight invoice DHL 55120.pdf', uploadedAt: CLOSED_REPLY_AT },
+    ],
+  },
+  'demo-closed-files': {
     kind: 'files',
     status: 'closed',
     companyCode: '99998',
@@ -186,12 +260,16 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
     periodKey: '2604-2606',
     periodLabel: 'Apr - Jun 2026 (2604-2606)',
     deadline: '2026-07-15',
-    requestedItems: [],
+    requestedItems: FILES_POINTS,
     hasCustomsList: false,
     customsListName: null,
     expired: false,
-    files: [],
-    clientComment: null,
+    files: [
+      { name: 'Sales April - June 2026.xlsx', size: 48_211, uploadedAt: '2026-07-08T09:12:00.000Z' },
+      { name: 'Expenses Q2 2026.pdf', size: 1_204_880, uploadedAt: '2026-07-08T09:13:00.000Z' },
+      { name: 'Trial Balance 2604-2606.xlsx', size: 61_004, uploadedAt: '2026-07-10T06:40:00.000Z' },
+    ],
+    clientComment: 'No sales at 0% this quarter.',
     ...NO_TABLE,
   },
   'demo-customs-table': {
@@ -262,6 +340,10 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
       { lineId: 6202, docKind: 'invoice', name: 'Invoice INV-2208.pdf', uploadedAt: SPG_SENT_AT },
     ],
   },
+  // Round 4 B: the same table as demo-customs-table, behind the email code.
+  get 'demo-code'(): VatFilesPagePayload {
+    return { ...DEMOS['demo-customs-table'], viewerEmail: 'anna.k@pennypress-demo.com' };
+  },
   'demo-customs-table-long': {
     kind: 'customs',
     status: 'open',
@@ -291,3 +373,15 @@ export function isDemoToken(token: string): boolean {
 export function demoPayload(token: string): VatFilesPagePayload {
   return structuredClone(DEMOS[token]);
 }
+
+/** Round 4 B: demo tokens that ask for the email code first. */
+export function isDemoCodeToken(token: string): boolean {
+  return isDemoToken(token) && token === 'demo-code';
+}
+
+/** The masked list the demo shows under "Who are you?" (two look alike, so more letters show). */
+export const DEMO_CODE_ADDRESSES: VatFilesCodeAddress[] = [
+  { id: 'demo000000000001', masked: 'an***@pennypress-demo.com' },
+  { id: 'demo000000000002', masked: 'al***@pennypress-demo.com' },
+  { id: 'demo000000000003', masked: 'f***@pennypress-demo.com' },
+];

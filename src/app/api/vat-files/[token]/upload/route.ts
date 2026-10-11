@@ -23,6 +23,7 @@ import {
 } from '@/lib/vat-files';
 import { isVatCustomsDocKind, sanitizePageLines } from '@/lib/vat-customs';
 import { listVatLinkFolder, verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
+import { vatFilesViewer } from '@/lib/vat-files-code';
 import { VAT_FILES_BUCKET, type VatCustomsDocKind, type VatFileRequestRow } from '@/types/vat-files';
 
 export const runtime = 'nodejs';
@@ -38,6 +39,8 @@ export const runtime = 'nodejs';
 // table; they are checked here and echoed back, and the page sends them with
 // the path at Send, where they are checked again and kept on the file entry.
 // Answer: { path, name, size, lineId?, docKind? }.
+// Round 4 B: like every route of the page, 401 `email_code_required` when the
+// row needs an email code and the browser has no valid proof (vat-files-code.ts).
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -51,6 +54,8 @@ export async function POST(
   if (!access.ok || !access.row) {
     return NextResponse.json(vatFilesAccessErrorBody(access), { status: access.status ?? 404 });
   }
+  const viewer = await vatFilesViewer(req, access.row);
+  if (!viewer.ok) return NextResponse.json(viewer.body, { status: viewer.status });
   const row = access.row;
   if ((row.files ?? []).length >= VAT_FILES_MAX_TOTAL) {
     return NextResponse.json({ error: 'too_many_files' }, { status: 409 });
@@ -163,6 +168,8 @@ export async function DELETE(
   if (!access.ok || !access.row) {
     return NextResponse.json(vatFilesAccessErrorBody(access), { status: access.status ?? 404 });
   }
+  const viewer = await vatFilesViewer(req, access.row);
+  if (!viewer.ok) return NextResponse.json(viewer.body, { status: viewer.status });
   const row = access.row;
   const path = req.nextUrl.searchParams.get('path');
   if (!isUploadPathForLink(path, row.environment, row.link_token)) {

@@ -19,6 +19,7 @@ import {
   VAT_CUSTOMS_PAYMENT_OPTIONS,
   VAT_CUSTOMS_PURPOSE_OPTIONS,
   isVatCustomsLineComplete,
+  normaliseVatFilesEmail,
   type VatCustomsAnswerPart,
   type VatCustomsAnswers,
   type VatCustomsDefaults,
@@ -197,6 +198,9 @@ export function readStoredLineAnswer(raw: unknown): VatCustomsLineAnswer | null 
   if (replies) out.replies = replies;
   const updatedAt = isoOrUndefined(r.updatedAt);
   if (updatedAt) out.updatedAt = updatedAt;
+  // Round 4 B: kept on the server; the page payload drops it (scrubVatFilesRow).
+  const savedBy = normaliseVatFilesEmail(r.savedBy);
+  if (savedBy) out.savedBy = savedBy;
   return out;
 }
 
@@ -325,7 +329,9 @@ export function applyCustomsAnswersUpdate(
   stored: unknown,
   incoming: unknown,
   lines: VatCustomsPageLine[],
-  nowIso: string
+  nowIso: string,
+  /** Round 4 B: the confirmed address of the person saving; kept on each CHANGED line as `savedBy`. Null = unknown. */
+  savedBy: string | null = null
 ): CustomsAnswersUpdate {
   if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
     return { ok: false, error: 'invalid_answers' };
@@ -393,6 +399,7 @@ export function applyCustomsAnswersUpdate(
     const before = answers[key];
     if (answerKey(before) === answerKey(next)) continue;
     next.updatedAt = nowIso;
+    if (savedBy) next.savedBy = savedBy;
     answers[key] = next;
     changed.push(key);
   }

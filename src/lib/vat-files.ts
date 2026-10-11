@@ -18,6 +18,7 @@ import {
   vatFileStoragePath,
   type VatFileEntry,
   type VatFileRequestRow,
+  type VatCustomsAnswers,
   type VatCustomsDocKind,
   type VatFilesPagePayload,
 } from '@/types/vat-files';
@@ -264,11 +265,22 @@ export function scrubVatFilesRow(row: VatFileRequestRow, now: number = Date.now(
     })),
     clientComment: row.client_comment ?? null,
     customsLines,
-    customsAnswers: readStoredAnswers(row.customs_answers, customsLines),
+    customsAnswers: withoutSavedBy(readStoredAnswers(row.customs_answers, customsLines)),
     customsDefaults: customsLines.length > 0 ? readDefaults(row.customs_defaults) : null,
     customsAnswersSentAt: typeof row.customs_answers_sent_at === 'string' ? row.customs_answers_sent_at : null,
     lineFiles: buildLineFiles(files, customsLines),
   };
+}
+
+/** Round 4 B: who saved a line stays on the server (a colleague's address is not shown). */
+function withoutSavedBy(answers: VatCustomsAnswers): VatCustomsAnswers {
+  const out: VatCustomsAnswers = {};
+  for (const [id, a] of Object.entries(answers)) {
+    const { savedBy: _by, ...rest } = a;
+    void _by;
+    out[id] = rest;
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------
@@ -350,6 +362,8 @@ export function buildFinalizeEntries(
     lineIds?: ReadonlySet<number>;
     /** A Send that carries customs answers may come without files. */
     allowNoFiles?: boolean;
+    /** Round 4 B: the confirmed address of the sender, kept on each new entry; null = unknown. */
+    uploadedBy?: string | null;
   } = {}
 ): FinalizeCheck {
   if (submitted.length === 0 && !opts.allowNoFiles) return { ok: false, error: 'no_files' };
@@ -377,6 +391,7 @@ export function buildFinalizeEntries(
       uploadedAt: nowIso,
     };
     if (comment) entry.comment = comment;
+    if (opts.uploadedBy) entry.uploadedBy = opts.uploadedBy;
     if (f.lineId !== undefined && f.docKind) {
       entry.lineId = f.lineId;
       entry.docKind = f.docKind;

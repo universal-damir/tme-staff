@@ -49,6 +49,8 @@ export interface VatFileEntry {
   lineId?: number;
   /** Round 3: what the file is for that line. */
   docKind?: VatCustomsDocKind;
+  /** Round 4: the confirmed email (lower case) of the person whose Send brought the file; absent = unknown (no code). */
+  uploadedBy?: string;
 }
 
 /** A row of vat_file_requests, as Supabase returns it. */
@@ -89,6 +91,10 @@ export interface VatFileRequestRow {
   customs_answers_saved_at?: string | null;
   /** Round 3. Client-owned: last Send that carried the answers. */
   customs_answers_sent_at?: string | null;
+  /** Round 4. Portal-owned: who may open the page (lower case); empty / missing = anyone with the link (as before). */
+  allowed_emails?: string[] | null;
+  /** Round 4. Client-owned: the confirmed email of the last Send; null = unknown. */
+  last_submitted_by?: string | null;
 }
 
 /** What the tme-staff page shows (built from the row; never the storage paths). */
@@ -118,6 +124,8 @@ export interface VatFilesPagePayload {
   customsAnswersSentAt: string | null;
   /** Round 3: per-line files sent so far (name + line + kind), for the row ticks on the page. */
   lineFiles: Array<{ lineId: number; docKind: VatCustomsDocKind; name: string; uploadedAt: string }>;
+  /** Round 4: the email the viewer confirmed with a code; null / missing = no code needed. */
+  viewerEmail?: string | null;
 }
 
 /** Upload limits, the same as the portal's VAT filing documents (period-documents.ts). */
@@ -291,6 +299,8 @@ export interface VatCustomsLineAnswer {
   replies?: Record<string, string>;
   /** ISO timestamp of the client's last change to this line. */
   updatedAt?: string;
+  /** Round 4: the confirmed email of the person who made that change; absent = unknown. Never shown on the page. */
+  savedBy?: string;
 }
 
 /** vat_file_requests.customs_answers: { "<portal line id>": VatCustomsLineAnswer } */
@@ -365,4 +375,77 @@ export function vatCustomsOptionLabel(
   value: string | null | undefined
 ): string {
   return options.find((o) => o.value === value)?.label ?? '';
+}
+
+// ============================================
+// Round 4 (11.10.2026): email code on the link
+// ============================================
+//
+// The link opens only for the addresses the request went to. The PORTAL
+// writes vat_file_requests.allowed_emails (To + CC of every booked customs
+// request / files request / reminder / customs questions email, TME's own
+// addresses left out; addresses are only ever added). With the tme-staff
+// switch VAT_FILES_EMAIL_CODE=on and a non-empty list, the page asks "Who
+// are you?" (masked addresses), mails a 6-digit code and, after the right
+// code, keeps a proof in the browser for VAT_FILES_PROOF_DAYS. Every upload /
+// answer / reply then carries WHO (VatFileEntry.uploadedBy,
+// VatCustomsLineAnswer.savedBy, vat_file_requests.last_submitted_by). An
+// empty list (rows made before round 4) or the switch off = the page works
+// as before, and the who fields stay absent.
+
+/** Codes sent for the page (tme-staff only, service role; HMAC hashes only). */
+export const VAT_FILE_EMAIL_CODES_TABLE = 'vat_file_email_codes';
+
+/** How long the browser's proof stays valid after the right code. */
+export const VAT_FILES_PROOF_DAYS = 7;
+
+/** Digits in the code. */
+export const VAT_FILES_CODE_LENGTH = 6;
+
+const VAT_FILES_EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[a-z]{2,}$/i;
+
+/** Trimmed, lower-case address, or null when it does not look like one. */
+export function normaliseVatFilesEmail(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const email = value.trim().toLowerCase();
+  return email.length <= 254 && VAT_FILES_EMAIL_RE.test(email) ? email : null;
+}
+
+/** The stored list, read leniently: valid addresses only, lower case, each once, in stored order. */
+export function readVatAllowedEmails(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    const e = normaliseVatFilesEmail(v);
+    if (e && !out.includes(e)) out.push(e);
+  }
+  return out;
+}
+
+/** The stored list plus new addresses (added at the end). Never removes one. */
+export function mergeVatAllowedEmails(existing: unknown, add: readonly unknown[]): string[] {
+  const out = readVatAllowedEmails(existing);
+  for (const v of add) {
+    const e = normaliseVatFilesEmail(v);
+    if (e && !out.includes(e)) out.push(e);
+  }
+  return out;
+}
+
+/** Most letters a masked address ever shows before the stars. */
+export const VAT_FILES_MASK_MAX_LETTERS = 4;
+
+/** "d***@client.com". `reveal` = letters shown before the stars (to tell two addresses apart), at most 4. */
+export function maskVatFilesEmail(email: string, reveal: number = 1): string {
+  const at = email.lastIndexOf('@');
+  if (at <= 0) return '***';
+  const local = email.slice(0, at);
+  const shown = local.slice(0, Math.max(1, Math.min(reveal, VAT_FILES_MASK_MAX_LETTERS, local.length - 1)));
+  return `${shown}***${email.slice(at)}`;
+}
+
+/** One address the page offers under "Who are you?": an opaque id and the masked address. */
+export interface VatFilesCodeAddress {
+  id: string;
+  masked: string;
 }

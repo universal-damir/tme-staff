@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { vatFilesRateLimited } from '@/lib/vat-files';
 import { applyCustomsAnswersUpdate, sanitizePageLines } from '@/lib/vat-customs';
 import { verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
+import { vatFilesViewer } from '@/lib/vat-files-code';
 import { VAT_FILE_REQUESTS_TABLE, type VatFileRequestRow } from '@/types/vat-files';
 
 export const runtime = 'nodejs';
@@ -29,6 +30,8 @@ const MAX_WRITE_ATTEMPTS = 4;
 // customs_answers_saved_at (+ updated_at, the write guard), never the
 // portal's columns.
 // Answer: { savedAt, updated: { "<line id>": updatedAt }, staleReplies: ["<line id>"] }.
+// Round 4 B: gated like every route of the page; a changed line keeps
+// `savedBy` = the confirmed address (replies to TME's questions included).
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -42,6 +45,8 @@ export async function POST(
   if (!access.ok || !access.row) {
     return NextResponse.json(vatFilesAccessErrorBody(access), { status: access.status ?? 404 });
   }
+  const viewer = await vatFilesViewer(req, access.row);
+  if (!viewer.ok) return NextResponse.json(viewer.body, { status: viewer.status });
 
   let body: unknown;
   try {
@@ -66,7 +71,7 @@ export async function POST(
       return NextResponse.json({ error: 'no_customs_table' }, { status: 409 });
     }
     const nowIso = new Date().toISOString();
-    const update = applyCustomsAnswersUpdate(current.customs_answers, incoming, lines, nowIso);
+    const update = applyCustomsAnswersUpdate(current.customs_answers, incoming, lines, nowIso, viewer.email);
     if (!update.ok) {
       return NextResponse.json({ error: update.error, lineId: update.lineId ?? null }, { status: 400 });
     }

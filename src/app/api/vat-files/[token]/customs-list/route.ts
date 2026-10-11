@@ -3,6 +3,7 @@ import { getClientIp } from '@/lib/ai-route-guard';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { vatFilesRateLimited } from '@/lib/vat-files';
 import { verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
+import { vatFilesViewer } from '@/lib/vat-files-code';
 import { VAT_FILES_BUCKET, vatFileNameFromPath } from '@/types/vat-files';
 
 export const runtime = 'nodejs';
@@ -10,7 +11,8 @@ export const runtime = 'nodejs';
 // GET /api/vat-files/[token]/customs-list
 // Sends the browser to a short-lived signed URL of the FTA import list the
 // portal stored for this link (a customs request, or a files request with
-// the customs point). Open requests only.
+// the customs point). Open and closed requests (a closed link still shows
+// what was asked, read-only); an expired link gets nothing.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -19,10 +21,12 @@ export async function GET(
   if (vatFilesRateLimited(getClientIp(req))) {
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
-  const access = await verifyVatFilesAccess(token);
+  const access = await verifyVatFilesAccess(token, { allowClosed: true });
   if (!access.ok || !access.row) {
     return NextResponse.json(vatFilesAccessErrorBody(access), { status: access.status ?? 404 });
   }
+  const viewer = await vatFilesViewer(req, access.row);
+  if (!viewer.ok) return NextResponse.json(viewer.body, { status: viewer.status });
   const path = access.row.customs_list_path;
   if (!path) {
     return NextResponse.json({ error: 'no_customs_list' }, { status: 404 });

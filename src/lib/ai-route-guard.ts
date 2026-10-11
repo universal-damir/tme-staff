@@ -42,14 +42,23 @@ const RATE_MAX = 30;
 const rateState = new Map<string, RateBucket>();
 
 /** Best-effort client IP from the proxy headers (exported for the non-AI
- *  company-setup upload route, which reuses the same per-IP budget). */
+ *  company-setup upload route, which reuses the same per-IP budget).
+ *
+ *  Order (round 4 B fix, 11.10.2026): the FIRST x-forwarded-for value is
+ *  whatever the caller typed, so it must never key a limit.
+ *   1. `x-nf-client-connection-ip`: set by Netlify's edge, cannot be faked.
+ *   2. the LAST x-forwarded-for value: the hop the last proxy saw.
+ *   3. `x-real-ip`. */
 export function getClientIp(req: NextRequest): string {
+  const netlify = req.headers.get('x-nf-client-connection-ip')?.trim();
+  if (netlify && IP_REGEX.test(netlify)) return netlify;
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) {
-    const first = forwarded.split(',')[0].trim();
-    if (IP_REGEX.test(first)) return first;
+    const hops = forwarded.split(',').map((h) => h.trim()).filter(Boolean);
+    const last = hops[hops.length - 1];
+    if (last && IP_REGEX.test(last)) return last;
   }
-  const real = req.headers.get('x-real-ip');
+  const real = req.headers.get('x-real-ip')?.trim();
   if (real && IP_REGEX.test(real)) return real;
   return 'unknown';
 }

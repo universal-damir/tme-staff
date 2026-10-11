@@ -14,6 +14,11 @@
 //
 // Look (11.10): a compact "fintech" table: ~52 px rows, quiet select cells
 // (hairline until hover / focus), document pills, a "..." menu per row.
+//
+// Read-only (11.10, a closed request): the same table with the answers as
+// plain text, the replies as text, document pills that only show what came
+// in, no menus, no split / remove, no "Copy to empty rows". Nothing can
+// call onChange / onFill / onAddFile.
 
 import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
@@ -25,6 +30,7 @@ import {
   Info,
   Loader2,
   MessageCircleQuestion,
+  Lock,
   MoreHorizontal,
   Paperclip,
   Pencil,
@@ -92,6 +98,20 @@ type LineQuestion = NonNullable<VatCustomsPageLine['questions']>[number];
 
 const NO_FILES: LineFileCounts = { boe: 0, invoice: 0, other: 0 };
 const NO_QUESTIONS: LineQuestion[] = [];
+
+/** The questions block shows: open questions, or (read-only) a reply to an earlier one. */
+function questionsOrReplies(line: VatCustomsPageLine, answer: VatCustomsLineAnswer | undefined, readOnly: boolean): boolean {
+  const questions = line.questions ?? NO_QUESTIONS;
+  return questions.length > 0 || (readOnly && earlierReplies(questions, answer?.replies).length > 0);
+}
+
+/** Read-only: replies whose question is no longer open (TME closed it); shown without the question. */
+function earlierReplies(questions: LineQuestion[], replies: Record<string, string> | undefined): string[] {
+  const open = new Set(questions.map((q) => String(q.id)));
+  return Object.entries(replies ?? {})
+    .filter(([id, text]) => !open.has(id) && typeof text === 'string' && text.trim() !== '')
+    .map(([, text]) => text.trim());
+}
 
 /** The help line for the delivery place (U1: the RME "Oman / Italy / Kuwait" confusion). */
 export const DELIVERY_HELP =
@@ -594,6 +614,74 @@ const AnswerField = memo(function AnswerField({
   );
 });
 
+/** Read-only: one answer as plain text (a closed request). */
+function ReadOnlyAnswer({
+  def,
+  part,
+  inTable,
+  showLabel,
+  context,
+}: {
+  def: FieldDef;
+  part: VatCustomsAnswerPart;
+  inTable: boolean;
+  showLabel: boolean;
+  context: string;
+}) {
+  const value = part[def.key] ?? '';
+  const text = (part[def.textKey] ?? '').trim();
+  const optional = !!def.optional?.(part);
+  const short = value ? cellLabel(def, value, inTable) : '';
+  // The words show next to the choice where they ARE the answer; the others are under the row.
+  const inline = !!text && def.needsText(value) && (def.key === 'purpose' || def.key === 'delivery');
+  const shown = inline ? `${short}: ${text}` : short;
+  const full = value ? vatCustomsOptionLabel(def.options, value) : '';
+  const empty = optional ? 'Not needed' : 'Not answered';
+  return (
+    <div className="min-w-0">
+      {showLabel && <p className="text-xs font-medium text-gray-600 mb-1">{def.label}</p>}
+      <p
+        className={
+          inTable
+            ? `flex items-center min-h-9 py-1.5 px-2.5 text-[13px] leading-snug break-words ${value ? 'text-gray-900' : 'text-gray-400'}`
+            : `flex items-center min-h-11 px-3 py-2 rounded-lg border border-gray-100 bg-gray-50 text-sm break-words ${value ? 'text-gray-900' : 'text-gray-400'}`
+        }
+        title={inline ? `${full.replace(/\s*\([^)]*\)\s*$/, '')}: ${text}` : full || undefined}
+      >
+        <span className="sr-only">
+          {def.label}, {context}:{' '}
+        </span>
+        <span className="min-w-0">{shown || empty}</span>
+      </p>
+    </div>
+  );
+}
+
+/** Read-only: the words that do not show in the cell (Other for Paid / FOC or Incoterms, the original BOE). */
+function readOnlyDetails(part: VatCustomsAnswerPart): Array<{ label: string; text: string }> {
+  const out: Array<{ label: string; text: string }> = [];
+  for (const def of detailDefs(part)) {
+    const value = part[def.key] ?? '';
+    const text = (part[def.textKey] ?? '').trim();
+    if (!text) continue;
+    if (def.needsText(value) && (def.key === 'purpose' || def.key === 'delivery')) continue;
+    out.push({ label: value === 'customer_return' ? 'Original BOE no.' : def.label, text });
+  }
+  return out;
+}
+
+function ReadOnlyDetails({ items }: { items: Array<{ label: string; text: string }> }) {
+  return (
+    <div className="flex flex-wrap gap-x-6 gap-y-1.5 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2 text-[13px]">
+      {items.map((d) => (
+        <p key={d.label} className="min-w-0 break-words">
+          <span className="text-gray-500">{d.label}:</span> <span className="text-gray-900">{d.text}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /** One auto-growing text field of the details strip. */
 function DetailField({
   def,
@@ -853,6 +941,7 @@ function DocPill({
   ctx,
   disabled,
   onAdd,
+  readOnly = false,
 }: {
   kind: 'boe' | 'invoice';
   state: 0 | 1 | 2;
@@ -860,10 +949,33 @@ function DocPill({
   ctx: string;
   disabled: boolean;
   onAdd: () => void;
+  readOnly?: boolean;
 }) {
   const label = kind === 'boe' ? 'BOE' : 'Invoice';
   const noun = kind === 'boe' ? 'BOE' : 'invoice';
   const base = 'inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-semibold whitespace-nowrap transition-colors';
+  if (readOnly) {
+    // Shows what came in; nothing to click (the tooltip lists the file names).
+    const got = state === 2;
+    const tip = got ? (names ? `${label} received:\n${names}` : `${label} received by TME.`) : `No ${noun} received.`;
+    return (
+      <Tip text={tip}>
+        {(describedBy) => (
+          <span
+            tabIndex={0}
+            aria-describedby={describedBy}
+            aria-label={got ? `${label} received, ${ctx}` : `No ${noun}, ${ctx}`}
+            className={`${base} ${FOCUS_RING} ${
+              got ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'border border-dashed border-gray-200 bg-white text-gray-400'
+            }`}
+          >
+            {got ? <Check className="w-3 h-3" strokeWidth={3} aria-hidden /> : <X className="w-3 h-3" aria-hidden />}
+            {label}
+          </span>
+        )}
+      </Tip>
+    );
+  }
   if (state === 1) {
     return (
       <span className={`${base} border border-gray-200 bg-white text-gray-500`}>
@@ -910,6 +1022,7 @@ function DocPills({
   names,
   onAddFile,
   disabled,
+  readOnly = false,
 }: {
   line: Pick<VatCustomsPageLine, 'id' | 'lineNo' | 'declarationNo'>;
   boe: 0 | 1 | 2;
@@ -919,14 +1032,30 @@ function DocPills({
   names: { boe: string; invoice: string; other: string };
   onAddFile: OnAddFile;
   disabled: boolean;
+  readOnly?: boolean;
 }) {
   const ctx = lineContext(line, null);
   return (
     <div className="flex items-center gap-1">
-      <DocPill kind="boe" state={boe} names={names.boe} ctx={ctx} disabled={disabled} onAdd={() => onAddFile(line.id, 'boe')} />
-      <DocPill kind="invoice" state={invoice} names={names.invoice} ctx={ctx} disabled={disabled} onAdd={() => onAddFile(line.id, 'invoice')} />
+      <DocPill kind="boe" state={boe} names={names.boe} ctx={ctx} disabled={disabled} readOnly={readOnly} onAdd={() => onAddFile(line.id, 'boe')} />
+      <DocPill kind="invoice" state={invoice} names={names.invoice} ctx={ctx} disabled={disabled} readOnly={readOnly} onAdd={() => onAddFile(line.id, 'invoice')} />
       {/* Other files: the "..." menu adds one; the clip shows once there are some. */}
-      {other > 0 && (
+      {other > 0 && readOnly && (
+        <Tip text={`Other files:\n${names.other || `${other} received`}`}>
+          {(describedBy) => (
+            <span
+              tabIndex={0}
+              aria-describedby={describedBy}
+              aria-label={`${other} other ${other === 1 ? 'file' : 'files'}, ${ctx}`}
+              className={`inline-flex items-center gap-0.5 h-6 px-1.5 rounded-full bg-gray-100 text-[11px] font-semibold tabular-nums text-gray-700 ${FOCUS_RING}`}
+            >
+              <Paperclip className="w-3 h-3" aria-hidden />
+              {other}
+            </span>
+          )}
+        </Tip>
+      )}
+      {other > 0 && !readOnly && (
         <Tip text={`Other files:\n${names.other || `${other} added`}\nClick to add another.`}>
           {(describedBy) => (
             <button
@@ -956,6 +1085,7 @@ function QuestionBoxes({
   disabled,
   idPrefix,
   sideBySide,
+  readOnly = false,
 }: {
   line: Pick<VatCustomsPageLine, 'lineNo' | 'declarationNo'>;
   questions: LineQuestion[];
@@ -965,8 +1095,47 @@ function QuestionBoxes({
   idPrefix: string;
   /** Laptop: question left, reply right. */
   sideBySide: boolean;
+  /** A closed request: the reply as text, plus replies whose question TME has closed since. */
+  readOnly?: boolean;
 }) {
   const ctx = lineContext(line, null);
+  if (readOnly) {
+    const earlier = earlierReplies(questions, replies);
+    const box = `rounded-lg border p-2.5 ${sideBySide ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-start' : ''}`;
+    const replyText = (text: string) =>
+      text ? (
+        <p className={`text-[13px] leading-snug break-words whitespace-pre-line text-gray-900 rounded-lg bg-white border border-gray-100 px-2.5 py-1.5 ${sideBySide ? '' : 'mt-2'}`}>
+          <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply</span>
+          {text}
+        </p>
+      ) : (
+        <p className={`text-[13px] text-gray-400 ${sideBySide ? 'py-1.5' : 'mt-2'}`}>No reply sent.</p>
+      );
+    return (
+      <div className="space-y-2">
+        {questions.map((q, i) => (
+          <div key={q.id} className={box} style={{ backgroundColor: '#FBF8F2', borderColor: '#E7DBC5' }}>
+            <div className="flex items-start gap-2 min-w-0">
+              <MessageCircleQuestion className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" aria-hidden />
+              <p className="text-[13px] leading-snug break-words min-w-0 whitespace-pre-line text-gray-800">
+                <span className="font-semibold" style={{ color: PRIMARY }}>
+                  TME asked{questions.length > 1 ? ` (${i + 1} of ${questions.length})` : ''}:
+                </span>{' '}
+                {q.text}
+              </p>
+            </div>
+            {replyText((replies?.[String(q.id)] ?? '').trim())}
+          </div>
+        ))}
+        {earlier.map((text, i) => (
+          <div key={`e${i}`} className="rounded-lg border border-gray-200 bg-gray-50/80 px-2.5 py-2 text-[13px] leading-snug break-words whitespace-pre-line">
+            <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply to an earlier TME question</span>
+            <span className="text-gray-900">{text}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="space-y-2">
       {questions.map((q, i) => {
@@ -1082,6 +1251,8 @@ interface LineProps {
   onChange: OnLineChange;
   onAddFile: OnAddFile;
   disabled: boolean;
+  /** A closed request: everything as text, no controls. */
+  readOnly: boolean;
 }
 
 const LineRows = memo(function LineRows({
@@ -1096,6 +1267,7 @@ const LineRows = memo(function LineRows({
   onChange,
   onAddFile,
   disabled,
+  readOnly,
 }: LineProps) {
   const key = String(line.id);
   const { parts, setPart, split, removePart, setReply } = useLineActions(key, answer, onChange);
@@ -1106,8 +1278,36 @@ const LineRows = memo(function LineRows({
   const ctx = lineContext(line, null);
   const names = useMemo(() => ({ boe: boeNames, invoice: invoiceNames, other: otherNames }), [boeNames, invoiceNames, otherNames]);
   const strips = useOpenStrips();
-  const strip = (part: VatCustomsAnswerPart, i: number, bg: string) =>
-    strips.shown(part, i) ? (
+  const showQuestions = questionsOrReplies(line, answer, readOnly);
+  const field = (def: FieldDef, part: VatCustomsAnswerPart, i: number, context: string) =>
+    readOnly ? (
+      <ReadOnlyAnswer def={def} part={part} inTable showLabel={false} context={context} />
+    ) : (
+      <AnswerField
+        def={def}
+        part={part}
+        onPart={(patch) => setPart(i, patch)}
+        onOpenDetails={() => strips.show(i)}
+        disabled={disabled}
+        inTable
+        idPrefix={`${idPrefix}-p${i}`}
+        showLabel={false}
+        context={context}
+      />
+    );
+  const strip = (part: VatCustomsAnswerPart, i: number, bg: string) => {
+    if (readOnly) {
+      const details = readOnlyDetails(part);
+      return details.length > 0 ? (
+        <tr>
+          <td className={`${TD} ${EDGE} ${bg} pt-0`} colSpan={4} />
+          <td className={`${ATD} ${bg} pt-0 pb-3 pr-3`} colSpan={COLS - 4}>
+            <ReadOnlyDetails items={details} />
+          </td>
+        </tr>
+      ) : null;
+    }
+    return strips.shown(part, i) ? (
       <tr>
         <td className={`${TD} ${EDGE} ${bg} pt-0`} colSpan={4} />
         <td className={`${ATD} ${bg} pt-0 pb-3 pr-3`} colSpan={COLS - 4}>
@@ -1122,6 +1322,7 @@ const LineRows = memo(function LineRows({
         </td>
       </tr>
     ) : null;
+  };
 
   return (
     <tbody
@@ -1159,8 +1360,8 @@ const LineRows = memo(function LineRows({
           <td className={TD} colSpan={4}>
             <div className="flex items-center gap-3 h-9 pl-2.5 text-[13px] text-gray-500">
               <Scissors className="w-3.5 h-3.5 text-gray-400" aria-hidden />
-              <span>Split into {parts.length} invoices. Please answer per invoice below.</span>
-              {parts.length < VAT_CUSTOMS_MAX_PARTS && (
+              <span>{readOnly ? `Split into ${parts.length} invoices, answered per invoice below.` : `Split into ${parts.length} invoices. Please answer per invoice below.`}</span>
+              {!readOnly && parts.length < VAT_CUSTOMS_MAX_PARTS && (
                 <button
                   type="button"
                   onClick={split}
@@ -1178,29 +1379,21 @@ const LineRows = memo(function LineRows({
         ) : (
           FIELDS.map((def) => (
             <td key={def.key} className={ATD}>
-              <AnswerField
-                def={def}
-                part={parts[0]}
-                onPart={(patch) => setPart(0, patch)}
-                onOpenDetails={() => strips.show(0)}
-                disabled={disabled}
-                inTable
-                idPrefix={`${idPrefix}-p0`}
-                showLabel={false}
-                context={ctx}
-              />
+              {field(def, parts[0], 0, ctx)}
             </td>
           ))
         )}
         <td className={TD}>
           <div className="flex items-center h-9">
-            <DocPills line={line} boe={boe} invoice={invoice} other={other} names={names} onAddFile={onAddFile} disabled={disabled} />
+            <DocPills line={line} boe={boe} invoice={invoice} other={other} names={names} onAddFile={onAddFile} disabled={disabled} readOnly={readOnly} />
           </div>
         </td>
         <td className={`${TD_BASE} pl-0.5 pr-2 text-right`}>
-          <div className="flex items-center justify-end h-9">
-            <RowMenu label={`More actions, ${ctx}`} items={lineMenuItems(line, parts.length, split, onAddFile)} disabled={disabled} />
-          </div>
+          {!readOnly && (
+            <div className="flex items-center justify-end h-9">
+              <RowMenu label={`More actions, ${ctx}`} items={lineMenuItems(line, parts.length, split, onAddFile)} disabled={disabled} />
+            </div>
+          )}
         </td>
       </tr>
       {!isSplit && strip(parts[0], 0, '')}
@@ -1214,40 +1407,40 @@ const LineRows = memo(function LineRows({
                   <span className="text-gray-300 select-none w-3 shrink-0" aria-hidden>
                     └
                   </span>
-                  <InvoiceRefInput
-                    id={`${idPrefix}-p${i}-inv`}
-                    value={part.invoiceRef ?? ''}
-                    index={i}
-                    context={lineContext(line, i)}
-                    disabled={disabled}
-                    inTable
-                    onChange={(s) => setPart(i, { invoiceRef: s })}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removePart(i)}
-                    disabled={disabled}
-                    className={`shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 ${FOCUS_RING}`}
-                    title="Remove this invoice"
-                    aria-label={`Remove invoice ${i + 1}, ${ctx}`}
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  {readOnly ? (
+                    <span className={`${LINE} min-w-0 text-[13px] tabular-nums ${part.invoiceRef?.trim() ? 'text-gray-900' : 'text-gray-400'}`}>
+                      <span className="truncate">
+                        {part.invoiceRef?.trim() ? `Invoice ${part.invoiceRef.trim()}` : `Invoice ${i + 1}: no number`}
+                      </span>
+                    </span>
+                  ) : (
+                    <>
+                      <InvoiceRefInput
+                        id={`${idPrefix}-p${i}-inv`}
+                        value={part.invoiceRef ?? ''}
+                        index={i}
+                        context={lineContext(line, i)}
+                        disabled={disabled}
+                        inTable
+                        onChange={(s) => setPart(i, { invoiceRef: s })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePart(i)}
+                        disabled={disabled}
+                        className={`shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 ${FOCUS_RING}`}
+                        title="Remove this invoice"
+                        aria-label={`Remove invoice ${i + 1}, ${ctx}`}
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </td>
               {FIELDS.map((def) => (
                 <td key={def.key} className={`${ATD} ${SUB_BG}`}>
-                  <AnswerField
-                    def={def}
-                    part={part}
-                    onPart={(patch) => setPart(i, patch)}
-                    onOpenDetails={() => strips.show(i)}
-                    disabled={disabled}
-                    inTable
-                    idPrefix={`${idPrefix}-p${i}`}
-                    showLabel={false}
-                    context={lineContext(line, i)}
-                  />
+                  {field(def, part, i, lineContext(line, i))}
                 </td>
               ))}
               <td className={`${TD} ${SUB_BG}`} colSpan={2}>
@@ -1262,7 +1455,7 @@ const LineRows = memo(function LineRows({
             {strip(part, i, SUB_BG)}
           </React.Fragment>
         ))}
-      {questions.length > 0 && (
+      {showQuestions && (
         <tr>
           <td className={`${TD} ${EDGE} pt-0 pb-3 pl-4 pr-3`} colSpan={COLS}>
             <QuestionBoxes
@@ -1273,6 +1466,7 @@ const LineRows = memo(function LineRows({
               disabled={disabled}
               idPrefix={idPrefix}
               sideBySide
+              readOnly={readOnly}
             />
           </td>
         </tr>
@@ -1297,12 +1491,14 @@ const LineCard = memo(function LineCard({
   onChange,
   onAddFile,
   disabled,
+  readOnly,
 }: LineProps) {
   const key = String(line.id);
   const { parts, setPart, split, removePart, setReply } = useLineActions(key, answer, onChange);
   const status = lineState(answer);
   const isSplit = parts.length > 1;
   const idPrefix = `c${line.id}`;
+  const showQuestions = questionsOrReplies(line, answer, readOnly);
   const questions = line.questions ?? NO_QUESTIONS;
   const ctx = lineContext(line, null);
   const names = useMemo(() => ({ boe: boeNames, invoice: invoiceNames, other: otherNames }), [boeNames, invoiceNames, otherNames]);
@@ -1321,6 +1517,29 @@ const LineCard = memo(function LineCard({
       showLabel: true,
       context: lineContext(line, isSplit ? i : null),
     };
+    if (readOnly) {
+      const ro = { part, inTable: false, showLabel: true, context: common.context };
+      const details = readOnlyDetails(part);
+      return (
+        <>
+          <div className="grid grid-cols-2 gap-x-2 gap-y-3">
+            <div className="col-span-2">
+              <ReadOnlyAnswer def={purpose} {...ro} />
+            </div>
+            <ReadOnlyAnswer def={payment} {...ro} />
+            <ReadOnlyAnswer def={incoterm} {...ro} />
+            <div className="col-span-2">
+              <ReadOnlyAnswer def={delivery} {...ro} />
+            </div>
+          </div>
+          {details.length > 0 && (
+            <div className="mt-3">
+              <ReadOnlyDetails items={details} />
+            </div>
+          )}
+        </>
+      );
+    }
     return (
       <>
         <div className="grid grid-cols-2 gap-x-2 gap-y-3">
@@ -1369,7 +1588,7 @@ const LineCard = memo(function LineCard({
             {missingShort} missing
           </span>
         )}
-        <RowMenu label={`More actions, ${ctx}`} items={lineMenuItems(line, parts.length, split, onAddFile)} disabled={disabled} />
+        {!readOnly && <RowMenu label={`More actions, ${ctx}`} items={lineMenuItems(line, parts.length, split, onAddFile)} disabled={disabled} />}
       </div>
       <div className="mt-2 flex items-end justify-between gap-3">
         <div className="min-w-0">
@@ -1382,7 +1601,7 @@ const LineCard = memo(function LineCard({
         </div>
       </div>
 
-      {questions.length > 0 && (
+      {showQuestions && (
         <div className="mt-3">
           <QuestionBoxes
             line={line}
@@ -1392,6 +1611,7 @@ const LineCard = memo(function LineCard({
             disabled={disabled}
             idPrefix={idPrefix}
             sideBySide={false}
+            readOnly={readOnly}
           />
         </div>
       )}
@@ -1400,36 +1620,47 @@ const LineCard = memo(function LineCard({
         {parts.map((part, i) =>
           isSplit ? (
             <div key={i} className="rounded-lg border border-gray-200 bg-gray-50/50 p-2.5">
-              <label htmlFor={`${idPrefix}-p${i}-inv`} className="block text-xs font-medium text-gray-600 mb-1">
-                Invoice no.
-              </label>
-              <div className="flex items-start gap-2 mb-3">
-                <InvoiceRefInput
-                  id={`${idPrefix}-p${i}-inv`}
-                  value={part.invoiceRef ?? ''}
-                  index={i}
-                  context={lineContext(line, i)}
-                  disabled={disabled}
-                  inTable={false}
-                  onChange={(s) => setPart(i, { invoiceRef: s })}
-                />
-                <button
-                  type="button"
-                  onClick={() => removePart(i)}
-                  disabled={disabled}
-                  aria-label={`Remove invoice ${i + 1}, ${ctx}`}
-                  className={`shrink-0 h-11 px-2.5 rounded-lg text-xs font-medium text-gray-500 hover:text-red-500 hover:bg-red-50 disabled:opacity-40 ${FOCUS_RING}`}
-                >
-                  Remove
-                </button>
-              </div>
+              {readOnly ? (
+                <p className="text-[13px] mb-2.5">
+                  <span className="text-xs font-medium text-gray-600">Invoice no.</span>{' '}
+                  <span className={`tabular-nums break-all ${part.invoiceRef?.trim() ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
+                    {part.invoiceRef?.trim() || 'not given'}
+                  </span>
+                </p>
+              ) : (
+                <>
+                  <label htmlFor={`${idPrefix}-p${i}-inv`} className="block text-xs font-medium text-gray-600 mb-1">
+                    Invoice no.
+                  </label>
+                  <div className="flex items-start gap-2 mb-3">
+                    <InvoiceRefInput
+                      id={`${idPrefix}-p${i}-inv`}
+                      value={part.invoiceRef ?? ''}
+                      index={i}
+                      context={lineContext(line, i)}
+                      disabled={disabled}
+                      inTable={false}
+                      onChange={(s) => setPart(i, { invoiceRef: s })}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removePart(i)}
+                      disabled={disabled}
+                      aria-label={`Remove invoice ${i + 1}, ${ctx}`}
+                      className={`shrink-0 h-11 px-2.5 rounded-lg text-xs font-medium text-gray-500 hover:text-red-500 hover:bg-red-50 disabled:opacity-40 ${FOCUS_RING}`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </>
+              )}
               {fieldsFor(part, i)}
             </div>
           ) : (
             <div key={i}>{fieldsFor(part, i)}</div>
           )
         )}
-        {isSplit && parts.length < VAT_CUSTOMS_MAX_PARTS && (
+        {!readOnly && isSplit && parts.length < VAT_CUSTOMS_MAX_PARTS && (
           <button
             type="button"
             onClick={split}
@@ -1445,7 +1676,7 @@ const LineCard = memo(function LineCard({
 
       <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-gray-600">Documents</span>
-        <DocPills line={line} boe={boe} invoice={invoice} other={other} names={names} onAddFile={onAddFile} disabled={disabled} />
+        <DocPills line={line} boe={boe} invoice={invoice} other={other} names={names} onAddFile={onAddFile} disabled={disabled} readOnly={readOnly} />
       </div>
     </li>
   );
@@ -1515,6 +1746,8 @@ export interface CustomsTableProps {
   onFill: (next: VatCustomsAnswers, changed: string[]) => void;
   onAddFile: OnAddFile;
   onRetrySave: () => void;
+  /** A closed request: what was sent, read-only (no inputs, no fill buttons, no save state). */
+  readOnly?: boolean;
 }
 
 export default function CustomsTable(props: CustomsTableProps) {
@@ -1534,6 +1767,7 @@ export default function CustomsTable(props: CustomsTableProps) {
     onFill,
     onAddFile,
     onRetrySave,
+    readOnly = false,
   } = props;
   const wide = useIsWide();
   const [confirm, setConfirm] = useState<Confirm>(null);
@@ -1608,7 +1842,8 @@ export default function CustomsTable(props: CustomsTableProps) {
       otherNames: f.names?.other.join('\n') ?? '',
       onChange,
       onAddFile,
-      disabled,
+      disabled: disabled || readOnly,
+      readOnly,
     };
   };
 
@@ -1640,9 +1875,16 @@ export default function CustomsTable(props: CustomsTableProps) {
           <p className="text-[13px] font-semibold whitespace-nowrap tabular-nums" style={{ color: PRIMARY }}>
             {answered} of {total} answered
           </p>
-          <div className="min-w-0 ml-auto" aria-live="polite">
-            <SaveStatus save={save} onRetry={onRetrySave} compact />
-          </div>
+          {readOnly ? (
+            <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap">
+              <Lock className="w-3.5 h-3.5" aria-hidden />
+              Closed
+            </span>
+          ) : (
+            <div className="min-w-0 ml-auto" aria-live="polite">
+              <SaveStatus save={save} onRetry={onRetrySave} compact />
+            </div>
+          )}
         </div>
       </div>
 
@@ -1684,24 +1926,26 @@ export default function CustomsTable(props: CustomsTableProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 md:ml-auto">
-          <button
-            type="button"
-            onClick={() => setConfirm(confirm?.kind === 'apply' ? null : { kind: 'apply' })}
-            disabled={disabled || sources.length === 0 || emptyCount === 0}
-            aria-expanded={confirm?.kind === 'apply'}
-            className={GHOST_BTN}
-            title={
-              sources.length === 0
-                ? 'Answer one import first, then copy it to the empty ones.'
-                : emptyCount === 0
-                  ? 'Every import already has answers.'
-                  : 'Copy one import’s answers to every import that is still empty.'
-            }
-          >
-            <CopyCheck className="w-3.5 h-3.5 text-gray-500" aria-hidden />
-            Copy to empty rows
-          </button>
-          {defaults && (
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => setConfirm(confirm?.kind === 'apply' ? null : { kind: 'apply' })}
+              disabled={disabled || sources.length === 0 || emptyCount === 0}
+              aria-expanded={confirm?.kind === 'apply'}
+              className={GHOST_BTN}
+              title={
+                sources.length === 0
+                  ? 'Answer one import first, then copy it to the empty ones.'
+                  : emptyCount === 0
+                    ? 'Every import already has answers.'
+                    : 'Copy one import’s answers to every import that is still empty.'
+              }
+            >
+              <CopyCheck className="w-3.5 h-3.5 text-gray-500" aria-hidden />
+              Copy to empty rows
+            </button>
+          )}
+          {defaults && !readOnly && (
             <button
               type="button"
               onClick={() => setConfirm(confirm?.kind === 'defaults' ? null : { kind: 'defaults' })}
@@ -1727,13 +1971,13 @@ export default function CustomsTable(props: CustomsTableProps) {
                   Download Excel
                 </button>
               )}
-              <InfoTip text={EXCEL_HELP} label="About the Excel list" />
+              {!readOnly && <InfoTip text={EXCEL_HELP} label="About the Excel list" />}
             </span>
           )}
         </div>
       </div>
 
-      {(notice || confirm || save.status === 'error') && (
+      {!readOnly && (notice || confirm || save.status === 'error') && (
         <div className="md:px-4 pb-3 space-y-2">
           {save.status === 'error' && (
             <div className="hidden md:flex rounded-lg px-3 py-2 items-center gap-2 text-[13px]" style={{ backgroundColor: 'rgba(239,68,68,0.06)' }}>

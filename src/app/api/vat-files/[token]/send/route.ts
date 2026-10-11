@@ -10,6 +10,7 @@ import {
 } from '@/lib/vat-files';
 import { applyCustomsAnswersUpdate, sanitizePageLines } from '@/lib/vat-customs';
 import { listVatLinkFolder, verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
+import { vatFilesViewer } from '@/lib/vat-files-code';
 import {
   VAT_FILE_REQUESTS_TABLE,
   type VatFileEntry,
@@ -38,6 +39,8 @@ const MAX_WRITE_ATTEMPTS = 4;
 // stamps nothing. Replies follow the answers route (only to open questions;
 // `staleReplies` names lines where one was dropped). The row stays open, so the client can send more later
 // through the same link. Answer: the page data.
+// Round 4 B: with an email code, each new file carries `uploadedBy`, changed
+// answer lines `savedBy`, and the row `last_submitted_by` (the confirmed address).
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -51,7 +54,11 @@ export async function POST(
   if (!access.ok || !access.row) {
     return NextResponse.json(vatFilesAccessErrorBody(access), { status: access.status ?? 404 });
   }
+  const viewer = await vatFilesViewer(req, access.row);
+  if (!viewer.ok) return NextResponse.json(viewer.body, { status: viewer.status });
   const row = access.row;
+  // Round 4 B: who sends (null = no code needed, nothing recorded).
+  const by = viewer.email;
 
   let body: unknown;
   try {
@@ -94,7 +101,7 @@ export async function POST(
       row.environment,
       row.link_token,
       nowIso,
-      { lineIds, allowNoFiles: withAnswers }
+      { lineIds, allowNoFiles: withAnswers, uploadedBy: by }
     );
     if (!built.ok) {
       const status = built.error === 'too_many_files' ? 409 : 400;
@@ -106,7 +113,7 @@ export async function POST(
     let stampAnswers = false;
     let staleReplies: string[] = [];
     if (withAnswers) {
-      const update = applyCustomsAnswersUpdate(current.customs_answers, parsed.answers ?? {}, currentLines, nowIso);
+      const update = applyCustomsAnswersUpdate(current.customs_answers, parsed.answers ?? {}, currentLines, nowIso, by);
       if (!update.ok) {
         return NextResponse.json({ error: update.error, lineId: update.lineId ?? null }, { status: 400 });
       }
@@ -131,6 +138,8 @@ export async function POST(
     // A double click sends nothing new: keep the timestamps as they were.
     if (built.entries.length > 0 || stampAnswers) {
       patch.last_submitted_at = nowIso;
+      // Only with a code (the column comes with the round 4 SQL, like allowed_emails).
+      if (by) patch.last_submitted_by = by;
       if (parsed.comment) patch.client_comment = parsed.comment;
     }
 

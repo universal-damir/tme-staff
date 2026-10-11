@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { TME_COLORS } from '@/lib/constants';
 import { requestJson, failureMessage, type RequestFailure } from '@/lib/request-outcome';
+import { reportClientFailure } from '@/lib/client-error-log';
 import { uploadFileToRoute } from '@/lib/upload-client';
 import {
   VAT_FILES_ACCEPT,
@@ -37,13 +38,30 @@ import {
   type VatCustomsDocKind,
   type VatCustomsLineAnswer,
   type VatCustomsPageLine,
+  type VatFilesCodeAddress,
   type VatFilesPagePayload,
 } from '@/types/vat-files';
-import { initialPageAnswers, reconcileAfterReload } from '@/lib/vat-customs';
-import { demoPayload, isDemoToken } from './demo';
+import { formatDubaiDateTime, initialPageAnswers, reconcileAfterReload } from '@/lib/vat-customs';
+import { DEMO_CODE_ADDRESSES, demoPayload, isDemoCodeToken, isDemoToken } from './demo';
+import CodeGate from './CodeGate';
 import CustomsTable, { SaveStatus, type LineFileCounts, type SaveState } from './CustomsTable';
 
-type PageState = 'loading' | 'form' | 'sent' | 'closed' | 'not_found' | 'error';
+/**
+ * 'code' = round 4 B: "Who are you?" + email code before the page.
+ * 'closed' (11.10) = the same page read-only: what the client sent, no
+ * inputs, no upload, no Send (every write route refuses a closed row too).
+ */
+type PageState = 'loading' | 'code' | 'form' | 'sent' | 'closed' | 'not_found' | 'error';
+
+/** Round 4 B: the API asks for the email code; its body carries the masked addresses. */
+function codeGateFrom(outcome: RequestFailure): VatFilesCodeAddress[] | null {
+  if (outcome.code !== 'email_code_required') return null;
+  const raw = outcome.body?.addresses;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((a): a is VatFilesCodeAddress => !!a && typeof a.id === 'string' && typeof a.masked === 'string')
+    .slice(0, 50);
+}
 
 type ItemStatus = 'queued' | 'uploading' | 'done' | 'failed';
 
@@ -109,7 +127,16 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function TitleBlock({ data, large = false }: { data: VatFilesPagePayload | null; large?: boolean }) {
+function TitleBlock({
+  data,
+  large = false,
+  onNotYou,
+}: {
+  data: VatFilesPagePayload | null;
+  large?: boolean;
+  /** Round 4 B: shown with the confirmed address ("Not you?"). */
+  onNotYou?: () => void;
+}) {
   // The client knows its own name; the TME client code means nothing to them.
   const company = data?.companyName ?? '';
   const period = clientPeriodLabel(data?.periodLabel);
@@ -122,6 +149,19 @@ function TitleBlock({ data, large = false }: { data: VatFilesPagePayload | null;
         VAT filing{period ? ` ${period}` : ''}
       </h1>
       {company && <p className="text-[13px] text-gray-500 break-words leading-snug">{company}</p>}
+      {data?.viewerEmail && (
+        <p className="text-[11px] text-gray-500 leading-snug mt-0.5 break-all">
+          Confirmed as {data.viewerEmail}
+          {onNotYou && (
+            <>
+              {' · '}
+              <button type="button" onClick={onNotYou} className={`font-medium underline-offset-2 hover:underline rounded ${FOCUS}`} style={{ color: TME_COLORS.primary }}>
+                Not you?
+              </button>
+            </>
+          )}
+        </p>
+      )}
     </div>
   );
 }
@@ -181,17 +221,41 @@ function Message({
   );
 }
 
-function FileList({ files }: { files: VatFilesReceivedFile[] }) {
+function FileList({ files, withDate = false }: { files: VatFilesReceivedFile[]; withDate?: boolean }) {
   return (
     <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-      {files.map((f, i) => (
-        <li key={`${f.name}-${i}`} className="flex items-center gap-2.5 px-3 py-2">
-          <FileText className="w-4 h-4 shrink-0 text-gray-400" />
-          <span className="text-[13px] text-gray-800 truncate flex-1 min-w-0">{f.name}</span>
-          <span className="text-xs text-gray-500 shrink-0 tabular-nums">{formatBytes(f.size)}</span>
-        </li>
-      ))}
+      {files.map((f, i) => {
+        const when = withDate ? formatDubaiDateTime(f.uploadedAt) : '';
+        return (
+          <li key={`${f.name}-${i}`} className="flex items-center gap-2.5 px-3 py-2">
+            <FileText className="w-4 h-4 shrink-0 text-gray-400" aria-hidden />
+            <span className="flex-1 min-w-0">
+              <span className="block text-[13px] text-gray-800 truncate" title={f.name}>
+                {f.name}
+              </span>
+              {when && <span className="block sm:hidden text-[11px] text-gray-500 tabular-nums">Sent {when}</span>}
+            </span>
+            {when && <span className="hidden sm:inline text-xs text-gray-500 shrink-0 tabular-nums">Sent {when}</span>}
+            <span className="text-xs text-gray-500 shrink-0 tabular-nums">{formatBytes(f.size)}</span>
+          </li>
+        );
+      })}
     </ul>
+  );
+}
+
+/** The grey notice on top of a closed request. */
+function ClosedNotice() {
+  return (
+    <div className={`${CARD} px-4 py-3 flex items-start gap-3 bg-gray-50`} role="status">
+      <span className="w-8 h-8 shrink-0 rounded-full bg-gray-200/70 flex items-center justify-center" aria-hidden>
+        <Lock className="w-4 h-4 text-gray-600" />
+      </span>
+      <div className="min-w-0 text-[13px] leading-snug">
+        <p className="font-semibold text-gray-900">This request is closed. You can still see what you sent.</p>
+        <p className="text-gray-600 mt-0.5">If you need to send us something else for this VAT filing, please reply to our email.</p>
+      </div>
+    </div>
   );
 }
 
@@ -220,6 +284,10 @@ export default function VatFilesPage() {
   const [state, setState] = useState<PageState>('loading');
   const [data, setData] = useState<VatFilesPagePayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Round 4 B: the masked addresses for "Who are you?"; a new load after the code.
+  const [gate, setGate] = useState<VatFilesCodeAddress[]>([]);
+  const [loadKey, setLoadKey] = useState(0);
+  const demoCodeOk = useRef(false);
   const [items, setItems] = useState<PendingItem[]>([]);
   const [comment, setComment] = useState('');
   const [sending, setSending] = useState(false);
@@ -260,14 +328,40 @@ export default function VatFilesPage() {
     setAnswers(next);
   }, []);
 
+  /**
+   * TME closed the request while the page was open (a save, upload or Send
+   * answered 'closed'): drop what was not sent and load again, so the
+   * read-only view shows what TME really holds, not what was typed.
+   */
+  const reloadClosed = useCallback(() => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    dirty.current.clear();
+    setItems([]);
+    setState('loading');
+    setLoadKey((k) => k + 1);
+  }, []);
+
+  /** Round 4 B: an API call answered "email code required" (proof missing or ran out): show "Who are you?". */
+  const askForCodeIfNeeded = useCallback((outcome: RequestFailure): boolean => {
+    const addresses = codeGateFrom(outcome);
+    if (!addresses) return false;
+    setGate(addresses);
+    setState('code');
+    return true;
+  }, []);
+
   // ---------- Load ----------
-  const fetchPayload = useCallback(async (): Promise<
+  const fetchPayload = useCallback(async (log: boolean = true): Promise<
     { ok: true; payload: VatFilesPagePayload } | { ok: false; outcome: RequestFailure }
   > => {
+    // The first load logs by itself: "Who are you?" (401 email_code_required) is not a failure.
     const outcome = await requestJson<VatFilesPagePayload>(
       `/api/vat-files/${token}`,
       { cache: 'no-store' },
-      { form: FORM, action: 'load', ref: token }
+      log ? { form: FORM, action: 'load', ref: token } : undefined
     );
     return outcome.ok ? { ok: true, payload: outcome.data } : { ok: false, outcome };
   }, [token]);
@@ -277,12 +371,22 @@ export default function VatFilesPage() {
     (async () => {
       let payload: VatFilesPagePayload;
       if (demo) {
+        if (isDemoCodeToken(token) && !demoCodeOk.current) {
+          setGate(DEMO_CODE_ADDRESSES);
+          return setState('code');
+        }
         payload = demoPayload(token);
       } else {
-        const got = await fetchPayload();
+        const got = await fetchPayload(false);
         if (cancelled) return;
         if (!got.ok) {
           const outcome = got.outcome;
+          const addresses = codeGateFrom(outcome);
+          if (addresses) {
+            setGate(addresses);
+            return setState('code');
+          }
+          reportClientFailure({ form: FORM, action: 'load', ref: token }, outcome);
           if (outcome.status === 404 || outcome.code === 'expired') return setState('not_found');
           if (outcome.code === 'closed') return setState('closed');
           setLoadError(failureMessage(outcome));
@@ -300,7 +404,7 @@ export default function VatFilesPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, demo, fetchPayload, setAllAnswers]);
+  }, [token, demo, fetchPayload, setAllAnswers, loadKey]);
 
   /**
    * TME changed the lines while the client was typing (S2: a "replace" upload
@@ -313,7 +417,10 @@ export default function VatFilesPage() {
   const reloadLines = useCallback(async (reason: 'list' | 'questions' = 'list'): Promise<boolean> => {
     if (demo) return true;
     const got = await fetchPayload();
-    if (!got.ok) return false;
+    if (!got.ok) {
+      askForCodeIfNeeded(got.outcome);
+      return false;
+    }
     const fresh = got.payload.customsLines ?? [];
     const r = reconcileAfterReload(answersRef.current, dirty.current, fresh, got.payload.customsAnswers ?? {});
     setLines(fresh);
@@ -324,6 +431,7 @@ export default function VatFilesPage() {
             customsLines: fresh,
             customsAnswers: got.payload.customsAnswers,
             lineFiles: got.payload.lineFiles,
+            viewerEmail: got.payload.viewerEmail,
           }
         : d
     );
@@ -332,7 +440,7 @@ export default function VatFilesPage() {
     if (r.listChanged) setNotice(LIST_UPDATED_NOTE);
     else if (r.repliesDropped || reason === 'questions') setNotice(QUESTIONS_UPDATED_NOTE);
     return true;
-  }, [demo, fetchPayload, setAllAnswers]);
+  }, [demo, fetchPayload, setAllAnswers, askForCodeIfNeeded]);
 
   // ---------- Autosave ----------
   const saveNowRef = useRef<() => Promise<boolean>>(async () => true);
@@ -388,8 +496,13 @@ export default function VatFilesPage() {
       }
       // Not saved: the lines stay marked, the text stays on the page.
       ids.forEach((id) => dirty.current.add(id));
+      // The proof ran out: after the code the page saves again (the typed answers stay).
+      if (askForCodeIfNeeded(outcome)) {
+        setSave({ status: 'idle' });
+        return false;
+      }
       if (outcome.code === 'closed') {
-        setState('closed');
+        reloadClosed();
         return false;
       }
       if (outcome.code === 'expired' || outcome.status === 404) {
@@ -420,7 +533,7 @@ export default function VatFilesPage() {
     } finally {
       inflight.current = null;
     }
-  }, [demo, token, reloadLines, scheduleSave]);
+  }, [demo, token, reloadLines, scheduleSave, askForCodeIfNeeded, reloadClosed]);
   saveNowRef.current = saveNow;
 
   const onLineChange = useCallback(
@@ -561,10 +674,12 @@ export default function VatFilesPage() {
           patch = { status: 'done', path: outcome.data.path };
         } else if (outcome.code === 'closed') {
           busy.current = false;
-          setState('closed');
+          reloadClosed();
           return;
         } else if (outcome.code === 'unknown_line') {
           patch = { status: 'failed', error: 'This import is no longer on the list. Please add the file without a row.' };
+        } else if (askForCodeIfNeeded(outcome)) {
+          patch = { status: 'failed', error: 'Not uploaded: please confirm your email, then add this file again.' };
         } else {
           patch = { status: 'failed', error: uploadErrorText(next.file.name, outcome) };
         }
@@ -572,7 +687,7 @@ export default function VatFilesPage() {
       busy.current = false;
       setItems((prev) => prev.map((i) => (i.id === next.id ? { ...i, ...patch } : i)));
     })();
-  }, [items, demo, token]);
+  }, [items, demo, token, askForCodeIfNeeded, reloadClosed]);
 
   const removeItem = useCallback(
     (item: PendingItem) => {
@@ -704,7 +819,8 @@ export default function VatFilesPage() {
         if (sentItemIds.size > 0) setItems((prev) => prev.filter((i) => !sentItemIds.has(i.id)));
         if (r > 0) setUnsent(false);
         setSending(false);
-        if (outcome.code === 'closed') return setState('closed');
+        if (askForCodeIfNeeded(outcome)) return;
+        if (outcome.code === 'closed') return reloadClosed();
         if ((outcome.code === 'question_changed' || outcome.code === 'unknown_line') && (await reloadLines())) {
           if (dirty.current.size > 0) scheduleSave(200);
           setSendError('TME has just updated your imports. Please check your answers and press Send again.');
@@ -747,7 +863,26 @@ export default function VatFilesPage() {
     setUnsent(false);
     setSending(false);
     setState('sent');
-  }, [canSend, done, demo, token, comment, hasTable, unsent, reloadLines, scheduleSave, setAllAnswers]);
+  }, [canSend, done, demo, token, comment, hasTable, unsent, reloadLines, scheduleSave, setAllAnswers, askForCodeIfNeeded, reloadClosed]);
+
+  // ---------- Round 4 B: email code ----------
+  const onCodeConfirmed = useCallback(() => {
+    if (demo) demoCodeOk.current = true;
+    if (data && data.status === 'open') {
+      // The proof ran out mid-way: back to the form, nothing typed is lost.
+      setState('form');
+      void reloadLines();
+      if (dirty.current.size > 0) scheduleSave(200);
+      return;
+    }
+    setState('loading');
+    setLoadKey((k) => k + 1);
+  }, [demo, data, reloadLines, scheduleSave]);
+
+  const notYou = useCallback(async () => {
+    if (!demo) await requestJson(`/api/vat-files/${token}/code`, { method: 'DELETE' });
+    window.location.reload();
+  }, [demo, token]);
 
   const sendMore = useCallback(() => {
     setItems([]);
@@ -760,6 +895,19 @@ export default function VatFilesPage() {
   }, []);
 
   // ---------- States ----------
+  if (state === 'code') {
+    const period = clientPeriodLabel(data?.periodLabel);
+    return (
+      <CodeGate
+        token={token}
+        addresses={gate}
+        demo={demo}
+        title={data ? `VAT filing${period ? ` ${period}` : ''}` : null}
+        onConfirmed={onCodeConfirmed}
+      />
+    );
+  }
+
   if (state === 'loading') {
     return (
       <Shell>
@@ -800,7 +948,8 @@ export default function VatFilesPage() {
     );
   }
 
-  if (state === 'closed') {
+  // A 'closed' answer without data (a row in an unknown state): the lock card only.
+  if (state === 'closed' && !data) {
     return (
       <Shell>
         <Header data={data} />
@@ -866,7 +1015,8 @@ export default function VatFilesPage() {
     );
   }
 
-  // ---------- Form ----------
+  // ---------- Form (open) or read-only (closed) ----------
+  const readOnly = state === 'closed';
   const deadline = formatDeadline(data?.deadline);
   const received = data?.files ?? [];
   const isCustoms = data?.kind === 'customs';
@@ -910,13 +1060,13 @@ export default function VatFilesPage() {
       {/* Header: title left, summary card right (deadline, progress, saved, Send). Sticks on a laptop. */}
       <header ref={barRef} className="md:sticky top-0 z-30 border-b border-gray-200 bg-white/90 backdrop-blur-md">
         <div className={`mx-auto ${maxW} px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-3`}>
-          <TitleBlock data={data} />
+          <TitleBlock data={data} onNotYou={notYou} />
           <div className="w-full md:w-auto md:ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gray-200 bg-white pl-3.5 pr-1.5 py-1.5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
             {deadline && (
               <div className="flex items-center gap-2">
                 <CalendarClock className="w-4 h-4 shrink-0" style={{ color: TME_COLORS.secondary }} aria-hidden />
                 <div className="leading-tight">
-                  <p className="text-[11px] text-gray-500">Please send by</p>
+                  <p className="text-[11px] text-gray-500">{readOnly ? 'Deadline' : 'Please send by'}</p>
                   <p className="text-[13px] font-semibold tabular-nums text-gray-900">{deadline}</p>
                 </div>
               </div>
@@ -933,34 +1083,50 @@ export default function VatFilesPage() {
                     <p className="text-[11px] text-gray-500">answered</p>
                   </div>
                 </div>
-                <span className="hidden md:block w-px h-7 bg-gray-200" aria-hidden />
-                <div className="hidden md:block min-w-[88px]" aria-live="polite">
-                  <SaveStatus save={save} onRetry={retrySave} compact />
-                </div>
+                {!readOnly && (
+                  <>
+                    <span className="hidden md:block w-px h-7 bg-gray-200" aria-hidden />
+                    <div className="hidden md:block min-w-[88px]" aria-live="polite">
+                      <SaveStatus save={save} onRetry={retrySave} compact />
+                    </div>
+                  </>
+                )}
               </>
             )}
-            <div className="ml-auto">{sendButton('top')}</div>
+            <div className="ml-auto">
+              {readOnly ? (
+                <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-gray-100 text-[13px] font-semibold text-gray-600 whitespace-nowrap">
+                  <Lock className="w-3.5 h-3.5" aria-hidden />
+                  Closed
+                </span>
+              ) : (
+                sendButton('top')
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       <main className={`mx-auto ${maxW} px-4 sm:px-6 py-4 sm:py-5 space-y-4`}>
+        {readOnly && <ClosedNotice />}
         {errorBanner}
 
         {/* What we need */}
         <section className={`${CARD} px-4 py-3.5`} aria-labelledby="vat-need-title">
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 mb-2.5">
             <h2 id="vat-need-title" className="text-[13px] font-semibold" style={{ color: TME_COLORS.primary }}>
-              What we need
+              {readOnly ? 'What we asked for' : 'What we need'}
             </h2>
-            <p className="text-xs text-gray-500">
-              {hasTable
-                ? 'A few details and the documents for each import in the FTA list below.'
-                : isCustoms
-                  ? 'The documents for the imports on the FTA import list. Please upload them here and press Send.'
-                  : 'The documents below. Please upload them here and press Send.'}{' '}
-              Your files go only to the TME VAT team.
-            </p>
+            {!readOnly && (
+              <p className="text-xs text-gray-500">
+                {hasTable
+                  ? 'A few details and the documents for each import in the FTA list below.'
+                  : isCustoms
+                    ? 'The documents for the imports on the FTA import list. Please upload them here and press Send.'
+                    : 'The documents below. Please upload them here and press Send.'}{' '}
+                Your files go only to the TME VAT team.
+              </p>
+            )}
           </div>
           {(data?.requestedItems.length ?? 0) > 0 && (
             <ol className={hasTable ? 'grid gap-y-2 md:flex md:gap-x-8' : 'space-y-1.5'}>
@@ -1004,11 +1170,13 @@ export default function VatFilesPage() {
                   Download the FTA import list
                 </a>
               )}
-              <p className="text-xs text-gray-500">Fill in the yellow columns and upload the list again together with your documents.</p>
+              {!readOnly && (
+                <p className="text-xs text-gray-500">Fill in the yellow columns and upload the list again together with your documents.</p>
+              )}
             </div>
           )}
 
-          {received.length > 0 && (
+          {!readOnly && received.length > 0 && (
             <details className="mt-3 pt-3 border-t border-gray-100 group">
               <summary className={`text-[13px] font-medium cursor-pointer rounded inline-flex items-center gap-1.5 ${FOCUS}`} style={{ color: TME_COLORS.primary }}>
                 <CheckCircle className="w-4 h-4" style={{ color: TME_COLORS.success }} aria-hidden />
@@ -1038,188 +1206,223 @@ export default function VatFilesPage() {
             onFill={onFill}
             onAddFile={onAddLineFile}
             onRetrySave={retrySave}
+            readOnly={readOnly}
           />
         )}
-        <input
-          ref={lineInputRef}
-          type="file"
-          accept={VAT_FILES_ACCEPT}
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            addFiles(e.target.files, lineTarget.current);
-            lineTarget.current = null;
-          }}
-        />
-
-        {/* Files, comment, Send */}
-        <section className={`${CARD} p-4`} aria-labelledby="vat-files-title">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 mb-2">
-            <h2 id="vat-files-title" className="text-[13px] font-semibold" style={{ color: TME_COLORS.primary }}>
-              {hasTable ? 'Other files' : 'Your files'}
-            </h2>
-            {hasTable && (
-              <p className="text-xs text-gray-500">
-                Anything that does not belong to one import, or several documents at once. Files you add on a row above are listed here too.
-              </p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragging(false);
-              addFiles(e.dataTransfer.files);
-            }}
-            disabled={sending}
-            className={`w-full border border-dashed rounded-lg transition-colors disabled:opacity-60 hover:bg-gray-50 ${FOCUS} ${
-              hasTable
-                ? 'min-h-12 px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-left'
-                : 'py-7 px-4 flex flex-col items-center justify-center gap-1.5'
-            }`}
-            style={{
-              borderColor: dragging ? TME_COLORS.primary : '#D1D5DB',
-              backgroundColor: dragging ? 'rgba(36,63,123,0.04)' : undefined,
-            }}
-          >
-            <UploadCloud className={hasTable ? 'w-[18px] h-[18px] shrink-0' : 'w-6 h-6'} style={{ color: TME_COLORS.primary }} aria-hidden />
-            <span className="text-[13px] text-gray-700 font-medium">
-              Drop files or{' '}
-              <span className="underline underline-offset-2" style={{ color: TME_COLORS.primary }}>
-                browse
-              </span>
-            </span>
-            <span className={`text-xs text-gray-500 ${hasTable ? 'sm:ml-auto' : 'text-center'}`}>
-              PDF, Excel, Word, CSV, images or emails. Up to {MAX_MB} MB each.
-            </span>
-          </button>
+        {!readOnly && (
           <input
-            ref={inputRef}
+            ref={lineInputRef}
             type="file"
             accept={VAT_FILES_ACCEPT}
             multiple
             className="hidden"
-            onChange={(e) => addFiles(e.target.files)}
+            onChange={(e) => {
+              addFiles(e.target.files, lineTarget.current);
+              lineTarget.current = null;
+            }}
           />
+        )}
 
-          {pendingOk.length > 0 && (
-            <ul className="mt-2.5 flex flex-wrap gap-1.5" aria-label="Files to send">
-              {pendingOk.map((item) => (
-                <li
-                  key={item.id}
-                  className="inline-flex items-center gap-1.5 h-7 max-w-full pl-2 pr-0.5 rounded-full border border-gray-200 bg-gray-50 text-xs"
-                >
-                  {item.status === 'done' ? (
-                    <CheckCircle className="w-3.5 h-3.5 shrink-0" style={{ color: TME_COLORS.success }} aria-hidden />
-                  ) : (
-                    <Loader2
-                      className={`w-3.5 h-3.5 shrink-0 ${item.status === 'uploading' ? 'animate-spin' : ''}`}
-                      style={{ color: TME_COLORS.primary }}
-                      aria-hidden
-                    />
-                  )}
-                  <span className="truncate min-w-0 max-w-[220px] text-gray-800" title={item.file.name}>
-                    {item.file.name}
-                  </span>
-                  {item.lineId && item.docKind && (
-                    <span className="shrink-0 rounded-full bg-white border border-gray-200 px-1.5 text-[11px] text-gray-600 whitespace-nowrap">
-                      Import {lineNoById.get(item.lineId) ?? ''} · {DOC_KIND_LABEL[item.docKind]}
-                    </span>
-                  )}
-                  <span className="shrink-0 text-gray-400 tabular-nums whitespace-nowrap">
-                    {item.status === 'queued' ? 'Waiting…' : item.status === 'uploading' ? 'Uploading…' : formatBytes(item.file.size)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeItem(item)}
-                    disabled={item.status === 'uploading' || sending}
-                    aria-label={`Remove ${item.file.name}`}
-                    title="Remove this file"
-                    className={`shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${FOCUS}`}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {pendingFailed.length > 0 && (
-            <ul className="mt-2.5 space-y-1.5">
-              {pendingFailed.map((item) => (
-                <li
-                  key={item.id}
-                  className="flex items-start gap-2 rounded-lg px-3 py-2 border text-xs"
-                  style={{ backgroundColor: 'rgba(239,68,68,0.05)', borderColor: 'rgba(239,68,68,0.25)' }}
-                >
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: TME_COLORS.error }} aria-hidden />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-gray-800 truncate">
-                      {item.file.name}
-                      {item.lineId && item.docKind && (
-                        <span className="text-gray-500">
-                          {' '}
-                          · Import {lineNoById.get(item.lineId) ?? ''} · {DOC_KIND_LABEL[item.docKind]}
-                        </span>
-                      )}
-                    </span>
-                    <span className="block mt-0.5" style={{ color: TME_COLORS.error }}>
-                      {item.error}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeItem(item)}
-                    disabled={sending}
-                    aria-label={`Remove ${item.file.name}`}
-                    title="Remove this file"
-                    className={`shrink-0 p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 ${FOCUS}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="mt-4">
-            <label htmlFor="vat-files-comment" className="block text-[13px] font-semibold mb-1.5" style={{ color: TME_COLORS.primary }}>
-              Comment <span className="font-normal text-gray-500">(optional)</span>
-            </label>
-            <textarea
-              id="vat-files-comment"
-              value={comment}
-              onChange={(e) => setComment(e.target.value.slice(0, VAT_FILES_MAX_COMMENT))}
-              rows={2}
-              placeholder={hasTable ? 'Anything we should know about these imports?' : 'Anything we should know about these files?'}
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-base sm:text-[13px] text-gray-900 placeholder:text-gray-400 transition-colors focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20"
-            />
-          </div>
-
-          <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
-            {errorBanner}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <div className="flex-1 min-w-0 text-[13px] text-gray-600 space-y-0.5">
-                {hasTable && openCount > 0 && (
-                  <p>
-                    {openCount} {openCount === 1 ? 'import still needs answers' : 'imports still need answers'}. You can send now and finish
-                    later.
-                  </p>
-                )}
-                {hasTable && !unsent && done.length === 0 && data?.customsAnswersSentAt && (
-                  <p className="text-xs text-gray-500">Your answers are already with TME. Any change you make is sent with the next Send.</p>
-                )}
-                {demo && <p className="text-xs text-gray-400">Demo page: nothing is saved.</p>}
-              </div>
-              {sendButton('bottom')}
+        {/* Closed: what was sent, names only (no downloads), and the comment. */}
+        {readOnly && (
+          <section className={`${CARD} p-4`} aria-labelledby="vat-sent-title">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 mb-2">
+              <h2 id="vat-sent-title" className="text-[13px] font-semibold" style={{ color: TME_COLORS.primary }}>
+                Files you sent
+                {received.length > 0 && <span className="font-normal text-gray-500"> ({received.length})</span>}
+              </h2>
+              {data?.customsAnswersSentAt && (
+                <p className="lg:hidden text-xs text-gray-500 tabular-nums">Answers last sent: {formatDubaiDateTime(data.customsAnswersSentAt)}</p>
+              )}
             </div>
-          </div>
-        </section>
+            {received.length > 0 ? (
+              <FileList files={received} withDate />
+            ) : (
+              <p className="text-[13px] text-gray-500">No files were sent through this link.</p>
+            )}
+            {data?.clientComment && (
+              <div className="mt-4">
+                <p className="text-[13px] font-semibold mb-1.5" style={{ color: TME_COLORS.primary }}>
+                  Your comment
+                </p>
+                <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[13px] text-gray-800 whitespace-pre-line break-words">
+                  {data.clientComment}
+                </p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Files, comment, Send */}
+        {!readOnly && (
+          <section className={`${CARD} p-4`} aria-labelledby="vat-files-title">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 mb-2">
+              <h2 id="vat-files-title" className="text-[13px] font-semibold" style={{ color: TME_COLORS.primary }}>
+                {hasTable ? 'Other files' : 'Your files'}
+              </h2>
+              {hasTable && (
+                <p className="text-xs text-gray-500">
+                  Anything that does not belong to one import, or several documents at once. Files you add on a row above are listed here too.
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                addFiles(e.dataTransfer.files);
+              }}
+              disabled={sending}
+              className={`w-full border border-dashed rounded-lg transition-colors disabled:opacity-60 hover:bg-gray-50 ${FOCUS} ${
+                hasTable
+                  ? 'min-h-12 px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-left'
+                  : 'py-7 px-4 flex flex-col items-center justify-center gap-1.5'
+              }`}
+              style={{
+                borderColor: dragging ? TME_COLORS.primary : '#D1D5DB',
+                backgroundColor: dragging ? 'rgba(36,63,123,0.04)' : undefined,
+              }}
+            >
+              <UploadCloud className={hasTable ? 'w-[18px] h-[18px] shrink-0' : 'w-6 h-6'} style={{ color: TME_COLORS.primary }} aria-hidden />
+              <span className="text-[13px] text-gray-700 font-medium">
+                Drop files or{' '}
+                <span className="underline underline-offset-2" style={{ color: TME_COLORS.primary }}>
+                  browse
+                </span>
+              </span>
+              <span className={`text-xs text-gray-500 ${hasTable ? 'sm:ml-auto' : 'text-center'}`}>
+                PDF, Excel, Word, CSV, images or emails. Up to {MAX_MB} MB each.
+              </span>
+            </button>
+            <input
+              ref={inputRef}
+              type="file"
+              accept={VAT_FILES_ACCEPT}
+              multiple
+              className="hidden"
+              onChange={(e) => addFiles(e.target.files)}
+            />
+
+            {pendingOk.length > 0 && (
+              <ul className="mt-2.5 flex flex-wrap gap-1.5" aria-label="Files to send">
+                {pendingOk.map((item) => (
+                  <li
+                    key={item.id}
+                    className="inline-flex items-center gap-1.5 h-7 max-w-full pl-2 pr-0.5 rounded-full border border-gray-200 bg-gray-50 text-xs"
+                  >
+                    {item.status === 'done' ? (
+                      <CheckCircle className="w-3.5 h-3.5 shrink-0" style={{ color: TME_COLORS.success }} aria-hidden />
+                    ) : (
+                      <Loader2
+                        className={`w-3.5 h-3.5 shrink-0 ${item.status === 'uploading' ? 'animate-spin' : ''}`}
+                        style={{ color: TME_COLORS.primary }}
+                        aria-hidden
+                      />
+                    )}
+                    <span className="truncate min-w-0 max-w-[220px] text-gray-800" title={item.file.name}>
+                      {item.file.name}
+                    </span>
+                    {item.lineId && item.docKind && (
+                      <span className="shrink-0 rounded-full bg-white border border-gray-200 px-1.5 text-[11px] text-gray-600 whitespace-nowrap">
+                        Import {lineNoById.get(item.lineId) ?? ''} · {DOC_KIND_LABEL[item.docKind]}
+                      </span>
+                    )}
+                    <span className="shrink-0 text-gray-400 tabular-nums whitespace-nowrap">
+                      {item.status === 'queued' ? 'Waiting…' : item.status === 'uploading' ? 'Uploading…' : formatBytes(item.file.size)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeItem(item)}
+                      disabled={item.status === 'uploading' || sending}
+                      aria-label={`Remove ${item.file.name}`}
+                      title="Remove this file"
+                      className={`shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${FOCUS}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {pendingFailed.length > 0 && (
+              <ul className="mt-2.5 space-y-1.5">
+                {pendingFailed.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex items-start gap-2 rounded-lg px-3 py-2 border text-xs"
+                    style={{ backgroundColor: 'rgba(239,68,68,0.05)', borderColor: 'rgba(239,68,68,0.25)' }}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: TME_COLORS.error }} aria-hidden />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-gray-800 truncate">
+                        {item.file.name}
+                        {item.lineId && item.docKind && (
+                          <span className="text-gray-500">
+                            {' '}
+                            · Import {lineNoById.get(item.lineId) ?? ''} · {DOC_KIND_LABEL[item.docKind]}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block mt-0.5" style={{ color: TME_COLORS.error }}>
+                        {item.error}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeItem(item)}
+                      disabled={sending}
+                      aria-label={`Remove ${item.file.name}`}
+                      title="Remove this file"
+                      className={`shrink-0 p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 ${FOCUS}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="mt-4">
+              <label htmlFor="vat-files-comment" className="block text-[13px] font-semibold mb-1.5" style={{ color: TME_COLORS.primary }}>
+                Comment <span className="font-normal text-gray-500">(optional)</span>
+              </label>
+              <textarea
+                id="vat-files-comment"
+                value={comment}
+                onChange={(e) => setComment(e.target.value.slice(0, VAT_FILES_MAX_COMMENT))}
+                rows={2}
+                placeholder={hasTable ? 'Anything we should know about these imports?' : 'Anything we should know about these files?'}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-base sm:text-[13px] text-gray-900 placeholder:text-gray-400 transition-colors focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20"
+              />
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+              {errorBanner}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="flex-1 min-w-0 text-[13px] text-gray-600 space-y-0.5">
+                  {hasTable && openCount > 0 && (
+                    <p>
+                      {openCount} {openCount === 1 ? 'import still needs answers' : 'imports still need answers'}. You can send now and finish
+                      later.
+                    </p>
+                  )}
+                  {hasTable && !unsent && done.length === 0 && data?.customsAnswersSentAt && (
+                    <p className="text-xs text-gray-500">Your answers are already with TME. Any change you make is sent with the next Send.</p>
+                  )}
+                  {demo && <p className="text-xs text-gray-400">Demo page: nothing is saved.</p>}
+                </div>
+                {sendButton('bottom')}
+              </div>
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );

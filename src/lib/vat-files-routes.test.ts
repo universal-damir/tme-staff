@@ -157,7 +157,7 @@ describe('GET /api/vat-files/[token]', () => {
     expect((await GET(new NextRequest(url('', other)), params(other))).status).toBe(404);
   });
 
-  it('expired = 410 expired; closed still answers so the page can say so', async () => {
+  it('expired = 410 expired; closed still answers (the page shows it read-only)', async () => {
     seed({ expires_at: '2020-01-01T00:00:00Z' });
     const res = await GET(new NextRequest(url()), params());
     expect(res.status).toBe(410);
@@ -191,12 +191,19 @@ describe('upload + send', () => {
     expect(store.uploads).toEqual([]);
   });
 
-  it('closed request: upload and send = 410 closed', async () => {
-    seed({ status: 'closed' });
-    const res = await upload('a.pdf', PDF);
+  it('closed request: upload, delete and send = 410 closed, nothing written', async () => {
+    const a = await (await upload('a.pdf', PDF)).json();
+    store.rows[0].status = 'closed';
+    const res = await upload('b.pdf', PDF);
     expect(res.status).toBe(410);
     expect(await res.json()).toEqual({ error: 'closed' });
-    expect((await send({ files: [], comment: '' })).status).toBe(410);
+    expect((await send({ files: [{ path: a.path, name: 'a.pdf' }], comment: 'late' })).status).toBe(410);
+    const del = await REMOVE(new NextRequest(url(`/upload?path=${encodeURIComponent(a.path)}`), { method: 'DELETE' }), params());
+    expect(del.status).toBe(410);
+    expect(store.removed).toEqual([]);
+    expect(store.patches).toEqual([]);
+    expect(store.rows[0].files).toEqual([]);
+    expect(store.rows[0].client_comment).toBeNull();
   });
 
   it('send appends the round, sets comment + time; a second round adds more', async () => {
@@ -309,6 +316,13 @@ describe('GET customs-list', () => {
     expect(res.headers.get('location')).toContain('customs-list.xlsx');
     seed({ kind: 'files', customs_list_path: null });
     expect((await CUSTOMS(new NextRequest(url('/customs-list')), params())).status).toBe(404);
+  });
+
+  it('a closed link may still download the FTA list; an expired one may not', async () => {
+    seed({ status: 'closed' });
+    expect((await CUSTOMS(new NextRequest(url('/customs-list')), params())).status).toBe(302);
+    seed({ status: 'closed', expires_at: '2020-01-01T00:00:00Z' });
+    expect((await CUSTOMS(new NextRequest(url('/customs-list')), params())).status).toBe(410);
   });
 });
 
