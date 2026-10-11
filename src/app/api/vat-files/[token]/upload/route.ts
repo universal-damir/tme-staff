@@ -21,8 +21,9 @@ import {
   linkFolder,
   vatFilesRateLimited,
 } from '@/lib/vat-files';
+import { isVatCustomsDocKind, sanitizePageLines } from '@/lib/vat-customs';
 import { listVatLinkFolder, verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
-import { VAT_FILES_BUCKET, type VatFileRequestRow } from '@/types/vat-files';
+import { VAT_FILES_BUCKET, type VatCustomsDocKind, type VatFileRequestRow } from '@/types/vat-files';
 
 export const runtime = 'nodejs';
 
@@ -32,7 +33,11 @@ export const runtime = 'nodejs';
 // matching extension) and stores it in the private `vat-files` bucket at
 // `{environment}/{link_token}/{uuid}-{safeName}`. The row is NOT changed
 // here: the file joins the row's `files` only when the client presses Send.
-// Answer: { path, name, size }.
+// Round 3: optional fields `lineId` (a customs line of THIS row) + `docKind`
+// ('boe' | 'invoice' | 'other') say the file belongs to a row of the customs
+// table; they are checked here and echoed back, and the page sends them with
+// the path at Send, where they are checked again and kept on the file entry.
+// Answer: { path, name, size, lineId?, docKind? }.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -64,6 +69,9 @@ export async function POST(
     const body = await readDirectUploadRequest(req);
     if (!body) return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
 
+    const target = readLineTarget(row, body.lineId, body.docKind);
+    if (!target.ok) return NextResponse.json({ error: target.error }, { status: 400 });
+
     if (body.step === 'start') {
       // Refuse an unknown extension before the browser sends 20 MB.
       if (typeof body.filename === 'string' && !isAcceptedExtension(body.filename)) {
@@ -77,7 +85,7 @@ export async function POST(
     const received = await readDirectUpload(VAT_FILES_BUCKET, row.id, body.uploadId, VAT_FILES_MAX_BYTES);
     if (!received.ok) return NextResponse.json({ error: received.error }, { status: received.status });
     try {
-      return await store(row, received.bytes, String(body.filename ?? ''));
+      return await store(row, received.bytes, String(body.filename ?? ''), target);
     } finally {
       await removeDirectUpload(VAT_FILES_BUCKET, row.id, body.uploadId);
     }
@@ -89,6 +97,8 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: 'upload_failed' }, { status: 413 });
   }
+  const target = readLineTarget(row, form.get('lineId'), form.get('docKind'));
+  if (!target.ok) return NextResponse.json({ error: target.error }, { status: 400 });
   const file = form.get('file');
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'missing_file' }, { status: 400 });
@@ -96,10 +106,28 @@ export async function POST(
   if (file.size === 0 || file.size > VAT_FILES_MAX_BYTES) {
     return NextResponse.json({ error: 'file_size_out_of_range' }, { status: 413 });
   }
-  return store(row, new Uint8Array(await file.arrayBuffer()), String(file.name ?? ''));
+  return store(row, new Uint8Array(await file.arrayBuffer()), String(file.name ?? ''), target);
 }
 
-async function store(row: VatFileRequestRow, bytes: Uint8Array, originalName: string): Promise<NextResponse> {
+type LineTarget = { ok: true; lineId?: number; docKind?: VatCustomsDocKind } | { ok: false; error: string };
+
+/** The optional customs line of an upload: absent = a general file; present = a line of this row + a kind. */
+function readLineTarget(row: VatFileRequestRow, rawLineId: unknown, rawDocKind: unknown): LineTarget {
+  const empty = (v: unknown) => v === undefined || v === null || v === '';
+  if (empty(rawLineId)) return empty(rawDocKind) ? { ok: true } : { ok: false, error: 'invalid_line' };
+  const lineId = typeof rawLineId === 'number' ? rawLineId : /^\d{1,15}$/.test(String(rawLineId)) ? Number(rawLineId) : NaN;
+  if (!Number.isSafeInteger(lineId) || lineId <= 0) return { ok: false, error: 'invalid_line' };
+  if (!sanitizePageLines(row.customs_lines).some((l) => l.id === lineId)) return { ok: false, error: 'unknown_line' };
+  if (!isVatCustomsDocKind(rawDocKind)) return { ok: false, error: 'invalid_line' };
+  return { ok: true, lineId, docKind: rawDocKind };
+}
+
+async function store(
+  row: VatFileRequestRow,
+  bytes: Uint8Array,
+  originalName: string,
+  target: { lineId?: number; docKind?: VatCustomsDocKind } = {}
+): Promise<NextResponse> {
   const detected = detectVatFile(bytes, originalName);
   if (!detected) {
     return NextResponse.json({ error: 'unsupported_file_type' }, { status: 415 });
@@ -112,7 +140,12 @@ async function store(row: VatFileRequestRow, bytes: Uint8Array, originalName: st
     console.error('vat-files/upload: storage upload failed');
     return NextResponse.json({ error: 'upload_failed' }, { status: 500 });
   }
-  return NextResponse.json({ path, name: displayFileName(originalName), size: bytes.length });
+  return NextResponse.json({
+    path,
+    name: displayFileName(originalName),
+    size: bytes.length,
+    ...(target.lineId ? { lineId: target.lineId, docKind: target.docKind } : {}),
+  });
 }
 
 // DELETE /api/vat-files/[token]/upload?path=...

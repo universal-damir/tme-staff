@@ -3,10 +3,16 @@
 //   /vat-files/demo-files     non-accounting client, files request
 //   /vat-files/demo-files-customs  files request with point 8 (customs) + the FTA list
 //   /vat-files/demo-closed    a closed request
-// Uploads and Send stay in the browser: no API call, nothing is saved.
+//   /vat-files/demo-customs-table       round 3: the customs table (7 imports,
+//                                       real FTA CSV values of a Pennypress-like
+//                                       client; one answered by TME, one with
+//                                       two TME questions, "Same as last quarter")
+//   /vat-files/demo-customs-table-sent  the table after a Send (4 SPG-like imports)
+//   /vat-files/demo-customs-table-long  150 imports, to check the page stays fast
+// Uploads, autosave and Send stay in the browser: no API call, nothing is saved.
 // Only in `next dev`; a production build treats these like any unknown link.
 
-import type { VatFilesPagePayload } from '@/types/vat-files';
+import type { VatCustomsPageLine, VatFilesPagePayload } from '@/types/vat-files';
 
 // The REAL points, as the portal writes them to requested_items (page
 // wording: portal src/lib/vat-filing/email-templates.ts customsRequestItems('page')
@@ -32,6 +38,95 @@ const FILES_POINTS = [
 const FILES_CUSTOMS_POINT =
   'The FTA import list below shows the shipments that passed through the customs code linked to the TRN of the company during the period 2607-2609. In this regard: A. Please share with us the BOE and the respective invoices for these imports. B. Please state the purpose of these imports. C. Please confirm whether all supplier invoices are being paid, or whether there are any free of charge (FOC) imports.';
 
+/** Round 3 points with the customs table (portal customsRequestItems('page', { table: true })). */
+const CUSTOMS_TABLE_POINTS = [
+  'Bill of Entry (BOE) of each shipment.',
+  'Supplier invoices for each shipment. You can upload them next to each import in the table below.',
+  'Please answer four short questions for each import in the table below: purpose, paid or free of charge, Incoterms and delivery point. You can also download the list as Excel.',
+];
+
+/** No customs columns: the round 2 pages. */
+const NO_TABLE = {
+  customsLines: [],
+  customsAnswers: {},
+  customsDefaults: null,
+  customsAnswersSentAt: null,
+  lineFiles: [],
+} satisfies Partial<VatFilesPagePayload>;
+
+type CsvLine = [date: string, declarationNo: string, transactionRef: string, value: number, vat: number];
+
+function demoLines(firstId: number, rows: CsvLine[]): VatCustomsPageLine[] {
+  return rows.map(([date, declarationNo, ref, value, vat], i) => ({
+    id: firstId + i,
+    lineNo: i + 1,
+    declarationDate: `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`,
+    declarationNo,
+    transactionRefNo: ref,
+    totalValue: value,
+    totalVat: vat,
+    hasBoe: false,
+    hasInvoice: false,
+    answer: null,
+    questions: [],
+  }));
+}
+
+// FTA CSV "260901 Pennypress customs details from FTA-CSV.csv" (2606-2608).
+const PENNYPRESS_LINES = demoLines(5101, [
+  ['20260602', '1020035196026', '6495973488', 17577.0, 878.85],
+  ['20260620', '1010107019826', '6498757330', 5880.59, 294.03],
+  ['20260626', '1010111084626', '6499634073', 3027.06, 151.35],
+  ['20260706', '1010117406226', '6501352058', 1908.8, 95.44],
+  ['20260728', '1020050830526', '6504352368', 52731.0, 2636.55],
+  ['20260804', '1010136320226', '6505473181', 3856.12, 192.81],
+  ['20260817', '1010144550726', '6507195392', 1214.68, 60.73],
+]);
+// Line 1: TME already holds the answer (staff typed it), BOE + invoice in the portal.
+PENNYPRESS_LINES[0].hasBoe = true;
+PENNYPRESS_LINES[0].hasInvoice = true;
+PENNYPRESS_LINES[0].answer = {
+  parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' }],
+  updatedAt: '2026-10-08T07:30:00.000Z',
+};
+// Line 5: two open TME questions (each with its own reply box).
+PENNYPRESS_LINES[4].hasBoe = true;
+PENNYPRESS_LINES[4].questions = [
+  {
+    id: 901,
+    text: 'The invoice shows two suppliers. Is this one shipment, or should we split it by invoice?',
+    askedAt: '2026-10-10T08:15:00.000Z',
+  },
+  {
+    id: 902,
+    text: 'The invoice says "FCA Loughborough". Please check the delivery place.',
+    askedAt: '2026-10-10T08:16:00.000Z',
+  },
+];
+
+// FTA CSV "261009 SPG customs details from FTA 2607-2609 - CSV.csv".
+const SPG_LINES = demoLines(6201, [
+  ['20260803', '1010135960026', '6505210394', 252203.24, 12610.16],
+  ['20260819', '1010146613726', '6507604297', 6472.57, 323.63],
+  ['20260923', '1010169929426', '6511897684', 265416.02, 13270.8],
+  ['20260924', '1010170952926', '6511904860', 228916.43, 11445.82],
+]);
+SPG_LINES[0].hasBoe = true;
+SPG_LINES[0].hasInvoice = true;
+
+const SPG_SENT_AT = '2026-10-10T11:42:00.000Z';
+
+function longLines(): VatCustomsPageLine[] {
+  const rows: CsvLine[] = [];
+  for (let i = 0; i < 150; i++) {
+    const day = String(1 + (i % 28)).padStart(2, '0');
+    const month = String(7 + Math.floor(i / 50)).padStart(2, '0');
+    const value = Math.round((1000 + ((i * 7919) % 90000)) * 100) / 100;
+    rows.push([`2026${month}${day}`, `10101${String(40000000 + i * 137).padStart(8, '0')}`, `65${String(10000000 + i * 911)}`, value, Math.round(value * 5) / 100]);
+  }
+  return demoLines(7001, rows);
+}
+
 const DEMOS: Record<string, VatFilesPagePayload> = {
   'demo-customs': {
     kind: 'customs',
@@ -47,6 +142,7 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
     expired: false,
     files: [],
     clientComment: null,
+    ...NO_TABLE,
   },
   'demo-files': {
     kind: 'files',
@@ -64,6 +160,7 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
       { name: 'Sales July 2026.xlsx', size: 48_211, uploadedAt: '2026-10-05T09:12:00.000Z' },
     ],
     clientComment: null,
+    ...NO_TABLE,
   },
   'demo-files-customs': {
     kind: 'files',
@@ -79,6 +176,7 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
     expired: false,
     files: [],
     clientComment: null,
+    ...NO_TABLE,
   },
   'demo-closed': {
     kind: 'files',
@@ -94,6 +192,95 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
     expired: false,
     files: [],
     clientComment: null,
+    ...NO_TABLE,
+  },
+  'demo-customs-table': {
+    kind: 'customs',
+    status: 'open',
+    companyCode: '99997',
+    companyName: 'Sample Press Trading LLC',
+    periodKey: '2606-2608',
+    periodLabel: 'Jun - Aug 2026 (2606-2608)',
+    deadline: '2026-10-20',
+    requestedItems: CUSTOMS_TABLE_POINTS,
+    hasCustomsList: true,
+    customsListName: 'FTA import list 99997 2606-2608.xlsx',
+    expired: false,
+    files: [],
+    clientComment: null,
+    customsLines: PENNYPRESS_LINES,
+    customsAnswers: {
+      // Line 2: the client started (saved, not sent yet).
+      '5102': { parts: [{ purpose: 'office_use', payment: 'paid' }], updatedAt: '2026-10-10T09:00:00.000Z' },
+      // Line 3: a customer return, original BOE given.
+      '5103': {
+        parts: [{ purpose: 'customer_return', purposeOther: '302-06945947-21', payment: 'foc', incoterm: 'not_stated' }],
+        updatedAt: '2026-10-10T09:05:00.000Z',
+      },
+      // Line 5: one of the two questions already has a reply.
+      '5105': { parts: [], replies: { '901': 'One shipment, two invoices.' }, updatedAt: '2026-10-10T09:10:00.000Z' },
+    },
+    customsDefaults: { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' },
+    customsAnswersSentAt: null,
+    lineFiles: [],
+  },
+  'demo-customs-table-sent': {
+    kind: 'customs',
+    status: 'open',
+    companyCode: '99996',
+    companyName: 'Sample Projects General Trading LLC',
+    periodKey: '2607-2609',
+    periodLabel: 'Jul - Sep 2026 (2607-2609)',
+    deadline: '2026-10-20',
+    requestedItems: CUSTOMS_TABLE_POINTS,
+    hasCustomsList: true,
+    customsListName: 'FTA import list 99996 2607-2609.xlsx',
+    expired: false,
+    files: [
+      { name: 'BOE 1010146613726.pdf', size: 182_300, uploadedAt: SPG_SENT_AT },
+      { name: 'Invoice INV-2207.pdf', size: 96_120, uploadedAt: SPG_SENT_AT },
+      { name: 'Invoice INV-2208.pdf', size: 88_410, uploadedAt: SPG_SENT_AT },
+    ],
+    clientComment: null,
+    customsLines: SPG_LINES,
+    customsAnswers: {
+      '6201': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'outside_uae', deliveryPlace: 'Shanghai, China' }], updatedAt: SPG_SENT_AT },
+      '6202': {
+        parts: [
+          { invoiceRef: 'INV-2207', purpose: 'sale_stock', payment: 'paid', incoterm: 'DAP', delivery: 'uae_premises' },
+          { invoiceRef: 'INV-2208', purpose: 'samples', payment: 'foc', incoterm: 'DAP', delivery: 'uae_premises' },
+        ],
+        updatedAt: SPG_SENT_AT,
+      },
+      '6203': { parts: [{ purpose: 'fixed_asset', payment: 'will_be_paid', incoterm: 'EXW', delivery: 'outside_uae', deliveryPlace: 'Milan, Italy' }], updatedAt: SPG_SENT_AT },
+    },
+    customsDefaults: { purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'outside_uae', deliveryPlace: 'Shanghai, China' },
+    customsAnswersSentAt: SPG_SENT_AT,
+    lineFiles: [
+      { lineId: 6202, docKind: 'boe', name: 'BOE 1010146613726.pdf', uploadedAt: SPG_SENT_AT },
+      { lineId: 6202, docKind: 'invoice', name: 'Invoice INV-2207.pdf', uploadedAt: SPG_SENT_AT },
+      { lineId: 6202, docKind: 'invoice', name: 'Invoice INV-2208.pdf', uploadedAt: SPG_SENT_AT },
+    ],
+  },
+  'demo-customs-table-long': {
+    kind: 'customs',
+    status: 'open',
+    companyCode: '99995',
+    companyName: 'Sample Wholesale FZE',
+    periodKey: '2607-2609',
+    periodLabel: 'Jul - Sep 2026 (2607-2609)',
+    deadline: '2026-10-20',
+    requestedItems: CUSTOMS_TABLE_POINTS,
+    hasCustomsList: true,
+    customsListName: 'FTA import list 99995 2607-2609.xlsx',
+    expired: false,
+    files: [],
+    clientComment: null,
+    customsLines: longLines(),
+    customsAnswers: {},
+    customsDefaults: null,
+    customsAnswersSentAt: null,
+    lineFiles: [],
   },
 };
 

@@ -18,8 +18,16 @@ import {
   vatFileStoragePath,
   type VatFileEntry,
   type VatFileRequestRow,
+  type VatCustomsDocKind,
   type VatFilesPagePayload,
 } from '@/types/vat-files';
+import {
+  buildLineFiles,
+  isVatCustomsDocKind,
+  readDefaults,
+  readStoredAnswers,
+  sanitizePageLines,
+} from './vat-customs';
 
 // ------------------------------------------------------------------
 // Limits (the shared ones live in the mirrored types file)
@@ -234,6 +242,9 @@ export function scrubVatFilesRow(row: VatFileRequestRow, now: number = Date.now(
     ? row.requested_items.filter((s): s is string => typeof s === 'string' && s.trim() !== '')
     : [];
   const files = Array.isArray(row.files) ? row.files : [];
+  // Round 3 columns: missing (older Supabase schema, or a row without a
+  // customs table) = no table.
+  const customsLines = sanitizePageLines(row.customs_lines);
   return {
     companyCode: row.company_code ?? null,
     companyName: row.company_name ?? null,
@@ -252,6 +263,11 @@ export function scrubVatFilesRow(row: VatFileRequestRow, now: number = Date.now(
       uploadedAt: String(f?.uploadedAt ?? ''),
     })),
     clientComment: row.client_comment ?? null,
+    customsLines,
+    customsAnswers: readStoredAnswers(row.customs_answers, customsLines),
+    customsDefaults: customsLines.length > 0 ? readDefaults(row.customs_defaults) : null,
+    customsAnswersSentAt: typeof row.customs_answers_sent_at === 'string' ? row.customs_answers_sent_at : null,
+    lineFiles: buildLineFiles(files, customsLines),
   };
 }
 
@@ -263,6 +279,9 @@ export function scrubVatFilesRow(row: VatFileRequestRow, now: number = Date.now(
 export interface VatFilesSubmittedFile {
   path: string;
   name: string;
+  /** Round 3: the customs line the file belongs to (checked against the row's lines at Send). */
+  lineId?: number;
+  docKind?: VatCustomsDocKind;
 }
 
 /** Comment: control characters out (line breaks kept), trimmed, capped. */
@@ -275,26 +294,43 @@ export function cleanComment(raw: unknown): string {
     .slice(0, VAT_FILES_MAX_COMMENT);
 }
 
-/** Read the Send body: `{ files: [{ path, name }], comment }`. Null when malformed. */
+/**
+ * Read the Send body: `{ files: [{ path, name, lineId?, docKind? }], comment,
+ * answers? }`. `answers` (round 3) = the customs answers not autosaved yet,
+ * keyed by line id; its presence means "this Send carries the answers".
+ * Null when malformed.
+ */
 export function parseFinalizeBody(
   body: unknown
-): { files: VatFilesSubmittedFile[]; comment: string } | null {
+): { files: VatFilesSubmittedFile[]; comment: string; answers?: unknown } | null {
   if (!body || typeof body !== 'object') return null;
-  const b = body as { files?: unknown; comment?: unknown };
+  const b = body as { files?: unknown; comment?: unknown; answers?: unknown };
   if (!Array.isArray(b.files)) return null;
   const files: VatFilesSubmittedFile[] = [];
   for (const f of b.files) {
     if (!f || typeof f !== 'object') return null;
-    const { path, name } = f as { path?: unknown; name?: unknown };
+    const { path, name, lineId, docKind } = f as { path?: unknown; name?: unknown; lineId?: unknown; docKind?: unknown };
     if (typeof path !== 'string') return null;
-    files.push({ path, name: typeof name === 'string' ? name : '' });
+    const entry: VatFilesSubmittedFile = { path, name: typeof name === 'string' ? name : '' };
+    if (lineId !== undefined && lineId !== null) {
+      if (typeof lineId !== 'number' || !Number.isSafeInteger(lineId) || lineId <= 0) return null;
+      if (!isVatCustomsDocKind(docKind)) return null;
+      entry.lineId = lineId;
+      entry.docKind = docKind;
+    }
+    files.push(entry);
   }
-  return { files, comment: cleanComment(b.comment) };
+  const parsed: { files: VatFilesSubmittedFile[]; comment: string; answers?: unknown } = {
+    files,
+    comment: cleanComment(b.comment),
+  };
+  if (b.answers !== undefined) parsed.answers = b.answers;
+  return parsed;
 }
 
 export type FinalizeCheck =
   | { ok: true; entries: VatFileEntry[] }
-  | { ok: false; error: 'no_files' | 'too_many_files' | 'invalid_path' | 'upload_not_received' };
+  | { ok: false; error: 'no_files' | 'too_many_files' | 'invalid_path' | 'upload_not_received' | 'unknown_line' };
 
 /**
  * Build the entries one Send adds. Every path must be this link's upload
@@ -308,9 +344,15 @@ export function buildFinalizeEntries(
   stored: ReadonlyMap<string, number>,
   environment: string,
   token: string,
-  nowIso: string
+  nowIso: string,
+  opts: {
+    /** Round 3: ids of the row's customs lines; a file for any other line is refused. */
+    lineIds?: ReadonlySet<number>;
+    /** A Send that carries customs answers may come without files. */
+    allowNoFiles?: boolean;
+  } = {}
 ): FinalizeCheck {
-  if (submitted.length === 0) return { ok: false, error: 'no_files' };
+  if (submitted.length === 0 && !opts.allowNoFiles) return { ok: false, error: 'no_files' };
   if (submitted.length > VAT_FILES_MAX_PER_ROUND) return { ok: false, error: 'too_many_files' };
 
   const known = new Set(existing.map((f) => f.path));
@@ -318,6 +360,7 @@ export function buildFinalizeEntries(
   const entries: VatFileEntry[] = [];
   for (const f of submitted) {
     if (!isUploadPathForLink(f.path, environment, token)) return { ok: false, error: 'invalid_path' };
+    if (f.lineId !== undefined && !opts.lineIds?.has(f.lineId)) return { ok: false, error: 'unknown_line' };
     if (known.has(f.path) || seen.has(f.path)) continue;
     const size = stored.get(f.path);
     if (size === undefined) return { ok: false, error: 'upload_not_received' };
@@ -334,6 +377,10 @@ export function buildFinalizeEntries(
       uploadedAt: nowIso,
     };
     if (comment) entry.comment = comment;
+    if (f.lineId !== undefined && f.docKind) {
+      entry.lineId = f.lineId;
+      entry.docKind = f.docKind;
+    }
     entries.push(entry);
   }
   if (existing.length + entries.length > VAT_FILES_MAX_TOTAL) {

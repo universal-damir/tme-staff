@@ -8,6 +8,7 @@ import {
   scrubVatFilesRow,
   vatFilesRateLimited,
 } from '@/lib/vat-files';
+import { applyCustomsAnswersUpdate, sanitizePageLines } from '@/lib/vat-customs';
 import { listVatLinkFolder, verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
 import {
   VAT_FILE_REQUESTS_TABLE,
@@ -17,16 +18,26 @@ import {
 
 export const runtime = 'nodejs';
 
-// Paths + names of up to 40 files and a 2000 character comment.
-const MAX_BODY_BYTES = 64 * 1024;
+// Paths + names of up to 10 files, a 2000 character comment and the customs
+// answers not autosaved yet (same cap as the answers route).
+const MAX_BODY_BYTES = 576 * 1024;
 // Optimistic write of `files`: retry when another write landed in between.
 const MAX_WRITE_ATTEMPTS = 4;
 
-// POST /api/vat-files/[token]/send   json: { files: [{ path, name }], comment }
+// POST /api/vat-files/[token]/send
+//   json: { files: [{ path, name, lineId?, docKind? }], comment, answers? }
 // The client's Send: the files uploaded in this round join the row's
-// `files` (each with the round's comment), `client_comment` and
-// `last_submitted_at` are set. The row stays open, so the client can send
-// more files later through the same link. Answer: the page data.
+// `files` (each with the round's comment, and its customs line + kind when
+// it was added on a row), `client_comment` and `last_submitted_at` are set.
+// Round 3: `answers` present = this Send carries the customs answers (the
+// lines not autosaved yet, merged like the answers route). Then files may be
+// empty, and when the answers changed since the last Send (or were never
+// sent) `customs_answers_sent_at` AND `last_submitted_at` are stamped, so
+// the portal's sync (it reads rows by last_submitted_at, compares
+// customs_answers_sent_at) picks them up. A repeated Send with nothing new
+// stamps nothing. Replies follow the answers route (only to open questions;
+// `staleReplies` names lines where one was dropped). The row stays open, so the client can send more later
+// through the same link. Answer: the page data.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -55,7 +66,14 @@ export async function POST(
   const parsed = parseFinalizeBody(body);
   if (!parsed) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
 
-  const stored = await listVatLinkFolder(linkFolder(row.environment, row.link_token));
+  const lines = sanitizePageLines(row.customs_lines);
+  // Answers only count on a row with a customs table (older rows: files only).
+  const withAnswers = parsed.answers !== undefined && lines.length > 0;
+
+  const stored =
+    parsed.files.length > 0
+      ? await listVatLinkFolder(linkFolder(row.environment, row.link_token))
+      : new Map<string, number>();
   if (!stored) {
     console.error('vat-files/send: could not list the uploaded files');
     return NextResponse.json({ error: 'send_failed' }, { status: 500 });
@@ -66,6 +84,8 @@ export async function POST(
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
     const existing: VatFileEntry[] = Array.isArray(current.files) ? current.files : [];
     const nowIso = new Date().toISOString();
+    const currentLines = sanitizePageLines(current.customs_lines);
+    const lineIds = new Set(currentLines.map((l) => l.id));
     const built = buildFinalizeEntries(
       existing,
       parsed.files,
@@ -73,7 +93,8 @@ export async function POST(
       stored,
       row.environment,
       row.link_token,
-      nowIso
+      nowIso,
+      { lineIds, allowNoFiles: withAnswers }
     );
     if (!built.ok) {
       const status = built.error === 'too_many_files' ? 409 : 400;
@@ -82,8 +103,33 @@ export async function POST(
 
     const files = [...existing, ...built.entries];
     const patch: Record<string, unknown> = { files, updated_at: nowIso };
+    let stampAnswers = false;
+    let staleReplies: string[] = [];
+    if (withAnswers) {
+      const update = applyCustomsAnswersUpdate(current.customs_answers, parsed.answers ?? {}, currentLines, nowIso);
+      if (!update.ok) {
+        return NextResponse.json({ error: update.error, lineId: update.lineId ?? null }, { status: 400 });
+      }
+      staleReplies = update.staleReplies;
+      if (update.changed.length > 0) {
+        patch.customs_answers = update.answers;
+        patch.customs_answers_saved_at = nowIso;
+      }
+      const savedAt = current.customs_answers_saved_at ?? null;
+      const sentAt = current.customs_answers_sent_at ?? null;
+      const unsentSave = !!savedAt && (!sentAt || Date.parse(savedAt) > Date.parse(sentAt));
+      stampAnswers = update.changed.length > 0 || unsentSave;
+      if (stampAnswers) patch.customs_answers_sent_at = nowIso;
+      if (built.entries.length === 0 && !stampAnswers) {
+        // Nothing new: a double click after a Send is fine, a first empty Send is not.
+        if (sentAt) {
+          return NextResponse.json({ ...scrubVatFilesRow(current), sent: [] });
+        }
+        return NextResponse.json({ error: 'no_files' }, { status: 400 });
+      }
+    }
     // A double click sends nothing new: keep the timestamps as they were.
-    if (built.entries.length > 0) {
+    if (built.entries.length > 0 || stampAnswers) {
       patch.last_submitted_at = nowIso;
       if (parsed.comment) patch.client_comment = parsed.comment;
     }
@@ -100,6 +146,8 @@ export async function POST(
     if (written && written.length > 0) {
       return NextResponse.json({
         ...scrubVatFilesRow({ ...current, ...patch, files } as VatFileRequestRow),
+        answersSent: stampAnswers,
+        staleReplies,
         sent: built.entries.map((e) => ({ name: e.name, size: e.size, uploadedAt: e.uploadedAt })),
       });
     }

@@ -45,6 +45,10 @@ export interface VatFileEntry {
   uploadedAt: string;
   /** The comment typed with that Send, when there was one. */
   comment?: string;
+  /** Round 3: the customs line (portal vat_customs_lines.id) the file belongs to; absent = general file. */
+  lineId?: number;
+  /** Round 3: what the file is for that line. */
+  docKind?: VatCustomsDocKind;
 }
 
 /** A row of vat_file_requests, as Supabase returns it. */
@@ -75,6 +79,16 @@ export interface VatFileRequestRow {
   updated_at: string;
   /** After this the page takes no more uploads; null = no end. */
   expires_at: string | null;
+  /** Round 3. Portal-owned: the import lines (empty = no customs table). */
+  customs_lines?: VatCustomsPageLine[];
+  /** Round 3. Portal-owned: "Same as last quarter" answer. */
+  customs_defaults?: VatCustomsDefaults;
+  /** Round 3. Client-owned: the answers, autosaved. */
+  customs_answers?: VatCustomsAnswers;
+  /** Round 3. Client-owned: last autosave. */
+  customs_answers_saved_at?: string | null;
+  /** Round 3. Client-owned: last Send that carried the answers. */
+  customs_answers_sent_at?: string | null;
 }
 
 /** What the tme-staff page shows (built from the row; never the storage paths). */
@@ -96,6 +110,14 @@ export interface VatFilesPagePayload {
   /** Files already sent through this link, oldest first. */
   files: Array<{ name: string; size: number; uploadedAt: string }>;
   clientComment: string | null;
+  /** Round 3: the customs table; empty = the page shows no table. */
+  customsLines: VatCustomsPageLine[];
+  /** Round 3: the client's saved answers (merged over each line's `answer`). */
+  customsAnswers: VatCustomsAnswers;
+  customsDefaults: VatCustomsDefaults;
+  customsAnswersSentAt: string | null;
+  /** Round 3: per-line files sent so far (name + line + kind), for the row ticks on the page. */
+  lineFiles: Array<{ lineId: number; docKind: VatCustomsDocKind; name: string; uploadedAt: string }>;
 }
 
 /** Upload limits, the same as the portal's VAT filing documents (period-documents.ts). */
@@ -159,4 +181,188 @@ export function vatFileNameFromPath(path: string | null | undefined): string | n
   const last = String(path || '').split('/').pop() || '';
   if (!last) return null;
   return last.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, '') || last;
+}
+
+// ============================================
+// Round 3 (11.10.2026): the customs table
+// Changed 11.10 after review: questions[] (all open ones) + replies map;
+// delivery point = the place next to the Incoterm; optional when no Incoterm.
+// ============================================
+//
+// The staff upload the FTA CSV; the portal keeps one line per import
+// (portal table vat_customs_lines) and writes the client's view of them to
+// vat_file_requests.customs_lines. The client answers on the page; tme-staff
+// writes vat_file_requests.customs_answers (autosave) and, on Send, stamps
+// customs_answers_sent_at. The portal pulls the answers in (same sync as the
+// files). Ownership: the PORTAL writes customs_lines + customs_defaults, the
+// CLIENT PAGE writes customs_answers + customs_answers_saved_at /
+// customs_answers_sent_at. Neither side ever writes the other's columns.
+
+/** Purpose of import. The last option is always 'other' (free text required). */
+export const VAT_CUSTOMS_PURPOSE_OPTIONS = [
+  { value: 'sale_stock', label: 'For sale / stock / trading' },
+  { value: 'office_use', label: 'Office use / tools' },
+  { value: 'fixed_asset', label: 'Shop fit-out / fixed asset' },
+  { value: 'spare_parts', label: 'Spare parts / maintenance / repair' },
+  { value: 'marketing_gifts', label: 'Marketing / gifts / give-away' },
+  { value: 'packaging', label: 'Packaging' },
+  { value: 'staff_uniforms', label: 'Staff uniforms' },
+  { value: 'demo_display', label: 'Demo / testing / event display' },
+  { value: 'samples', label: 'Samples (not for sale)' },
+  { value: 'replacement', label: 'Replacement (not for sale)' },
+  { value: 'customer_return', label: 'Customer return / sales return' },
+  { value: 'other', label: 'Other (please explain)' },
+] as const;
+
+/** Paid or free of charge. */
+export const VAT_CUSTOMS_PAYMENT_OPTIONS = [
+  { value: 'paid', label: 'Paid' },
+  { value: 'will_be_paid', label: 'Will be paid' },
+  { value: 'foc', label: 'FOC (free of charge)' },
+  { value: 'other', label: 'Other (please explain)' },
+] as const;
+
+/** Incoterms 2020 as on the supplier invoice. */
+export const VAT_CUSTOMS_INCOTERM_OPTIONS = [
+  { value: 'EXW', label: 'EXW - Ex Works' },
+  { value: 'FCA', label: 'FCA - Free Carrier' },
+  { value: 'CPT', label: 'CPT - Carriage Paid To' },
+  { value: 'CIP', label: 'CIP - Carriage and Insurance Paid To' },
+  { value: 'DAP', label: 'DAP - Delivered at Place' },
+  { value: 'DPU', label: 'DPU - Delivered at Place Unloaded' },
+  { value: 'DDP', label: 'DDP - Delivered Duty Paid' },
+  { value: 'FAS', label: 'FAS - Free Alongside Ship (sea)' },
+  { value: 'FOB', label: 'FOB - Free on Board (sea)' },
+  { value: 'CFR', label: 'CFR - Cost and Freight (sea)' },
+  { value: 'CIF', label: 'CIF - Cost, Insurance and Freight (sea)' },
+  { value: 'not_stated', label: 'Not stated on the invoice' },
+  { value: 'other', label: 'Other (please explain)' },
+] as const;
+
+/**
+ * Delivery point = the place named next to the Incoterm on the supplier
+ * invoice (e.g. "CIP Dubai Airport" -> UAE - port / airport), NOT where the
+ * goods went afterwards. 'outside_uae' and 'other' need the place text.
+ */
+export const VAT_CUSTOMS_DELIVERY_OPTIONS = [
+  { value: 'uae_premises', label: 'UAE - our office / warehouse' },
+  { value: 'uae_port', label: 'UAE - port / airport (e.g. "CIP Dubai Airport")' },
+  { value: 'outside_uae', label: 'Outside the UAE (please name the place on the invoice)' },
+  { value: 'other', label: 'Other (please explain)' },
+] as const;
+
+export type VatCustomsPurpose = (typeof VAT_CUSTOMS_PURPOSE_OPTIONS)[number]['value'];
+export type VatCustomsPayment = (typeof VAT_CUSTOMS_PAYMENT_OPTIONS)[number]['value'];
+export type VatCustomsIncoterm = (typeof VAT_CUSTOMS_INCOTERM_OPTIONS)[number]['value'];
+export type VatCustomsDelivery = (typeof VAT_CUSTOMS_DELIVERY_OPTIONS)[number]['value'];
+
+/** Longest free text kept in one answer field. */
+export const VAT_CUSTOMS_MAX_TEXT_CHARS = 500;
+/** Most parts one import may be split into (one per supplier invoice). */
+export const VAT_CUSTOMS_MAX_PARTS = 20;
+
+/**
+ * One answer part. An import has one part, or one per supplier invoice when
+ * one BOE covers several invoices (then invoiceRef names the invoice).
+ * Every field may be empty while the client is still working.
+ */
+export interface VatCustomsAnswerPart {
+  invoiceRef?: string;
+  purpose?: VatCustomsPurpose | null;
+  purposeOther?: string;
+  payment?: VatCustomsPayment | null;
+  paymentOther?: string;
+  incoterm?: VatCustomsIncoterm | null;
+  incotermOther?: string;
+  delivery?: VatCustomsDelivery | null;
+  /** The place (city / country / site); required for 'outside_uae' and 'other'. */
+  deliveryPlace?: string;
+  comment?: string;
+}
+
+/** The client's answer for one import line, keyed by the portal line id. */
+export interface VatCustomsLineAnswer {
+  parts: VatCustomsAnswerPart[];
+  /**
+   * The client's replies to TME's open questions on this line (see
+   * VatCustomsPageLine.questions), keyed by question id. A reply belongs to
+   * ONE question; it is never moved to another one.
+   */
+  replies?: Record<string, string>;
+  /** ISO timestamp of the client's last change to this line. */
+  updatedAt?: string;
+}
+
+/** vat_file_requests.customs_answers: { "<portal line id>": VatCustomsLineAnswer } */
+export type VatCustomsAnswers = Record<string, VatCustomsLineAnswer>;
+
+/** One import line as the PORTAL writes it to vat_file_requests.customs_lines. */
+export interface VatCustomsPageLine {
+  /** Portal vat_customs_lines.id. The key of customs_answers. */
+  id: number;
+  /** 1-based order in the FTA list. */
+  lineNo: number;
+  /** YYYY-MM-DD */
+  declarationDate: string | null;
+  /** The BOE number. */
+  declarationNo: string;
+  transactionRefNo: string | null;
+  /** AED, the FTA 'Total Value' (excluding VAT). */
+  totalValue: number | null;
+  /** AED, the FTA 'Total Vat'. */
+  totalVat: number | null;
+  /** The BOE is in the portal's documents for this line (client or staff). */
+  hasBoe: boolean;
+  /** At least one supplier invoice is in the portal's documents for this line. */
+  hasInvoice: boolean;
+  /** Answers TME already holds for this line (staff typed them, or an earlier Send). Prefills the page. */
+  answer?: VatCustomsLineAnswer | null;
+  /** TME's open (sent, not resolved) questions on this line, oldest first. Empty = none. */
+  questions?: Array<{ id: number; text: string; askedAt: string }>;
+}
+
+/**
+ * vat_file_requests.customs_defaults: the client's most common answer of the
+ * last filing that had answers. Powers "Same as last quarter". Null = none.
+ */
+export type VatCustomsDefaults = VatCustomsAnswerPart | null;
+
+/** What a per-line upload is (VatFileEntry.docKind). */
+export type VatCustomsDocKind = 'boe' | 'invoice' | 'other';
+
+function hasText(s: string | undefined | null): boolean {
+  return typeof s === 'string' && s.trim().length > 0;
+}
+
+/**
+ * One part is answered: purpose, payment, incoterm and delivery chosen, with
+ * the text each 'other' needs, and the place for 'outside_uae' / 'other'
+ * delivery. Used by the page AND the portal, so both count progress alike.
+ */
+export function isVatCustomsPartComplete(part: VatCustomsAnswerPart | null | undefined): boolean {
+  if (!part) return false;
+  if (!part.purpose || (part.purpose === 'other' && !hasText(part.purposeOther))) return false;
+  if (!part.payment || (part.payment === 'other' && !hasText(part.paymentOther))) return false;
+  if (!part.incoterm || (part.incoterm === 'other' && !hasText(part.incotermOther))) return false;
+  // No Incoterm on the invoice = no named place to give; the delivery point is optional then.
+  if (part.incoterm === 'not_stated' && !part.delivery) return true;
+  if (!part.delivery) return false;
+  if ((part.delivery === 'outside_uae' || part.delivery === 'other') && !hasText(part.deliveryPlace)) return false;
+  return true;
+}
+
+/** A line is answered when it has at least one part and every part is complete (split parts also need invoiceRef). */
+export function isVatCustomsLineComplete(answer: VatCustomsLineAnswer | null | undefined): boolean {
+  const parts = answer?.parts ?? [];
+  if (parts.length === 0) return false;
+  if (parts.length > 1 && parts.some((p) => !hasText(p.invoiceRef))) return false;
+  return parts.every(isVatCustomsPartComplete);
+}
+
+/** The label of a stored option value ('' when unknown). */
+export function vatCustomsOptionLabel(
+  options: ReadonlyArray<{ value: string; label: string }>,
+  value: string | null | undefined
+): string {
+  return options.find((o) => o.value === value)?.label ?? '';
 }

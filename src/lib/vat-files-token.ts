@@ -15,8 +15,14 @@ import {
   type VatFilesAccessResult,
 } from './vat-files';
 
-export const VAT_FILES_COLUMNS =
-  'id, link_token, environment, portal_filing_id, company_code, company_name, period_key, period_label, kind, requested_items, customs_list_path, deadline, status, files, client_comment, last_submitted_at, created_at, updated_at, expires_at';
+/**
+ * All columns. The round 3 customs columns (customs_lines, customs_defaults,
+ * customs_answers, customs_answers_saved_at, customs_answers_sent_at) may not
+ * exist yet on a Supabase project: a named list would then fail every link,
+ * '*' simply leaves them out and the page treats them as empty. The row never
+ * leaves the server as is (scrubVatFilesRow decides what the browser sees).
+ */
+export const VAT_FILES_COLUMNS = '*';
 
 export async function verifyVatFilesAccess(
   token: string,

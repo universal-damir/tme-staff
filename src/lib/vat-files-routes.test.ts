@@ -10,8 +10,9 @@ const store: {
   objects: Map<string, number>;
   uploads: string[];
   removed: string[];
+  patches: Row[];
   beforeUpdate?: () => void;
-} = { rows: [], objects: new Map(), uploads: [], removed: [] };
+} = { rows: [], objects: new Map(), uploads: [], removed: [], patches: [] };
 
 function makeClient() {
   return {
@@ -47,6 +48,7 @@ function makeClient() {
               store.beforeUpdate?.();
               store.beforeUpdate = undefined;
               const hits = store.rows.filter((r) => filters.every(([c, v]) => r[c] === v));
+              if (hits.length > 0) store.patches.push(structuredClone(patch));
               hits.forEach((r) => Object.assign(r, structuredClone(patch)));
               return { data: hits.map((r) => ({ id: r.id })), error: null };
             },
@@ -95,6 +97,7 @@ import { GET } from '@/app/api/vat-files/[token]/route';
 import { POST as UPLOAD, DELETE as REMOVE } from '@/app/api/vat-files/[token]/upload/route';
 import { POST as SEND } from '@/app/api/vat-files/[token]/send/route';
 import { GET as CUSTOMS } from '@/app/api/vat-files/[token]/customs-list/route';
+import { POST as ANSWERS } from '@/app/api/vat-files/[token]/answers/route';
 
 const TOKEN = 'TokenAbcdefghij0123456789';
 const ROW_ID = '11111111-2222-3333-4444-555555555555';
@@ -128,6 +131,7 @@ function seed(over: Row = {}) {
   store.objects = new Map();
   store.uploads = [];
   store.removed = [];
+  store.patches = [];
   store.beforeUpdate = undefined;
 }
 
@@ -305,5 +309,222 @@ describe('GET customs-list', () => {
     expect(res.headers.get('location')).toContain('customs-list.xlsx');
     seed({ kind: 'files', customs_list_path: null });
     expect((await CUSTOMS(new NextRequest(url('/customs-list')), params())).status).toBe(404);
+  });
+});
+
+// ------------------------------------------------------------------
+// Round 3: the customs table
+// ------------------------------------------------------------------
+
+const LINES = [
+  { id: 501, lineNo: 1, declarationDate: '2026-08-03', declarationNo: '1010135960026', transactionRefNo: '6505210394', totalValue: 252203.24, totalVat: 12610.16, hasBoe: false, hasInvoice: false, answer: null, questions: [] },
+  { id: 502, lineNo: 2, declarationDate: '2026-08-19', declarationNo: '1010146613726', transactionRefNo: '6507604297', totalValue: 6472.57, totalVat: 323.63, hasBoe: false, hasInvoice: false, answer: null, questions: [{ id: 31, text: 'Samples?', askedAt: '2026-10-10T08:00:00Z' }, { id: 32, text: 'Paid by whom?', askedAt: '2026-10-10T08:01:00Z' }] },
+];
+const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' };
+const answers = (body: unknown, raw = false) =>
+  ANSWERS(new NextRequest(url('/answers'), { method: 'POST', body: raw ? (body as string) : JSON.stringify(body) }), params());
+
+function uploadForLine(name: string, lineId: string, docKind: string) {
+  const fd = new FormData();
+  fd.append('file', new File([PDF], name));
+  fd.append('lineId', lineId);
+  fd.append('docKind', docKind);
+  return UPLOAD(new NextRequest(url('/upload'), { method: 'POST', body: fd }), params());
+}
+
+describe('GET with the customs table', () => {
+  it('fills customsLines, customsAnswers, defaults, sent time and per-line files', async () => {
+    seed({
+      customs_lines: LINES,
+      customs_answers: { '501': { parts: [FULL], updatedAt: '2026-10-10T09:00:00Z' }, '999': { parts: [FULL] } },
+      customs_defaults: FULL,
+      customs_answers_sent_at: '2026-10-10T09:05:00Z',
+      files: [{ path: `${ENV}/${TOKEN}/x-boe.pdf`, name: 'boe.pdf', size: 1, uploadedAt: 'x', lineId: 501, docKind: 'boe' }],
+    });
+    const body = await (await GET(new NextRequest(url()), params())).json();
+    expect(body.customsLines).toHaveLength(2);
+    expect(Object.keys(body.customsAnswers)).toEqual(['501']);
+    expect(body.customsDefaults).toEqual(FULL);
+    expect(body.customsAnswersSentAt).toBe('2026-10-10T09:05:00Z');
+    expect(body.lineFiles).toEqual([{ lineId: 501, docKind: 'boe', name: 'boe.pdf', uploadedAt: 'x' }]);
+  });
+});
+
+describe('POST answers (autosave)', () => {
+  beforeEach(() => seed({ customs_lines: LINES }));
+
+  it('saves the changed lines and writes ONLY the page columns', async () => {
+    const res = await answers({ answers: { '501': { parts: [FULL] } } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.keys(body.updated)).toEqual(['501']);
+    const r = store.rows[0] as Record<string, unknown>;
+    expect((r.customs_answers as Record<string, { parts: unknown[]; updatedAt: string }>)['501']).toMatchObject({ parts: [FULL] });
+    expect(r.customs_answers_saved_at).toBe(body.savedAt);
+    expect(Object.keys(store.patches[0]).sort()).toEqual(['customs_answers', 'customs_answers_saved_at', 'updated_at']);
+    expect(r.customs_answers_sent_at).toBeUndefined();
+    expect(r.last_submitted_at).toBeNull();
+  });
+
+  it('nothing changed = no write', async () => {
+    await answers({ answers: { '501': { parts: [FULL] } } });
+    store.patches = [];
+    const res = await answers({ answers: { '501': { parts: [FULL] } } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).updated).toEqual({});
+    expect(store.patches).toEqual([]);
+  });
+
+  it('refuses a bad option, a foreign line, bad replies and too many parts', async () => {
+    expect((await answers({ answers: { '501': { parts: [{ purpose: 'nope' }] } } })).status).toBe(400);
+    const foreign = await answers({ answers: { '777': { parts: [FULL] } } });
+    expect(foreign.status).toBe(400);
+    expect(await foreign.json()).toEqual({ error: 'unknown_line', lineId: '777' });
+    expect((await answers({ answers: { '502': { parts: [], replies: { '31': 7 } } } })).status).toBe(400);
+    const parts = new Array(21).fill({});
+    expect((await answers({ answers: { '501': { parts } } })).status).toBe(400);
+    expect((await answers({ nothing: 1 })).status).toBe(400);
+    expect(store.patches).toEqual([]);
+  });
+
+  it('replies are kept per open question (two questions on one line)', async () => {
+    const res = await answers({ answers: { '502': { parts: [], replies: { '31': 'Yes, samples', '32': 'We paid' } } } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).staleReplies).toEqual([]);
+    expect((store.rows[0].customs_answers as Record<string, Record<string, unknown>>)['502']).toMatchObject({
+      replies: { '31': 'Yes, samples', '32': 'We paid' },
+    });
+  });
+
+  it('a reply to a closed / unknown question is dropped (never moved) and the page is told to reload', async () => {
+    const res = await answers({ answers: { '502': { parts: [FULL], replies: { '30': 'old reply', '31': 'Yes' } } } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.staleReplies).toEqual(['502']);
+    expect(Object.keys(body.updated)).toEqual(['502']);
+    const stored = (store.rows[0].customs_answers as Record<string, Record<string, unknown>>)['502'];
+    expect(stored.replies).toEqual({ '31': 'Yes' });
+    expect(stored.parts).toEqual([FULL]);
+    expect(JSON.stringify(store.rows[0].customs_answers)).not.toContain('old reply');
+    // Only a stale reply, nothing else changed: no write, still told.
+    store.patches = [];
+    const again = await answers({ answers: { '502': { parts: [FULL], replies: { '31': 'Yes', '29': 'x' } } } });
+    expect((await again.json()).staleReplies).toEqual(['502']);
+    expect(store.patches).toEqual([]);
+  });
+
+  it('after a staff "replace" the old ids are refused as unknown_line and nothing is written', async () => {
+    seed({ customs_lines: [{ ...LINES[0], id: 601 }], status: 'open' });
+    store.patches = [];
+    const res = await answers({ answers: { '501': { parts: [FULL] }, '601': { parts: [FULL] } } });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'unknown_line', lineId: '501' });
+    expect(store.patches).toEqual([]);
+  });
+
+  it('a body over the cap = 413; closed / expired rows and rows without a table are refused', async () => {
+    expect((await answers('x'.repeat(600 * 1024), true)).status).toBe(413);
+    seed({ customs_lines: LINES, status: 'closed' });
+    expect((await answers({ answers: {} })).status).toBe(410);
+    seed({ customs_lines: LINES, expires_at: '2020-01-01T00:00:00Z' });
+    expect((await answers({ answers: {} })).status).toBe(410);
+    seed();
+    const res = await answers({ answers: { '501': { parts: [FULL] } } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'no_customs_table' });
+  });
+
+  it('two writes at once: the second is re-read and merged, nothing lost', async () => {
+    store.beforeUpdate = () => {
+      store.rows[0].customs_answers = { '502': { parts: [{ purpose: 'samples' }], updatedAt: '2026-10-11T08:00:00Z' } };
+      store.rows[0].updated_at = '2026-10-11T08:00:00Z';
+    };
+    expect((await answers({ answers: { '501': { parts: [FULL] } } })).status).toBe(200);
+    const saved = store.rows[0].customs_answers as Record<string, unknown>;
+    expect(Object.keys(saved).sort()).toEqual(['501', '502']);
+  });
+});
+
+describe('upload + send with the customs table', () => {
+  beforeEach(() => seed({ customs_lines: LINES }));
+
+  it('upload takes a line of this row and echoes it; another row = 400 unknown_line', async () => {
+    const ok = await uploadForLine('boe.pdf', '501', 'boe');
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ lineId: 501, docKind: 'boe' });
+    const other = await uploadForLine('boe.pdf', '9999', 'boe');
+    expect(other.status).toBe(400);
+    expect(await other.json()).toEqual({ error: 'unknown_line' });
+    expect((await uploadForLine('boe.pdf', '501', 'passport')).status).toBe(400);
+    expect(store.uploads).toHaveLength(1);
+  });
+
+  it('send with answers and no files: stamps customs_answers_sent_at + last_submitted_at; a repeat stamps nothing', async () => {
+    const res = await send({ files: [], comment: '', answers: { '501': { parts: [FULL] } } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).answersSent).toBe(true);
+    const r = store.rows[0] as Record<string, unknown>;
+    expect(r.customs_answers_sent_at).toBeTruthy();
+    expect(r.last_submitted_at).toBe(r.customs_answers_sent_at);
+    expect(r.files).toEqual([]);
+    const first = r.customs_answers_sent_at;
+
+    store.patches = [];
+    const again = await send({ files: [], comment: '', answers: {} });
+    expect(again.status).toBe(200);
+    expect(store.patches).toEqual([]);
+    expect(store.rows[0].customs_answers_sent_at).toBe(first);
+  });
+
+  it('answers autosaved before: an answers-only Send still stamps them', async () => {
+    await answers({ answers: { '501': { parts: [FULL] } } });
+    const res = await send({ files: [], comment: 'see table', answers: {} });
+    expect(res.status).toBe(200);
+    expect(store.rows[0].customs_answers_sent_at).toBeTruthy();
+    expect(store.rows[0].client_comment).toBe('see table');
+  });
+
+  it('nothing to send at all = 400 no_files; answers on a row without a table count for nothing', async () => {
+    expect((await send({ files: [], comment: '', answers: {} })).status).toBe(400);
+    seed();
+    expect((await send({ files: [], comment: '', answers: { '501': { parts: [FULL] } } })).status).toBe(400);
+  });
+
+  it('files + answers: both stamped, the file keeps its line and kind', async () => {
+    const up = await (await uploadForLine('inv.pdf', '502', 'invoice')).json();
+    const res = await send({
+      files: [{ path: up.path, name: 'inv.pdf', lineId: 502, docKind: 'invoice' }],
+      comment: '',
+      answers: { '502': { parts: [FULL] } },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.lineFiles).toEqual([expect.objectContaining({ lineId: 502, docKind: 'invoice' })]);
+    const r = store.rows[0] as Record<string, unknown>;
+    expect((r.files as Array<Record<string, unknown>>)[0]).toMatchObject({ lineId: 502, docKind: 'invoice' });
+    expect(r.customs_answers_sent_at).toBeTruthy();
+    expect(r.last_submitted_at).toBeTruthy();
+  });
+
+  it('send refuses a file for a line of another row', async () => {
+    const up = await (await upload('a.pdf', PDF)).json();
+    const res = await send({ files: [{ path: up.path, name: 'a.pdf', lineId: 9999, docKind: 'boe' }], comment: '' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'unknown_line' });
+  });
+
+  it('send: replies per open question; a reply to a closed question is dropped and named in staleReplies', async () => {
+    const res = await send({ files: [], comment: '', answers: { '502': { parts: [FULL], replies: { '32': 'TME paid', '30': 'stale' } } } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.staleReplies).toEqual(['502']);
+    expect(body.answersSent).toBe(true);
+    expect((store.rows[0].customs_answers as Record<string, Record<string, unknown>>)['502'].replies).toEqual({ '32': 'TME paid' });
+  });
+
+  it('send with a bad answer = 400, nothing written', async () => {
+    const res = await send({ files: [], comment: '', answers: { '501': { parts: [{ payment: 'barter' }] } } });
+    expect(res.status).toBe(400);
+    expect(store.patches).toEqual([]);
   });
 });
