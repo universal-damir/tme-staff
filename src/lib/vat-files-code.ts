@@ -178,6 +178,15 @@ export function codeEmailContent(code: string, companyName: string | null): { su
   return { subject: 'Your TME Services code', text, html };
 }
 
+/**
+ * Local testing only: next dev without a Brevo login prints the code instead
+ * of mailing it, and the page shows it in a yellow "Dev only" box. Never true
+ * on Netlify (NODE_ENV is production there).
+ */
+export function vatFilesDevCodeOnPage(): boolean {
+  return process.env.NODE_ENV === 'development' && !(process.env.BREVO_SMTP_USER && process.env.BREVO_SMTP_PASSWORD);
+}
+
 async function mailCode(to: string, code: string, companyName: string | null): Promise<boolean> {
   const { subject, text, html } = codeEmailContent(code, companyName);
   const user = process.env.BREVO_SMTP_USER;
@@ -298,7 +307,7 @@ const failed = (message = 'We could not send the code. Please try again.'): Code
 export async function sendVatFilesCode(
   supabase: Supabase,
   args: { requestId: string; email: string; ip: string | null; companyName: string | null }
-): Promise<CodeResult> {
+): Promise<CodeResult<{ devCode?: string }>> {
   const table = () => supabase.from(VAT_FILE_EMAIL_CODES_TABLE);
   const recent = async (): Promise<{ forLink: RecentCode[]; fromIp: RecentCode[] } | null> => {
     const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -363,7 +372,7 @@ export async function sendVatFilesCode(
   const old = new Date(Date.now() - CODE_ROWS_KEEP_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { error: cleanError } = await table().delete().eq('request_id', args.requestId).lt('created_at', old);
   if (cleanError) console.error('[vat-files/code] deleting old code rows failed:', cleanError.message);
-  return { ok: true };
+  return vatFilesDevCodeOnPage() ? { ok: true, devCode: code } : { ok: true };
 }
 
 // ------------------------------------------------------------------

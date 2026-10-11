@@ -13,6 +13,14 @@ import {
   readDefaults,
   sanitizeCustomsPart,
   sanitizePageLines,
+  nextReplyMeta,
+  questionAskedLine,
+  replyWhoLine,
+  filledByLine,
+  formatDubaiDate,
+  withSavedReplyMeta,
+  shownReplyMeta,
+  demoReplyMeta,
 } from './vat-customs';
 import { buildFinalizeEntries, buildStoragePath, parseFinalizeBody, scrubVatFilesRow } from './vat-files';
 import {
@@ -84,7 +92,13 @@ describe('answers validation (autosave + Send)', () => {
 
   it('replies are stored per open question of the line', () => {
     const r = applyCustomsAnswersUpdate({}, { '2': { parts: [], replies: { '77': 'Yes, samples', '78': ' We did ' } } }, LINES, NOW);
-    expect(r.ok && r.answers['2']).toEqual({ parts: [], replies: { '77': 'Yes, samples', '78': 'We did' }, updatedAt: NOW });
+    expect(r.ok && r.answers['2']).toEqual({
+      parts: [],
+      replies: { '77': 'Yes, samples', '78': 'We did' },
+      // Round 4 C: who / when per reply (no code = no address).
+      replyMeta: { '77': { sentAt: NOW, savedAt: NOW }, '78': { sentAt: NOW, savedAt: NOW } },
+      updatedAt: NOW,
+    });
     expect(r.ok && r.staleReplies).toEqual([]);
   });
 
@@ -372,5 +386,172 @@ describe('filters (U6)', () => {
     expect(filterCustomsLineIds('all', lines, answers)).toBeNull();
     expect([...(filterCustomsLineIds('open', lines, answers) ?? [])]).toEqual(['2', '3']);
     expect([...(filterCustomsLineIds('questions', lines, answers) ?? [])]).toEqual(['2']);
+  });
+});
+
+// ------------------------------------------------------------------
+// Round 4 C (11.10.2026): who asked, who replied
+// ------------------------------------------------------------------
+
+describe('round 4 C: who asked, who replied', () => {
+  const T0 = '2026-10-11T09:09:00.000Z'; // 13:09 Dubai
+  const T5 = '2026-10-11T09:14:00.000Z'; // 5 minutes later
+  const T60 = '2026-10-11T10:09:00.000Z'; // an hour later
+
+  it('nextReplyMeta: first save = sent; same person within 10 minutes = same version; later = changed', () => {
+    const first = nextReplyMeta(undefined, undefined, T0, 'b.klingler@star.de.com');
+    expect(first).toEqual({ sentAt: T0, sentBy: 'b.klingler@star.de.com', savedAt: T0 });
+    const typing = nextReplyMeta('Yes', first, T5, 'b.klingler@star.de.com');
+    expect(typing).toEqual({ sentAt: T0, sentBy: 'b.klingler@star.de.com', savedAt: T5 });
+    const later = nextReplyMeta('Yes, one', typing, T60, 'b.klingler@star.de.com');
+    expect(later).toEqual({ sentAt: T0, sentBy: 'b.klingler@star.de.com', changedAt: T60, changedBy: 'b.klingler@star.de.com', savedAt: T60 });
+    // Someone else right away = a change too.
+    expect(nextReplyMeta('Yes', first, T5, 'anna@x.com')).toMatchObject({ changedAt: T5, changedBy: 'anna@x.com' });
+    // A reply stored before round 4 C (no stamps) that is edited = a change.
+    expect(nextReplyMeta('Old', undefined, T0, null)).toEqual({ changedAt: T0, savedAt: T0 });
+  });
+
+  it('autosave: unchanged replies keep their stamps; a changed reply gets new ones; the address comes from the code', () => {
+    const stored = {
+      '2': {
+        parts: [],
+        replies: { '77': 'Yes', '78': 'We did' },
+        replyMeta: { '77': { sentAt: EARLIER, sentBy: 'a@x.com', savedAt: EARLIER }, '78': { sentAt: EARLIER, sentBy: 'a@x.com', savedAt: EARLIER } },
+        updatedAt: EARLIER,
+      },
+    };
+    const r = applyCustomsAnswersUpdate(stored, { '2': { parts: [], replies: { '77': 'Yes', '78': 'We did not' } } }, LINES, NOW, 'b@x.com');
+    expect(r.ok && r.answers['2'].replyMeta).toEqual({
+      '77': { sentAt: EARLIER, sentBy: 'a@x.com', savedAt: EARLIER },
+      '78': { sentAt: EARLIER, sentBy: 'a@x.com', changedAt: NOW, changedBy: 'b@x.com', savedAt: NOW },
+    });
+    // replyMeta from the browser is never trusted.
+    const forged = applyCustomsAnswersUpdate({}, { '2': { parts: [], replies: { '77': 'Hi' }, replyMeta: { '77': { sentBy: 'boss@x.com' } } } }, LINES, NOW, null);
+    expect(forged.ok && forged.answers['2'].replyMeta).toEqual({ '77': { sentAt: NOW, savedAt: NOW } });
+  });
+
+  it('page payload: questions keep the asker name, answers keep replyMeta (savedBy stays out), staff answer keeps filledBy', () => {
+    const p = scrubVatFilesRow({
+      id: 'row-1',
+      link_token: 'Abc123_-xyzXYZ0987654321',
+      environment: 'production',
+      portal_filing_id: 42,
+      company_code: '10039',
+      company_name: 'Sample FZCO',
+      period_key: '2606-2608',
+      period_label: null,
+      kind: 'customs',
+      requested_items: [],
+      customs_list_path: null,
+      deadline: null,
+      status: 'open',
+      files: [],
+      client_comment: null,
+      last_submitted_at: null,
+      created_at: NOW,
+      updated_at: NOW,
+      expires_at: null,
+      customs_lines: [
+        line(1, { answer: { parts: [FULL], updatedAt: EARLIER, filledBy: { name: 'Anshad Muhammed' } } }),
+        line(2, { questions: [{ ...Q77, askedBy: 'Anshad Muhammed' }, Q78] }),
+      ],
+      customs_answers: {
+        '2': { parts: [], replies: { '77': 'Yes' }, replyMeta: { '77': { sentAt: T0, sentBy: 'B@X.com', savedAt: T0 }, '99': { sentAt: T0 } }, savedBy: 'b@x.com', updatedAt: T0 },
+      },
+    });
+    expect(p.customsLines[1].questions).toEqual([{ ...Q77, askedBy: 'Anshad Muhammed' }, Q78]);
+    // '99' = a cleared reply: its last who / when stays (no text).
+    expect(p.customsAnswers['2']).toEqual({
+      parts: [],
+      replies: { '77': 'Yes' },
+      replyMeta: { '77': { sentAt: T0, sentBy: 'b@x.com', savedAt: T0 }, '99': { sentAt: T0 } },
+      updatedAt: T0,
+    });
+    expect(p.customsLines[0].answer?.filledBy).toEqual({ name: 'Anshad Muhammed' });
+    // The page shows TME's answer (no client answer on line 1): with who typed it.
+    const merged = initialPageAnswers(p.customsLines, p.customsAnswers);
+    expect(merged['1'].filledBy).toEqual({ name: 'Anshad Muhammed' });
+    expect(filledByLine(merged['1'])).toBe('Filled in by Anshad Muhammed, TME Services, on 10.10.2026');
+  });
+
+  it('a newer client answer wins: no "filled in by"', () => {
+    const l = line(1, { answer: { parts: [FULL], updatedAt: EARLIER, filledBy: { name: 'Anshad Muhammed' } } });
+    expect(mergeLineAnswer(l, { parts: [{ ...FULL, payment: 'foc' }], updatedAt: NOW }).filledBy).toBeUndefined();
+    expect(filledByLine({ filledBy: { name: null }, updatedAt: EARLIER })).toBe('Filled in by TME Services on 10.10.2026');
+    expect(filledByLine({})).toBe('');
+  });
+
+  it('wording: who asked (old rows without a name or a date)', () => {
+    expect(questionAskedLine({ askedAt: T0, askedBy: 'Anshad Muhammed' })).toBe('Anshad Muhammed, TME Services, asked on 11.10.2026');
+    expect(questionAskedLine({ askedAt: T0 })).toBe('TME Services asked on 11.10.2026');
+    expect(questionAskedLine({ askedAt: '' })).toBe('TME Services asks');
+    // Dubai date: 21:30 UTC is the next day in the UAE.
+    expect(formatDubaiDate('2026-10-10T21:30:00.000Z')).toBe('11.10.2026');
+  });
+
+  it('wording: who replied (Dubai time; no address = "Sent on")', () => {
+    expect(replyWhoLine({ sentAt: T0, sentBy: 'b.klingler@star.de.com', savedAt: T0 })).toBe('Sent by b.klingler@star.de.com on 11.10.2026 13:09');
+    expect(replyWhoLine({ sentAt: T0, sentBy: 'a@x.com', changedAt: T60, changedBy: 'b@x.com', savedAt: T60 })).toBe('Changed by b@x.com on 11.10.2026 14:09');
+    expect(replyWhoLine({ sentAt: T0, savedAt: T5 })).toBe('Sent on 11.10.2026 13:14');
+    expect(replyWhoLine(undefined)).toBe('');
+  });
+
+  it('page state after a save: replies + stamps of the saved lines, others untouched; demo stamps like the server', () => {
+    const current = { '1': { parts: [FULL] }, '2': { parts: [], replies: { '77': 'Yes' }, replyMeta: { '77': { sentAt: T0, savedAt: T0 } } } };
+    const meta = demoReplyMeta(current, { '2': { parts: [], replies: { '77': 'Yes ', '78': 'Paid by us' } } }, T5, 'anna@x.com');
+    expect(meta).toEqual({ '2': { '77': { sentAt: T0, savedAt: T0 }, '78': { sentAt: T5, sentBy: 'anna@x.com', savedAt: T5 } } });
+    const next = withSavedReplyMeta(current, { '2': { parts: [], replies: { '77': 'Yes ', '78': 'Paid by us' } } }, meta);
+    expect(next['1']).toBe(current['1']);
+    expect(next['2'].replies).toEqual({ '77': 'Yes', '78': 'Paid by us' });
+    expect(next['2'].replyMeta?.['78']?.sentBy).toBe('anna@x.com');
+  });
+
+  it('clear then retype: the cleared reply keeps its meta; same person within 10 minutes = the same version', () => {
+    const T3 = '2026-10-11T09:12:00.000Z';
+    const sent = applyCustomsAnswersUpdate({}, { '2': { parts: [], replies: { '77': 'Yes' } } }, LINES, T0, 'a@x.com');
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    // Cleared (the page sends an empty text, or leaves the key out): no text, meta kept, savedAt moved.
+    const cleared = applyCustomsAnswersUpdate(sent.answers, { '2': { parts: [], replies: { '77': '' } } }, LINES, T3, 'a@x.com');
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.changed).toEqual(['2']);
+    expect(cleared.answers['2'].replies).toBeUndefined();
+    expect(cleared.answers['2'].replyMeta).toEqual({ '77': { sentAt: T0, sentBy: 'a@x.com', savedAt: T3 } });
+    const left = applyCustomsAnswersUpdate(sent.answers, { '2': { parts: [] } }, LINES, T3, 'a@x.com');
+    expect(left.ok && left.answers['2'].replyMeta).toEqual({ '77': { sentAt: T0, sentBy: 'a@x.com', savedAt: T3 } });
+    // Retyped within the window: the same version ("Sent by"), like the portal's in-place update.
+    const retyped = applyCustomsAnswersUpdate(cleared.answers, { '2': { parts: [], replies: { '77': 'Yes, two' } } }, LINES, T5, 'a@x.com');
+    expect(retyped.ok && retyped.answers['2'].replyMeta).toEqual({ '77': { sentAt: T0, sentBy: 'a@x.com', savedAt: T5 } });
+    expect(replyWhoLine(retyped.ok ? retyped.answers['2'].replyMeta?.['77'] : undefined)).toMatch(/^Sent by a@x.com/);
+    // Retyped after the window: a change.
+    const late = applyCustomsAnswersUpdate(cleared.answers, { '2': { parts: [], replies: { '77': 'Yes, two' } } }, LINES, T60, 'a@x.com');
+    expect(late.ok && late.answers['2'].replyMeta).toEqual({ '77': { sentAt: T0, sentBy: 'a@x.com', changedAt: T60, changedBy: 'a@x.com', savedAt: T60 } });
+    // nextReplyMeta: a cleared reply (meta, no text) is not a new one.
+    expect(nextReplyMeta(undefined, { sentAt: T0, sentBy: 'a@x.com', savedAt: T3 }, T5, 'a@x.com')).toEqual({ sentAt: T0, sentBy: 'a@x.com', savedAt: T5 });
+    // A clear after the window is itself a change.
+    expect(nextReplyMeta('Yes', { sentAt: T0, sentBy: 'a@x.com', savedAt: T0 }, T60, 'a@x.com')).toMatchObject({ changedAt: T60 });
+  });
+
+  it('demo stamps a cleared reply like the server', () => {
+    const current = { '2': { parts: [], replies: { '77': 'Yes' }, replyMeta: { '77': { sentAt: T0, sentBy: 'a@x.com', savedAt: T0 } } } };
+    expect(demoReplyMeta(current, { '2': { parts: [], replies: { '77': ' ' } } }, T5, 'a@x.com')).toEqual({
+      '2': { '77': { sentAt: T0, sentBy: 'a@x.com', savedAt: T5 } },
+    });
+  });
+
+  it('the line under a reply is hidden while the typed text is not the saved one', () => {
+    const meta77 = { sentAt: T0, savedAt: T0 };
+    const meta78 = { sentAt: T0, savedAt: T0 };
+    const saved = {
+      '1': { parts: [], replies: { '70': 'Ok' }, replyMeta: { '70': meta77 } },
+      '2': { parts: [], replies: { '77': 'Yes', '78': 'No' }, replyMeta: { '77': meta77, '78': meta78 } },
+    };
+    const typed = { '1': { parts: [], replies: { '70': 'Ok ' } }, '2': { parts: [], replies: { '77': 'Yes, b', '78': 'No' } } };
+    const shown = shownReplyMeta(saved, typed);
+    expect(shown['1']).toBe(saved['1'].replyMeta);
+    expect(shown['2']).toEqual({ '78': meta78 });
+    expect(shownReplyMeta(saved, {})['2']).toBe(saved['2'].replyMeta);
+    expect(shownReplyMeta(undefined, typed)).toEqual({});
   });
 });

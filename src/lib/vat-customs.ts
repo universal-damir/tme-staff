@@ -20,12 +20,16 @@ import {
   VAT_CUSTOMS_PURPOSE_OPTIONS,
   isVatCustomsLineComplete,
   normaliseVatFilesEmail,
+  VAT_CUSTOMS_REPLY_SESSION_MINUTES,
+  vatCustomsReplyBy,
+  vatCustomsReplyVersionAt,
   type VatCustomsAnswerPart,
   type VatCustomsAnswers,
   type VatCustomsDefaults,
   type VatCustomsDocKind,
   type VatCustomsLineAnswer,
   type VatCustomsPageLine,
+  type VatCustomsReplyMeta,
   type VatFileEntry,
   type VatFilesPagePayload,
 } from '@/types/vat-files';
@@ -201,6 +205,104 @@ export function readStoredLineAnswer(raw: unknown): VatCustomsLineAnswer | null 
   // Round 4 B: kept on the server; the page payload drops it (scrubVatFilesRow).
   const savedBy = normaliseVatFilesEmail(r.savedBy);
   if (savedBy) out.savedBy = savedBy;
+  // Round 4 C: who / when per reply (also of a cleared reply: meta without text).
+  const replyMeta = readReplyMeta(r.replyMeta);
+  if (replyMeta) out.replyMeta = replyMeta;
+  // Round 4 C: TME typed this answer (the portal's line.answer only).
+  const filledBy = readFilledBy(r.filledBy);
+  if (filledBy) out.filledBy = filledBy;
+  return out;
+}
+
+/** A colleague's name as the portal wrote it: one line, at most 120 characters; null when empty. */
+export function cleanStaffName(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const name = cleanCustomsText(raw, 120).replace(/\s+/g, ' ').trim();
+  return name || null;
+}
+
+function readFilledBy(raw: unknown): VatCustomsLineAnswer['filledBy'] | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  return { name: cleanStaffName((raw as Record<string, unknown>).name) };
+}
+
+/** One reply's who / when, read leniently (bad stamps and addresses dropped). */
+function readOneReplyMeta(raw: unknown): VatCustomsReplyMeta | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const out: VatCustomsReplyMeta = {};
+  const sentAt = isoOrUndefined(r.sentAt);
+  if (sentAt) out.sentAt = sentAt;
+  const sentBy = normaliseVatFilesEmail(r.sentBy);
+  if (sentBy) out.sentBy = sentBy;
+  const changedAt = isoOrUndefined(r.changedAt);
+  if (changedAt) out.changedAt = changedAt;
+  const changedBy = normaliseVatFilesEmail(r.changedBy);
+  if (changedBy && changedAt) out.changedBy = changedBy;
+  const savedAt = isoOrUndefined(r.savedAt);
+  if (savedAt) out.savedAt = savedAt;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * The stored replyMeta (keys = positive integer question ids, at most
+ * MAX_REPLIES_PER_LINE). A meta without a reply text = the client cleared
+ * that reply: its last who / when is kept, so typing it again within the
+ * session window stays the same version, and the portal sees the clear.
+ */
+function readReplyMeta(raw: unknown): Record<string, VatCustomsReplyMeta> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, VatCustomsReplyMeta> = {};
+  let n = 0;
+  for (const [qid, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (n >= MAX_REPLIES_PER_LINE) break;
+    if (positiveInt(qid) === null || String(positiveInt(qid)) !== qid) continue;
+    const meta = readOneReplyMeta(value);
+    if (meta) {
+      out[qid] = meta;
+      n++;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Round 4 C: the who / when of a reply whose text just changed (server time
+ * `nowIso`, `by` = the confirmed address or null). An empty new text (the
+ * client cleared the reply) goes through the same rule: the caller keeps the
+ * result as the cleared reply's meta. No earlier reply and no earlier who /
+ * when = a new one ("Sent"). The same person again within
+ * VAT_CUSTOMS_REPLY_SESSION_MINUTES of the last save = the same version
+ * (autosave while typing, also clear-then-retype): only savedAt moves.
+ * Otherwise a change ("Changed by ..."). An earlier reply without any who /
+ * when (stored before round 4 C) counts as a change. The portal books the
+ * same way (decideCustomsReplyUpdate in customs-who.ts).
+ */
+export function nextReplyMeta(
+  previousText: string | undefined,
+  previous: VatCustomsReplyMeta | undefined,
+  nowIso: string,
+  by: string | null
+): VatCustomsReplyMeta {
+  const hadText = typeof previousText === 'string' && previousText.trim().length > 0;
+  // A cleared reply keeps its last who / when (no text): not a new one.
+  if (!hadText && !vatCustomsReplyVersionAt(previous)) {
+    return { sentAt: nowIso, ...(by ? { sentBy: by } : {}), savedAt: nowIso };
+  }
+  const prev = previous ?? {};
+  const lastAt = prev.savedAt || vatCustomsReplyVersionAt(prev);
+  const lastBy = vatCustomsReplyBy(prev);
+  const sameSession =
+    !!lastAt &&
+    (lastBy ?? null) === (by ?? null) &&
+    Date.parse(nowIso) - Date.parse(lastAt) < VAT_CUSTOMS_REPLY_SESSION_MINUTES * 60_000;
+  if (sameSession) return { ...prev, savedAt: nowIso };
+  const out: VatCustomsReplyMeta = {};
+  if (prev.sentAt) out.sentAt = prev.sentAt;
+  if (prev.sentBy) out.sentBy = prev.sentBy;
+  out.changedAt = nowIso;
+  if (by) out.changedBy = by;
+  out.savedAt = nowIso;
   return out;
 }
 
@@ -230,7 +332,13 @@ export function sanitizePageLines(raw: unknown): VatCustomsPageLine[] {
       const qtext = qid ? cleanCustomsText(qr.text, 2000) : '';
       if (!qid || !qtext || seenQ.has(qid)) continue;
       seenQ.add(qid);
-      questions.push({ id: qid, text: qtext, askedAt: typeof qr.askedAt === 'string' ? qr.askedAt : '' });
+      const askedBy = cleanStaffName(qr.askedBy);
+      questions.push({
+        id: qid,
+        text: qtext,
+        askedAt: typeof qr.askedAt === 'string' ? qr.askedAt : '',
+        ...(askedBy ? { askedBy } : {}),
+      });
     }
     lines.push({
       id,
@@ -297,7 +405,7 @@ export type CustomsAnswersUpdate =
       ok: true;
       /** The whole map to store. */
       answers: VatCustomsAnswers;
-      /** Line ids (keys) whose answer really changed; each got `updatedAt = nowIso`. */
+      /** Line ids (keys) whose answer really changed; each got `updatedAt = nowIso`. Their who / when per reply is in `answers[id].replyMeta`. */
       changed: string[];
       /**
        * Line ids where a reply was left out because its question is no longer
@@ -374,8 +482,10 @@ export function applyCustomsAnswersUpdate(
     }
     if (rawReplies.length > MAX_REPLIES_PER_LINE) return { ok: false, error: 'invalid_answer', lineId: key };
     const replies: Record<string, string> = {};
-    // Stored replies to questions that are no longer open stay untouched.
-    for (const [qid, text] of Object.entries(answers[key]?.replies ?? {})) {
+    const storedReplies = answers[key]?.replies ?? {};
+    const storedMeta = answers[key]?.replyMeta ?? {};
+    // Stored replies to questions that are no longer open stay untouched (with their who / when).
+    for (const [qid, text] of Object.entries(storedReplies)) {
       if (!open.has(qid)) replies[qid] = text;
     }
     let stale = false;
@@ -398,6 +508,23 @@ export function applyCustomsAnswersUpdate(
 
     const before = answers[key];
     if (answerKey(before) === answerKey(next)) continue;
+    // Round 4 C: who / when per reply. Unchanged text keeps its stamps; a
+    // changed one gets new ones (same version or a change, see nextReplyMeta).
+    // A reply of an open question that is no longer there was cleared: it
+    // keeps a meta without text (its last who / when), so a retype within the
+    // window is the same version and the portal sees the clear. Questions no
+    // longer open keep their stamps as they are.
+    const replyMeta: Record<string, VatCustomsReplyMeta> = {};
+    for (const qid of new Set([...Object.keys(replies), ...Object.keys(storedReplies), ...Object.keys(storedMeta)])) {
+      const text = open.has(qid) ? replies[qid] ?? '' : storedReplies[qid] ?? '';
+      const was = storedReplies[qid] ?? '';
+      if (was === text) {
+        if (storedMeta[qid]) replyMeta[qid] = storedMeta[qid];
+      } else {
+        replyMeta[qid] = nextReplyMeta(was, storedMeta[qid], nowIso, savedBy);
+      }
+    }
+    if (Object.keys(replyMeta).length > 0) next.replyMeta = replyMeta;
     next.updatedAt = nowIso;
     if (savedBy) next.savedBy = savedBy;
     answers[key] = next;
@@ -441,6 +568,8 @@ export function mergeLineAnswer(
     parts: (pick?.parts ?? []).map((p) => ({ ...p })),
   };
   if (pick?.updatedAt) merged.updatedAt = pick.updatedAt;
+  // Round 4 C: TME's answer is the one shown: say who typed it (dropped on the client's first change).
+  if (pick && pick === portal && portal.filledBy && (portal.parts?.length ?? 0) > 0) merged.filledBy = { ...portal.filledBy };
   const replies = openReplies(line, client?.replies);
   if (replies) merged.replies = replies;
   return merged;
@@ -641,4 +770,153 @@ export function formatDubaiDateTime(iso: string | null | undefined): string {
   }).formatToParts(new Date(t));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return `${get('day')}.${get('month')}.${get('year')} ${get('hour')}:${get('minute')}`;
+}
+
+/** An ISO timestamp -> 'dd.mm.yyyy' in Dubai time ('' when unknown). */
+export function formatDubaiDate(iso: string | null | undefined): string {
+  const t = Date.parse(iso ?? '');
+  if (Number.isNaN(t)) return '';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Dubai',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).formatToParts(new Date(t));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('day')}.${get('month')}.${get('year')}`;
+}
+
+// ------------------------------------------------------------------
+// Round 4 C: who asked, who replied (page wording)
+// ------------------------------------------------------------------
+
+/**
+ * The head of a TME question: "Anshad Muhammed, TME Services, asked on
+ * 11.10.2026"; no name: "TME Services asked on 11.10.2026"; no date either:
+ * "TME Services asks".
+ */
+export function questionAskedLine(q: { askedAt?: string | null; askedBy?: string | null }): string {
+  const date = formatDubaiDate(q.askedAt);
+  const name = cleanStaffName(q.askedBy);
+  if (!date) return name ? `${name}, TME Services, asks` : 'TME Services asks';
+  return name ? `${name}, TME Services, asked on ${date}` : `TME Services asked on ${date}`;
+}
+
+/**
+ * The line under a reply: "Sent by b.klingler@star.de.com on 11.10.2026 13:09",
+ * after a later change "Changed by ... on ...", without an address "Sent on
+ * ...". Time = the last save of the current text (Dubai). '' when unknown.
+ */
+export function replyWhoLine(meta: VatCustomsReplyMeta | null | undefined): string {
+  if (!meta) return '';
+  const at = formatDubaiDateTime(meta.savedAt || meta.changedAt || meta.sentAt);
+  if (!at) return '';
+  const changed = !!meta.changedAt;
+  const by = vatCustomsReplyBy(meta);
+  return `${changed ? 'Changed' : 'Sent'}${by ? ` by ${by}` : ''} on ${at}`;
+}
+
+/** "Filled in by Anshad Muhammed, TME Services, on 11.10.2026" for an answer TME typed; '' when not TME's. */
+export function filledByLine(answer: Pick<VatCustomsLineAnswer, 'filledBy' | 'updatedAt'> | null | undefined): string {
+  if (!answer?.filledBy) return '';
+  const name = cleanStaffName(answer.filledBy.name);
+  const date = formatDubaiDate(answer.updatedAt);
+  const who = name ? `${name}, TME Services,` : 'TME Services';
+  return `Filled in by ${who}${date ? ` on ${date}` : ''}`;
+}
+
+/**
+ * Round 4 C, the page after a good autosave: the payload's copy of the saved
+ * answers gets the replies just saved and their who / when (`meta` per line,
+ * from the server). Lines not in `saved` stay as they are. Pure.
+ */
+export function withSavedReplyMeta(
+  current: VatCustomsAnswers,
+  saved: VatCustomsAnswers,
+  meta: Record<string, Record<string, VatCustomsReplyMeta> | undefined>
+): VatCustomsAnswers {
+  const out: VatCustomsAnswers = { ...current };
+  for (const [id, body] of Object.entries(saved)) {
+    if (!(id in meta)) continue;
+    const prev = out[id] ?? { parts: body.parts ?? [] };
+    const next: VatCustomsLineAnswer = { ...prev, parts: body.parts ?? prev.parts ?? [] };
+    const replies: Record<string, string> = {};
+    for (const [qid, raw] of Object.entries(body.replies ?? {})) {
+      const text = cleanCustomsText(raw);
+      if (text) replies[qid] = text;
+    }
+    if (Object.keys(replies).length > 0) next.replies = replies;
+    else delete next.replies;
+    const m = meta[id];
+    if (m && Object.keys(m).length > 0) next.replyMeta = m;
+    else delete next.replyMeta;
+    out[id] = next;
+  }
+  return out;
+}
+
+/** The demo pages (no server): the who / when the server would write for these saved lines. */
+export function demoReplyMeta(
+  current: VatCustomsAnswers,
+  saved: VatCustomsAnswers,
+  nowIso: string,
+  by: string | null
+): Record<string, Record<string, VatCustomsReplyMeta>> {
+  const out: Record<string, Record<string, VatCustomsReplyMeta>> = {};
+  for (const [id, body] of Object.entries(saved)) {
+    const prev = current[id];
+    const meta: Record<string, VatCustomsReplyMeta> = {};
+    const typed: Record<string, string> = {};
+    for (const [qid, raw] of Object.entries(body.replies ?? {})) {
+      const text = cleanCustomsText(raw);
+      if (text) typed[qid] = text;
+    }
+    // Like the server: a cleared reply keeps a meta without text.
+    const ids = new Set([...Object.keys(typed), ...Object.keys(prev?.replies ?? {}), ...Object.keys(prev?.replyMeta ?? {})]);
+    for (const qid of ids) {
+      const text = typed[qid] ?? '';
+      const was = prev?.replies?.[qid] ?? '';
+      const before = prev?.replyMeta?.[qid];
+      if (was === text) {
+        if (before) meta[qid] = before;
+      } else {
+        meta[qid] = nextReplyMeta(was, before, nowIso, by);
+      }
+    }
+    out[id] = meta;
+  }
+  return out;
+}
+
+/**
+ * Round 4 C, the line under each reply: the saved who / when per line, but
+ * only for replies whose typed text is the saved one. While the client edits
+ * a reply (typed text differs from the saved text) its "Sent ... on" line is
+ * left out until the autosave stores it. Lines with nothing left out keep the
+ * saved object (stable for memoised rows). Pure.
+ */
+export function shownReplyMeta(
+  saved: VatCustomsAnswers | null | undefined,
+  typed: VatCustomsAnswers | null | undefined
+): Record<string, Record<string, VatCustomsReplyMeta> | undefined> {
+  const out: Record<string, Record<string, VatCustomsReplyMeta> | undefined> = {};
+  for (const [id, a] of Object.entries(saved ?? {})) {
+    const meta = a?.replyMeta;
+    if (!meta) continue;
+    const typedReplies = typed?.[id]?.replies;
+    // Not touched on this page (no typed copy of the line): as saved.
+    if (!typed?.[id]) {
+      out[id] = meta;
+      continue;
+    }
+    let kept: Record<string, VatCustomsReplyMeta> | null = null;
+    for (const qid of Object.keys(meta)) {
+      const now = cleanCustomsText(typedReplies?.[qid]);
+      const was = a.replies?.[qid] ?? '';
+      if (now !== was) kept ??= { ...meta };
+      if (now !== was && kept) delete kept[qid];
+    }
+    out[id] = kept ?? meta;
+  }
+  return out;
 }

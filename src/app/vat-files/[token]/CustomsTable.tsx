@@ -49,7 +49,10 @@ import {
   formatDubaiDateTime,
   formatDubaiTime,
   formatPageDate,
+  filledByLine,
   isFillableLine,
+  questionAskedLine,
+  replyWhoLine,
   type CustomsLineFilter,
 } from '@/lib/vat-customs';
 import {
@@ -68,6 +71,7 @@ import {
   type VatCustomsDocKind,
   type VatCustomsLineAnswer,
   type VatCustomsPageLine,
+  type VatCustomsReplyMeta,
 } from '@/types/vat-files';
 
 // ------------------------------------------------------------------
@@ -95,6 +99,8 @@ export type SaveState =
 type OnLineChange = (lineId: string, next: VatCustomsLineAnswer) => void;
 type OnAddFile = (lineId: number, kind: VatCustomsDocKind) => void;
 type LineQuestion = NonNullable<VatCustomsPageLine['questions']>[number];
+/** Round 4 C: who / when per reply of one line, keyed by question id. */
+type LineReplyMeta = Record<string, VatCustomsReplyMeta> | undefined;
 
 const NO_FILES: LineFileCounts = { boe: 0, invoice: 0, other: 0 };
 const NO_QUESTIONS: LineQuestion[] = [];
@@ -105,12 +111,33 @@ function questionsOrReplies(line: VatCustomsPageLine, answer: VatCustomsLineAnsw
   return questions.length > 0 || (readOnly && earlierReplies(questions, answer?.replies).length > 0);
 }
 
-/** Read-only: replies whose question is no longer open (TME closed it); shown without the question. */
-function earlierReplies(questions: LineQuestion[], replies: Record<string, string> | undefined): string[] {
+/** Read-only: replies whose question is no longer open (TME closed it); shown without the question. [question id, text]. */
+function earlierReplies(questions: LineQuestion[], replies: Record<string, string> | undefined): Array<[string, string]> {
   const open = new Set(questions.map((q) => String(q.id)));
   return Object.entries(replies ?? {})
     .filter(([id, text]) => !open.has(id) && typeof text === 'string' && text.trim() !== '')
-    .map(([, text]) => text.trim());
+    .map(([id, text]) => [id, text.trim()]);
+}
+
+/** Round 4 C: "Sent by x on dd.mm.yyyy hh:mm" under a reply (nothing when unknown). */
+function ReplyWho({ meta, className = '' }: { meta: VatCustomsReplyMeta | undefined; className?: string }) {
+  const text = replyWhoLine(meta);
+  if (!text) return null;
+  return <span className={`block text-[11px] leading-snug text-gray-500 break-words ${className}`}>{text}</span>;
+}
+
+/** Round 4 C: "Filled in by Anshad Muhammed, TME Services, on 08.10.2026" when the shown answer is TME's. */
+function FilledByNote({ answer, readOnly }: { answer: VatCustomsLineAnswer | undefined; readOnly: boolean }) {
+  const text = filledByLine(answer);
+  if (!text) return null;
+  return (
+    <p className="flex items-center gap-1.5 text-[11px] leading-snug text-gray-500">
+      <Pencil className="w-3 h-3 shrink-0 text-gray-400" aria-hidden />
+      <span className="break-words">
+        {text}.{readOnly ? '' : ' You can change it.'}
+      </span>
+    </p>
+  );
 }
 
 /** The help line for the delivery place (U1: the RME "Oman / Italy / Kuwait" confusion). */
@@ -852,12 +879,19 @@ function useOpenStrips() {
 // Line state helpers (pure, used by rows and cards)
 // ------------------------------------------------------------------
 
+/** Round 4 C: the client changed the answer: it is no longer the one TME filled in. */
+function withoutFilledBy(answer: VatCustomsLineAnswer | undefined): Omit<VatCustomsLineAnswer, 'parts'> {
+  const { filledBy: _f, ...rest } = answer ?? {};
+  void _f;
+  return rest;
+}
+
 function useLineActions(lineId: string, answer: VatCustomsLineAnswer | undefined, onChange: OnLineChange) {
   const parts = partsOf(answer);
   const setPart = useCallback(
     (index: number, patch: Partial<VatCustomsAnswerPart>) => {
       const next = partsOf(answer).map((p, i) => (i === index ? { ...p, ...patch } : p));
-      onChange(lineId, { ...(answer ?? {}), parts: next });
+      onChange(lineId, { ...withoutFilledBy(answer), parts: next });
     },
     [answer, lineId, onChange]
   );
@@ -865,12 +899,12 @@ function useLineActions(lineId: string, answer: VatCustomsLineAnswer | undefined
     const current = partsOf(answer);
     if (current.length >= VAT_CUSTOMS_MAX_PARTS) return;
     const next = current.length === 1 ? [{ ...current[0], invoiceRef: current[0].invoiceRef ?? '' }, {}] : [...current, {}];
-    onChange(lineId, { ...(answer ?? {}), parts: next });
+    onChange(lineId, { ...withoutFilledBy(answer), parts: next });
   }, [answer, lineId, onChange]);
   const removePart = useCallback(
     (index: number) => {
       const next = partsOf(answer).filter((_, i) => i !== index);
-      onChange(lineId, { ...(answer ?? {}), parts: next.length > 0 ? next : [{}] });
+      onChange(lineId, { ...withoutFilledBy(answer), parts: next.length > 0 ? next : [{}] });
     },
     [answer, lineId, onChange]
   );
@@ -1076,11 +1110,27 @@ function DocPills({
   );
 }
 
+/**
+ * Round 4 C: "Anshad Muhammed, TME Services, asked on 11.10.2026 (1 of 2):"
+ * (no name: "TME Services asked on ..."; nothing known: "TME Services asks:").
+ */
+function QuestionHead({ q, index, count }: { q: LineQuestion; index: number; count: number }) {
+  return (
+    <>
+      <span className="block text-[12px] font-semibold mb-0.5" style={{ color: PRIMARY }}>
+        {questionAskedLine(q)}
+        {count > 1 ? ` (${index + 1} of ${count})` : ''}:
+      </span>
+    </>
+  );
+}
+
 /** Every open TME question of a line, each with its own reply box. */
 function QuestionBoxes({
   line,
   questions,
   replies,
+  replyMeta,
   onReply,
   disabled,
   idPrefix,
@@ -1090,6 +1140,8 @@ function QuestionBoxes({
   line: Pick<VatCustomsPageLine, 'lineNo' | 'declarationNo'>;
   questions: LineQuestion[];
   replies: Record<string, string> | undefined;
+  /** Round 4 C: who sent each reply and when. */
+  replyMeta: LineReplyMeta;
   onReply: (questionId: number, text: string) => void;
   disabled: boolean;
   idPrefix: string;
@@ -1102,12 +1154,15 @@ function QuestionBoxes({
   if (readOnly) {
     const earlier = earlierReplies(questions, replies);
     const box = `rounded-lg border p-2.5 ${sideBySide ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-start' : ''}`;
-    const replyText = (text: string) =>
+    const replyText = (text: string, meta: VatCustomsReplyMeta | undefined) =>
       text ? (
-        <p className={`text-[13px] leading-snug break-words whitespace-pre-line text-gray-900 rounded-lg bg-white border border-gray-100 px-2.5 py-1.5 ${sideBySide ? '' : 'mt-2'}`}>
-          <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply</span>
-          {text}
-        </p>
+        <div className={`rounded-lg bg-white border border-gray-100 px-2.5 py-1.5 ${sideBySide ? '' : 'mt-2'}`}>
+          <p className="text-[13px] leading-snug break-words whitespace-pre-line text-gray-900">
+            <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply</span>
+            {text}
+          </p>
+          <ReplyWho meta={meta} className="mt-1" />
+        </div>
       ) : (
         <p className={`text-[13px] text-gray-400 ${sideBySide ? 'py-1.5' : 'mt-2'}`}>No reply sent.</p>
       );
@@ -1118,19 +1173,18 @@ function QuestionBoxes({
             <div className="flex items-start gap-2 min-w-0">
               <MessageCircleQuestion className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" aria-hidden />
               <p className="text-[13px] leading-snug break-words min-w-0 whitespace-pre-line text-gray-800">
-                <span className="font-semibold" style={{ color: PRIMARY }}>
-                  TME asked{questions.length > 1 ? ` (${i + 1} of ${questions.length})` : ''}:
-                </span>{' '}
+                <QuestionHead q={q} index={i} count={questions.length} />
                 {q.text}
               </p>
             </div>
-            {replyText((replies?.[String(q.id)] ?? '').trim())}
+            {replyText((replies?.[String(q.id)] ?? '').trim(), replyMeta?.[String(q.id)])}
           </div>
         ))}
-        {earlier.map((text, i) => (
-          <div key={`e${i}`} className="rounded-lg border border-gray-200 bg-gray-50/80 px-2.5 py-2 text-[13px] leading-snug break-words whitespace-pre-line">
+        {earlier.map(([qid, text]) => (
+          <div key={`e${qid}`} className="rounded-lg border border-gray-200 bg-gray-50/80 px-2.5 py-2 text-[13px] leading-snug break-words whitespace-pre-line">
             <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply to an earlier TME question</span>
             <span className="text-gray-900">{text}</span>
+            <ReplyWho meta={replyMeta?.[qid]} className="mt-1" />
           </div>
         ))}
       </div>
@@ -1150,9 +1204,7 @@ function QuestionBoxes({
             <div className="flex items-start gap-2 min-w-0">
               <MessageCircleQuestion className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" aria-hidden />
               <p id={textId} className="text-[13px] leading-snug break-words min-w-0 whitespace-pre-line text-gray-800">
-                <span className="font-semibold" style={{ color: PRIMARY }}>
-                  TME asks{questions.length > 1 ? ` (${i + 1} of ${questions.length})` : ''}:
-                </span>{' '}
+                <QuestionHead q={q} index={i} count={questions.length} />
                 {q.text}
               </p>
             </div>
@@ -1172,6 +1224,9 @@ function QuestionBoxes({
                 sideBySide ? '' : 'mt-2'
               }`}
             />
+            {(replies?.[String(q.id)] ?? '').trim() && replyMeta?.[String(q.id)] ? (
+              <ReplyWho meta={replyMeta[String(q.id)]} className={sideBySide ? 'col-start-2 -mt-2' : 'mt-1'} />
+            ) : null}
           </div>
         );
       })}
@@ -1242,6 +1297,8 @@ const LINE = 'flex items-center h-9';
 interface LineProps {
   line: VatCustomsPageLine;
   answer: VatCustomsLineAnswer | undefined;
+  /** Round 4 C: who sent each reply and when (from the server). */
+  replyMeta: LineReplyMeta;
   boe: 0 | 1 | 2;
   invoice: 0 | 1 | 2;
   other: number;
@@ -1264,6 +1321,7 @@ const LineRows = memo(function LineRows({
   boeNames,
   invoiceNames,
   otherNames,
+  replyMeta,
   onChange,
   onAddFile,
   disabled,
@@ -1455,6 +1513,14 @@ const LineRows = memo(function LineRows({
             {strip(part, i, SUB_BG)}
           </React.Fragment>
         ))}
+      {filledByLine(answer) && (
+        <tr>
+          <td className={`${TD} ${EDGE} pt-0 pb-2`} colSpan={4} />
+          <td className={`${ATD} pt-0 pb-2 pr-3`} colSpan={COLS - 4}>
+            <FilledByNote answer={answer} readOnly={readOnly} />
+          </td>
+        </tr>
+      )}
       {showQuestions && (
         <tr>
           <td className={`${TD} ${EDGE} pt-0 pb-3 pl-4 pr-3`} colSpan={COLS}>
@@ -1462,6 +1528,7 @@ const LineRows = memo(function LineRows({
               line={line}
               questions={questions}
               replies={answer?.replies}
+              replyMeta={replyMeta}
               onReply={setReply}
               disabled={disabled}
               idPrefix={idPrefix}
@@ -1488,6 +1555,7 @@ const LineCard = memo(function LineCard({
   boeNames,
   invoiceNames,
   otherNames,
+  replyMeta,
   onChange,
   onAddFile,
   disabled,
@@ -1607,6 +1675,7 @@ const LineCard = memo(function LineCard({
             line={line}
             questions={questions}
             replies={answer?.replies}
+            replyMeta={replyMeta}
             onReply={setReply}
             disabled={disabled}
             idPrefix={idPrefix}
@@ -1672,6 +1741,7 @@ const LineCard = memo(function LineCard({
             Add invoice
           </button>
         )}
+        <FilledByNote answer={answer} readOnly={readOnly} />
       </div>
 
       <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
@@ -1748,6 +1818,8 @@ export interface CustomsTableProps {
   onRetrySave: () => void;
   /** A closed request: what was sent, read-only (no inputs, no fill buttons, no save state). */
   readOnly?: boolean;
+  /** Round 4 C: who sent each reply and when, per line id then question id. */
+  replyMeta?: Record<string, LineReplyMeta>;
 }
 
 export default function CustomsTable(props: CustomsTableProps) {
@@ -1768,6 +1840,7 @@ export default function CustomsTable(props: CustomsTableProps) {
     onAddFile,
     onRetrySave,
     readOnly = false,
+    replyMeta,
   } = props;
   const wide = useIsWide();
   const [confirm, setConfirm] = useState<Confirm>(null);
@@ -1834,6 +1907,7 @@ export default function CustomsTable(props: CustomsTableProps) {
     return {
       line,
       answer: answers[String(line.id)],
+      replyMeta: replyMeta?.[String(line.id)],
       boe: f.boe,
       invoice: f.invoice,
       other: f.other,

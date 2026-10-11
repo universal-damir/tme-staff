@@ -38,11 +38,12 @@ import {
   type VatCustomsDocKind,
   type VatCustomsLineAnswer,
   type VatCustomsPageLine,
+  type VatCustomsReplyMeta,
   type VatFilesCodeAddress,
   type VatFilesPagePayload,
 } from '@/types/vat-files';
-import { formatDubaiDateTime, initialPageAnswers, reconcileAfterReload } from '@/lib/vat-customs';
-import { DEMO_CODE_ADDRESSES, demoPayload, isDemoCodeToken, isDemoToken } from './demo';
+import { demoReplyMeta, formatDubaiDateTime, initialPageAnswers, reconcileAfterReload, shownReplyMeta, withSavedReplyMeta } from '@/lib/vat-customs';
+import { DEMO_CODE_ADDRESSES, DEMO_REPLY_BY, demoPayload, isDemoCodeToken, isDemoToken } from './demo';
 import CodeGate from './CodeGate';
 import CustomsTable, { SaveStatus, type LineFileCounts, type SaveState } from './CustomsTable';
 
@@ -471,13 +472,28 @@ export default function VatFilesPage() {
     const run = (async (): Promise<boolean> => {
       if (demo) {
         await sleep(400);
-        setSave({ status: 'saved', at: new Date().toISOString() });
+        const now = new Date().toISOString();
+        // Round 4 C: the line under each reply, as the server would write it.
+        setData((d) =>
+          d
+            ? {
+                ...d,
+                customsAnswers: withSavedReplyMeta(
+                  d.customsAnswers ?? {},
+                  body,
+                  demoReplyMeta(d.customsAnswers ?? {}, body, now, d.viewerEmail ?? DEMO_REPLY_BY)
+                ),
+              }
+            : d
+        );
+        setSave({ status: 'saved', at: now });
         return true;
       }
       const outcome = await requestJson<{
         savedAt: string | null;
         updated: Record<string, string>;
         staleReplies?: string[];
+        replyMeta?: Record<string, Record<string, VatCustomsReplyMeta>>;
       }>(
         `/api/vat-files/${token}/answers`,
         {
@@ -489,6 +505,11 @@ export default function VatFilesPage() {
       );
       if (outcome.ok) {
         setSave({ status: 'saved', at: outcome.data.savedAt ?? new Date().toISOString() });
+        // Round 4 C: "Sent by ... on ..." under each reply of the saved lines.
+        const meta = outcome.data.replyMeta;
+        if (meta && Object.keys(meta).length > 0) {
+          setData((d) => (d ? { ...d, customsAnswers: withSavedReplyMeta(d.customsAnswers ?? {}, body, meta) } : d));
+        }
         // A reply went to a question TME has closed meanwhile: it was not
         // stored; show the current questions.
         if ((outcome.data.staleReplies?.length ?? 0) > 0) await reloadLines('questions');
@@ -702,6 +723,11 @@ export default function VatFilesPage() {
     },
     [demo, token]
   );
+
+  // Round 4 C: who sent each reply and when, per line (from the server's copy
+  // of the answers); hidden for a reply while its typed text is not saved yet.
+  const savedAnswers = data?.customsAnswers;
+  const replyMetaByLine = useMemo(() => shownReplyMeta(savedAnswers, answers), [savedAnswers, answers]);
 
   // Per-line ticks: TME already has it, sent through this link, or uploaded and waiting for Send.
   const lineFiles = data?.lineFiles;
@@ -1207,6 +1233,7 @@ export default function VatFilesPage() {
             onAddFile={onAddLineFile}
             onRetrySave={retrySave}
             readOnly={readOnly}
+            replyMeta={replyMetaByLine}
           />
         )}
         {!readOnly && (

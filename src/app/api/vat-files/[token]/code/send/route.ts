@@ -59,5 +59,9 @@ export async function POST(
     return NextResponse.json({ error: result.error, errorMessage: result.message }, { status: result.status });
   }
   const masked = maskedAddresses(row.id, allowed).find((a) => a.id === choice)?.masked ?? '';
-  return NextResponse.json({ ok: true, masked }, { headers: { 'Cache-Control': 'no-store' } });
+  // devCode only exists in next dev without a Brevo login (vatFilesDevCodeOnPage).
+  return NextResponse.json(
+    result.devCode ? { ok: true, masked, devCode: result.devCode } : { ok: true, masked },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 }

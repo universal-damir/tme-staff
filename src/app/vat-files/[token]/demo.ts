@@ -14,6 +14,9 @@
 //   /vat-files/demo-customs-table-long  150 imports, to check the page stays fast
 //   /vat-files/demo-code       round 4 B: "Who are you?" + email code first (code 123456),
 //                              then the customs table page ("Not you?" goes back)
+// Round 4 C: the questions name who asked (one old question without a name),
+// the replies say who sent them and when (one changed later), line 1 says
+// which TME colleague filled it in.
 // Uploads, autosave and Send stay in the browser: no API call, nothing is saved.
 // Only in `next dev`; a production build treats these like any unknown link.
 
@@ -93,6 +96,7 @@ PENNYPRESS_LINES[0].hasInvoice = true;
 PENNYPRESS_LINES[0].answer = {
   parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' }],
   updatedAt: '2026-10-08T07:30:00.000Z',
+  filledBy: { name: 'Anshad Muhammed' },
 };
 // Line 5: two open TME questions (each with its own reply box).
 PENNYPRESS_LINES[4].hasBoe = true;
@@ -101,8 +105,10 @@ PENNYPRESS_LINES[4].questions = [
     id: 901,
     text: 'The invoice shows two suppliers. Is this one shipment, or should we split it by invoice?',
     askedAt: '2026-10-10T08:15:00.000Z',
+    askedBy: 'Anshad Muhammed',
   },
   {
+    // Asked before round 4 C: no name, the page says "TME Services".
     id: 902,
     text: 'The invoice says "FCA Loughborough". Please check the delivery place.',
     askedAt: '2026-10-10T08:16:00.000Z',
@@ -135,6 +141,7 @@ CLOSED_LINES[2].questions = [
     id: 911,
     text: 'The invoice shows EXW Milan. Who paid the freight to Dubai?',
     askedAt: '2026-10-10T12:30:00.000Z',
+    askedBy: 'Anshad Muhammed',
   },
 ];
 const CLOSED_SENT_AT = '2026-10-10T11:42:00.000Z';
@@ -235,6 +242,16 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
       '6303': {
         parts: [{ purpose: 'fixed_asset', payment: 'will_be_paid', incoterm: 'EXW', delivery: 'outside_uae', deliveryPlace: 'Milan, Italy' }],
         replies: { '911': 'We paid DHL directly. The DHL invoice is in the files.' },
+        // Changed once: first sent 10.10 13:20, changed 10.10 18:05 (Dubai).
+        replyMeta: {
+          '911': {
+            sentAt: '2026-10-10T09:20:00.000Z',
+            sentBy: 'b.klingler@star-demo.com',
+            changedAt: CLOSED_REPLY_AT,
+            changedBy: 'b.klingler@star-demo.com',
+            savedAt: CLOSED_REPLY_AT,
+          },
+        },
         updatedAt: CLOSED_REPLY_AT,
       },
       '6304': {
@@ -296,7 +313,12 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
         updatedAt: '2026-10-10T09:05:00.000Z',
       },
       // Line 5: one of the two questions already has a reply.
-      '5105': { parts: [], replies: { '901': 'One shipment, two invoices.' }, updatedAt: '2026-10-10T09:10:00.000Z' },
+      '5105': {
+        parts: [],
+        replies: { '901': 'One shipment, two invoices.' },
+        replyMeta: { '901': { sentAt: '2026-10-10T09:09:00.000Z', sentBy: 'anna.k@pennypress-demo.com', savedAt: '2026-10-10T09:10:00.000Z' } },
+        updatedAt: '2026-10-10T09:10:00.000Z',
+      },
     },
     customsDefaults: { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' },
     customsAnswersSentAt: null,
@@ -385,3 +407,6 @@ export const DEMO_CODE_ADDRESSES: VatFilesCodeAddress[] = [
   { id: 'demo000000000002', masked: 'al***@pennypress-demo.com' },
   { id: 'demo000000000003', masked: 'f***@pennypress-demo.com' },
 ];
+
+/** Round 4 C: who the demo pages say sent a reply (no code on most demos). */
+export const DEMO_REPLY_BY = 'anna.k@pennypress-demo.com';

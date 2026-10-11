@@ -56,6 +56,8 @@ export default function CodeGate({
   onConfirmed: () => void;
 }) {
   const [step, setStep] = useState<'pick' | 'code'>('pick');
+  // Local testing only: the code next dev printed instead of mailing it.
+  const [devCode, setDevCode] = useState<string | null>(null);
   const [choice, setChoice] = useState<string | null>(addresses.length === 1 ? addresses[0].id : null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -83,7 +85,7 @@ export default function CodeGate({
     if (demo) {
       await sleep(500);
     } else {
-      const outcome = await requestJson<{ ok: true; masked: string }>(`/api/vat-files/${token}/code/send`, {
+      const outcome = await requestJson<{ ok: true; masked: string; devCode?: string }>(`/api/vat-files/${token}/code/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ choice: picked.id }),
@@ -94,6 +96,7 @@ export default function CodeGate({
         setBusy(false);
         return;
       }
+      setDevCode(outcome.data.devCode ?? null);
     }
     setBusy(false);
     setCode('');
@@ -164,6 +167,15 @@ export default function CodeGate({
             </p>
           </div>
         </div>
+
+        {step === 'code' && devCode && (
+          <div
+            className="mt-4 text-[13px] rounded-lg px-3 py-2.5 border"
+            style={{ backgroundColor: '#FEF9C3', borderColor: '#FDE047', color: '#713F12' }}
+          >
+            Dev only, no email sent: the code is <span className="font-semibold tabular-nums tracking-widest">{devCode}</span>
+          </div>
+        )}
 
         {error && (
           <div

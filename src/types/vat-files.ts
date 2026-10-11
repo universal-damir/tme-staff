@@ -301,6 +301,18 @@ export interface VatCustomsLineAnswer {
   updatedAt?: string;
   /** Round 4: the confirmed email of the person who made that change; absent = unknown. Never shown on the page. */
   savedBy?: string;
+  /**
+   * Round 4 C: who sent each reply and when, keyed by question id like
+   * `replies`. Written ONLY by the page's server (never trusted from the
+   * browser); the page shows it under the reply. Absent = unknown (older rows).
+   * A key without a text in `replies` = a reply the client cleared.
+   */
+  replyMeta?: Record<string, VatCustomsReplyMeta>;
+  /**
+   * Round 4 C, portal-written on VatCustomsPageLine.answer only: TME typed this
+   * answer. `name` = the colleague's full name (first + last); null = unknown.
+   */
+  filledBy?: { name: string | null };
 }
 
 /** vat_file_requests.customs_answers: { "<portal line id>": VatCustomsLineAnswer } */
@@ -327,8 +339,12 @@ export interface VatCustomsPageLine {
   hasInvoice: boolean;
   /** Answers TME already holds for this line (staff typed them, or an earlier Send). Prefills the page. */
   answer?: VatCustomsLineAnswer | null;
-  /** TME's open (sent, not resolved) questions on this line, oldest first. Empty = none. */
-  questions?: Array<{ id: number; text: string; askedAt: string }>;
+  /**
+   * TME's open (sent, not resolved) questions on this line, oldest first. Empty = none.
+   * Round 4 C: `askedBy` = the colleague's full name (first + last, e.g.
+   * "Anshad Muhammed"); absent = unknown (the page then says "TME Services").
+   */
+  questions?: Array<{ id: number; text: string; askedAt: string; askedBy?: string }>;
 }
 
 /**
@@ -448,4 +464,47 @@ export function maskVatFilesEmail(email: string, reveal: number = 1): string {
 export interface VatFilesCodeAddress {
   id: string;
   masked: string;
+}
+
+// ============================================
+// Round 4 C (11.10.2026): who asked, who replied
+// ============================================
+//
+// The page names the TME colleague who asked a question
+// (VatCustomsPageLine.questions[].askedBy) and, under each reply, who sent it
+// and when (VatCustomsLineAnswer.replyMeta, written by the page's server).
+// A reply typed again within VAT_CUSTOMS_REPLY_SESSION_MINUTES of its last
+// save by the same person is the SAME version (autosave while typing);
+// later, or by someone else, it is a change ("Changed by ..."). The portal
+// keeps every version; the page shows only the latest. Missing fields = the
+// old text ("TME asks", no line under the reply).
+// A reply the client CLEARS keeps its replyMeta (no text in `replies`): the
+// clear follows the same 10-minute rule, so a retype by the same person
+// within the window stays the same version. The portal books a cleared reply
+// as "removed" (old text kept as a version). The portal keeps at most 50
+// earlier versions per reply (oldest dropped).
+
+/** One reply's who / when (all ISO timestamps from the page's server; emails lower case). */
+export interface VatCustomsReplyMeta {
+  /** The first save of this reply. */
+  sentAt?: string;
+  sentBy?: string;
+  /** The start of the latest change; absent = never changed. Marks the version (with sentAt). */
+  changedAt?: string;
+  changedBy?: string;
+  /** The last save of the current text. */
+  savedAt?: string;
+}
+
+/** Saves closer together than this (same person) are one version of a reply. */
+export const VAT_CUSTOMS_REPLY_SESSION_MINUTES = 10;
+
+/** The stamp that names the current version of a reply: changedAt, else sentAt; null = unknown. */
+export function vatCustomsReplyVersionAt(meta: VatCustomsReplyMeta | null | undefined): string | null {
+  return meta?.changedAt || meta?.sentAt || null;
+}
+
+/** Who wrote the current version of a reply (lower case); null = unknown. */
+export function vatCustomsReplyBy(meta: VatCustomsReplyMeta | null | undefined): string | null {
+  return (meta?.changedAt ? meta.changedBy : meta?.sentBy) || null;
 }

@@ -272,7 +272,11 @@ export function scrubVatFilesRow(row: VatFileRequestRow, now: number = Date.now(
   };
 }
 
-/** Round 4 B: who saved a line stays on the server (a colleague's address is not shown). */
+/**
+ * Round 4 B: who saved a line stays on the server. Round 4 C: the who / when
+ * per REPLY (replyMeta) does go to the page: Damir 11.10, the line under each
+ * reply names the confirmed address that sent it.
+ */
 function withoutSavedBy(answers: VatCustomsAnswers): VatCustomsAnswers {
   const out: VatCustomsAnswers = {};
   for (const [id, a] of Object.entries(answers)) {

@@ -5,7 +5,7 @@ import { vatFilesRateLimited } from '@/lib/vat-files';
 import { applyCustomsAnswersUpdate, sanitizePageLines } from '@/lib/vat-customs';
 import { verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
 import { vatFilesViewer } from '@/lib/vat-files-code';
-import { VAT_FILE_REQUESTS_TABLE, type VatFileRequestRow } from '@/types/vat-files';
+import { VAT_FILE_REQUESTS_TABLE, type VatCustomsReplyMeta, type VatFileRequestRow } from '@/types/vat-files';
 
 export const runtime = 'nodejs';
 
@@ -29,7 +29,8 @@ const MAX_WRITE_ATTEMPTS = 4;
 // `updatedAt` is set here per changed line. Writes ONLY customs_answers +
 // customs_answers_saved_at (+ updated_at, the write guard), never the
 // portal's columns.
-// Answer: { savedAt, updated: { "<line id>": updatedAt }, staleReplies: ["<line id>"] }.
+// Answer: { savedAt, updated: { "<line id>": updatedAt }, staleReplies: ["<line id>"],
+//          replyMeta: { "<line id>": { "<question id>": VatCustomsReplyMeta } } } (round 4 C).
 // Round 4 B: gated like every route of the page; a changed line keeps
 // `savedBy` = the confirmed address (replies to TME's questions included).
 export async function POST(
@@ -97,8 +98,13 @@ export async function POST(
     }
     if (written && written.length > 0) {
       const updated: Record<string, string> = {};
-      for (const id of update.changed) updated[id] = nowIso;
-      return NextResponse.json({ savedAt: nowIso, updated, staleReplies }, { headers: { 'Cache-Control': 'no-store' } });
+      // Round 4 C: who / when per reply of the changed lines (an empty map = no replies left), for the line under each reply.
+      const replyMeta: Record<string, Record<string, VatCustomsReplyMeta>> = {};
+      for (const id of update.changed) {
+        updated[id] = nowIso;
+        replyMeta[id] = update.answers[id]?.replyMeta ?? {};
+      }
+      return NextResponse.json({ savedAt: nowIso, updated, staleReplies, replyMeta }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     // Another write landed in between, or the portal closed the request: read again.
