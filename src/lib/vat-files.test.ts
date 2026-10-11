@@ -15,6 +15,7 @@ import {
   isValidVatFilesToken,
   parseFinalizeBody,
   scrubVatFilesRow,
+  vatFilesPeopleNames,
   vatFilesRateLimited,
 } from './vat-files';
 import type { VatFileEntry, VatFileRequestRow } from '@/types/vat-files';
@@ -251,5 +252,29 @@ describe('rate limit', () => {
     expect(blocked).toBe(false);
     expect(vatFilesRateLimited('9.9.9.9', t)).toBe(true);
     expect(vatFilesRateLimited('9.9.9.9', t + 61_000)).toBe(false);
+  });
+});
+
+describe('vatFilesPeopleNames (round 4 D)', () => {
+  const names = {
+    'b.klingler@star.de.com': 'Bernd Klingler',
+    'anna@client.com': 'Anna Keller',
+    'never.shown@client.com': 'Secret Person',
+  };
+  const answers = {
+    '1': { parts: [], replyMeta: { '7': { sentAt: 'x', sentBy: 'Anna@Client.com', changedBy: 'nobody@client.com', changedAt: 'y' } } },
+  };
+
+  it('only the viewer and the people under replies, never the whole list', () => {
+    expect(vatFilesPeopleNames(names, { customsAnswers: answers }, 'b.klingler@star.de.com')).toEqual({
+      'b.klingler@star.de.com': 'Bernd Klingler',
+      'anna@client.com': 'Anna Keller',
+    });
+  });
+
+  it('no confirmed viewer (code off) = no names; a missing column or junk = none', () => {
+    expect(vatFilesPeopleNames(names, { customsAnswers: answers }, null)).toEqual({});
+    expect(vatFilesPeopleNames(undefined, { customsAnswers: answers }, 'anna@client.com')).toEqual({});
+    expect(vatFilesPeopleNames(['x'], { customsAnswers: {} }, 'anna@client.com')).toEqual({});
   });
 });

@@ -14,6 +14,15 @@
 //   /vat-files/demo-customs-table-long  150 imports, to check the page stays fast
 //   /vat-files/demo-code       round 4 B: "Who are you?" + email code first (code 123456),
 //                              then the customs table page ("Not you?" goes back)
+//   /vat-files/demo-reply-locked  round 5: the table after a Send: the reply to
+//                              question 1 of import 5 is read-only ("Sent by ...");
+//                              question 2 can still be answered; the text Anna
+//                              typed into the sent reply shows as a note (Copy)
+//                              Round 5 item 8: one sent note under that reply
+//                              ("Sent by Anna Keller ...") and "Add a note"
+//   /vat-files/demo-conflict   round 5: "Benedikt Klingler changed the table" note
+//                              with Reload, and import 2 with the amber conflict
+//                              note (Use mine / Keep theirs)
 // Round 4 C: the questions name who asked (one old question without a name),
 // the replies say who sent them and when (one changed later), line 1 says
 // which TME colleague filled it in.
@@ -21,6 +30,7 @@
 // Only in `next dev`; a production build treats these like any unknown link.
 
 import type { VatCustomsPageLine, VatFilesCodeAddress, VatFilesPagePayload } from '@/types/vat-files';
+import type { LineConflictNote } from './CustomsTable';
 
 // The REAL points, as the portal writes them to requested_items (page
 // wording: portal src/lib/vat-filing/email-templates.ts customsRequestItems('page')
@@ -364,7 +374,53 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
   },
   // Round 4 B: the same table as demo-customs-table, behind the email code.
   get 'demo-code'(): VatFilesPagePayload {
-    return { ...DEMOS['demo-customs-table'], viewerEmail: 'anna.k@pennypress-demo.com' };
+    // Round 4 D: the contact's name next to the confirmed address and under her replies.
+    return {
+      ...DEMOS['demo-customs-table'],
+      viewerEmail: 'anna.k@pennypress-demo.com',
+      peopleNames: { 'anna.k@pennypress-demo.com': 'Anna Keller' },
+    };
+  },
+  // Round 5: the answers went out with a Send at 13:30 (Dubai): the reply to question 901 is read-only.
+  // Round 5 item 8: one note under that reply went out with the same Send; "Add a note" adds another.
+  get 'demo-reply-locked'(): VatFilesPagePayload {
+    const base = DEMOS['demo-customs-table'];
+    return {
+      ...base,
+      customsAnswers: {
+        ...base.customsAnswers,
+        '5105': {
+          ...base.customsAnswers['5105'],
+          notes: {
+            '901': [
+              {
+                id: 'ndemo0000001',
+                text: 'The second invoice is from the same supplier, dated 02.09.2026.',
+                sentAt: '2026-10-10T09:20:00.000Z',
+                sentBy: 'anna.k@pennypress-demo.com',
+                savedAt: '2026-10-10T09:21:00.000Z',
+              },
+            ],
+          },
+        },
+      },
+      customsAnswersSentAt: '2026-10-10T09:30:00.000Z',
+      viewerEmail: 'anna.k@pennypress-demo.com',
+      peopleNames: { 'anna.k@pennypress-demo.com': 'Anna Keller' },
+    };
+  },
+  // Round 5: a colleague of the client changed import 2 while Anna had typed on it.
+  get 'demo-conflict'(): VatFilesPagePayload {
+    const base = DEMOS['demo-customs-table'];
+    return {
+      ...base,
+      customsAnswers: {
+        ...base.customsAnswers,
+        '5102': { parts: [{ purpose: 'sale_stock', payment: 'will_be_paid' }], updatedAt: '2026-10-11T13:10:00.000Z' },
+      },
+      viewerEmail: 'anna.k@pennypress-demo.com',
+      peopleNames: { 'anna.k@pennypress-demo.com': 'Anna Keller' },
+    };
   },
   'demo-customs-table-long': {
     kind: 'customs',
@@ -407,6 +463,30 @@ export const DEMO_CODE_ADDRESSES: VatFilesCodeAddress[] = [
   { id: 'demo000000000002', masked: 'al***@pennypress-demo.com' },
   { id: 'demo000000000003', masked: 'f***@pennypress-demo.com' },
 ];
+
+/** Round 5: page state the demo pages start with (no server to produce it). */
+export function demoExtras(token: string): {
+  changeNote?: string;
+  conflicts?: Record<string, LineConflictNote>;
+  lockedNotes?: Record<string, Record<string, string>>;
+} | null {
+  if (!isDemoToken(token)) return null;
+  // Round 5 review: Anna typed a change into the reply already sent; it was kept as a note (Copy).
+  if (token === 'demo-reply-locked') {
+    return { lockedNotes: { '5105': { '901': 'One shipment, two invoices. The second invoice came later.' } } };
+  }
+  if (token !== 'demo-conflict') return null;
+  return {
+    changeNote: 'Benedikt Klingler changed the table at 17:10.',
+    conflicts: {
+      '5102': {
+        mine: { parts: [{ purpose: 'office_use', payment: 'paid', incoterm: 'EXW', delivery: 'outside_uae', deliveryPlace: 'Loughborough, UK' }] },
+        who: 'Benedikt Klingler',
+        at: '2026-10-11T13:10:00.000Z',
+      },
+    },
+  };
+}
 
 /** Round 4 C: who the demo pages say sent a reply (no code on most demos). */
 export const DEMO_REPLY_BY = 'anna.k@pennypress-demo.com';

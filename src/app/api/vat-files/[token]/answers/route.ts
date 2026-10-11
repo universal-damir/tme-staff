@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getClientIp } from '@/lib/ai-route-guard';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { vatFilesRateLimited } from '@/lib/vat-files';
-import { applyCustomsAnswersUpdate, sanitizePageLines } from '@/lib/vat-customs';
+import {
+  scrubVatFilesRow,
+  vatFilesChangeInfo,
+  vatFilesConflictsForPage,
+  vatFilesLastClientChange,
+  vatFilesPageVersion,
+  vatFilesRateLimited,
+  type VatFilesChangeInfo,
+} from '@/lib/vat-files';
+import { applyCustomsAnswersUpdate, customsUnsentLineIds, readStoredAnswers, sanitizePageLines } from '@/lib/vat-customs';
 import { verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
 import { vatFilesViewer } from '@/lib/vat-files-code';
-import { VAT_FILE_REQUESTS_TABLE, type VatCustomsReplyMeta, type VatFileRequestRow } from '@/types/vat-files';
+import { VAT_FILE_REQUESTS_TABLE, type VatCustomsNote, type VatCustomsReplyMeta, type VatFileRequestRow } from '@/types/vat-files';
 
 export const runtime = 'nodejs';
 
@@ -33,6 +41,33 @@ const MAX_WRITE_ATTEMPTS = 4;
 //          replyMeta: { "<line id>": { "<question id>": VatCustomsReplyMeta } } } (round 4 C).
 // Round 4 B: gated like every route of the page; a changed line keeps
 // `savedBy` = the confirmed address (replies to TME's questions included).
+// Round 5:
+// - a reply that was already SENT (isVatCustomsReplySent) is never changed or
+//   cleared: the sent text stays, the line is named in `lockedReplies` and
+//   the page loads it again;
+// - each line may carry `baseUpdatedAt` (the stored updatedAt the page loaded
+//   it with, null = none). Saved since by somebody else (customsLineConflict)
+//   = the line is refused, the others are saved; `conflicts: { "<line id>":
+//   { answer, at, by, byName } }` (who only for a code-confirmed viewer);
+// - body `seen: { version, clientAt }` = what the page last knew; when the row
+//   changed since (another person, TME), `otherChange` (VatFilesChangeInfo)
+//   tells the page to offer a reload;
+// - the answer adds `bases` (each taken line's stored updatedAt now),
+//   `version` + `clientChangedAt` (after this save).
+// Round 5 item 8: a line may carry `notes: { "<question id>": [{ id, text }] }`
+// (notes under a SENT reply, see mergeCustomsNotes in lib/vat-customs.ts):
+// drafts take the new text (empty = removed), sent notes never change
+// (`lockedReplies`), notes to closed questions are dropped (`staleReplies`),
+// unsent drafts of closed questions are removed, at most
+// VAT_CUSTOMS_MAX_NOTES_PER_QUESTION (extra new notes are left out, the line
+// named in `staleReplies` so the page reloads it; the rest is saved). The
+// answer adds `notes: { "<line id>": { "<question id>": VatCustomsNote[] } }`
+// for the changed lines (with the who / when this server stamped).
+// 11.10: a batch whose lines all hold what is stored already (texts compared
+// cleaned, empty notes / replies / parts left out) writes nothing: no
+// customs_answers_saved_at, no updated_at, so no new version for anybody. The
+// answer adds `unsentLines`: the line ids whose content differs from what the
+// last Send carried (customsUnsentLineIds; the page's Send button uses it).
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -63,6 +98,15 @@ export async function POST(
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
   const incoming = (body as { answers: unknown }).answers;
+  const seenRaw = (body as { seen?: unknown }).seen;
+  const seen =
+    seenRaw && typeof seenRaw === 'object' && typeof (seenRaw as { version?: unknown }).version === 'string'
+      ? {
+          version: (seenRaw as { version: string }).version,
+          clientAt:
+            typeof (seenRaw as { clientAt?: unknown }).clientAt === 'string' ? (seenRaw as { clientAt: string }).clientAt : null,
+        }
+      : null;
 
   const supabase = getSupabaseAdmin();
   let current: VatFileRequestRow = access.row;
@@ -72,14 +116,36 @@ export async function POST(
       return NextResponse.json({ error: 'no_customs_table' }, { status: 409 });
     }
     const nowIso = new Date().toISOString();
-    const update = applyCustomsAnswersUpdate(current.customs_answers, incoming, lines, nowIso, viewer.email);
+    const update = applyCustomsAnswersUpdate(current.customs_answers, incoming, lines, nowIso, viewer.email, {
+      answersSentAt: current.customs_answers_sent_at ?? null,
+    });
     if (!update.ok) {
       return NextResponse.json({ error: update.error, lineId: update.lineId ?? null }, { status: 400 });
     }
     const staleReplies = update.staleReplies;
+    const extra = {
+      staleReplies,
+      lockedReplies: update.lockedReplies,
+      conflicts: vatFilesConflictsForPage(update.conflicts, viewer.email, current.allowed_names),
+      bases: update.bases,
+    };
+    // The row changed since the page last looked (another person, another tab, TME).
+    let otherChange: VatFilesChangeInfo | undefined;
+    if (seen && vatFilesPageVersion(scrubVatFilesRow(current)) !== seen.version) {
+      otherChange = vatFilesChangeInfo(current, viewer.email, seen.clientAt);
+    }
     if (update.changed.length === 0) {
+      // 11.10: nothing changed = nothing written (no saved_at, no updated_at, no new version).
       return NextResponse.json(
-        { savedAt: current.customs_answers_saved_at ?? null, updated: {}, staleReplies },
+        {
+          savedAt: current.customs_answers_saved_at ?? null,
+          updated: {},
+          ...extra,
+          unsentLines: customsUnsentLineIds(readStoredAnswers(current.customs_answers, lines), current.customs_answers_sent_at ?? null),
+          version: vatFilesPageVersion(scrubVatFilesRow(current)),
+          clientChangedAt: vatFilesLastClientChange(current).at,
+          ...(otherChange ? { otherChange } : {}),
+        },
         { headers: { 'Cache-Control': 'no-store' } }
       );
     }
@@ -100,11 +166,28 @@ export async function POST(
       const updated: Record<string, string> = {};
       // Round 4 C: who / when per reply of the changed lines (an empty map = no replies left), for the line under each reply.
       const replyMeta: Record<string, Record<string, VatCustomsReplyMeta>> = {};
+      // Round 5 item 8: the stored notes of the changed lines (with who / when; {} = none left).
+      const notes: Record<string, Record<string, VatCustomsNote[]>> = {};
       for (const id of update.changed) {
         updated[id] = nowIso;
         replyMeta[id] = update.answers[id]?.replyMeta ?? {};
+        notes[id] = update.answers[id]?.notes ?? {};
       }
-      return NextResponse.json({ savedAt: nowIso, updated, staleReplies, replyMeta }, { headers: { 'Cache-Control': 'no-store' } });
+      const after = { ...current, ...patch } as VatFileRequestRow;
+      return NextResponse.json(
+        {
+          savedAt: nowIso,
+          updated,
+          replyMeta,
+          notes,
+          ...extra,
+          unsentLines: customsUnsentLineIds(update.answers, current.customs_answers_sent_at ?? null),
+          version: vatFilesPageVersion(scrubVatFilesRow(after)),
+          clientChangedAt: nowIso,
+          ...(otherChange ? { otherChange } : {}),
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      );
     }
 
     // Another write landed in between, or the portal closed the request: read again.

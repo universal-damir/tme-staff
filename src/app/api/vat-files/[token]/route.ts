@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getClientIp } from '@/lib/ai-route-guard';
-import { scrubVatFilesRow, vatFilesRateLimited } from '@/lib/vat-files';
+import { vatFilesRateLimited, vatFilesViewerPayload } from '@/lib/vat-files';
 import { verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
 import { vatFilesViewer } from '@/lib/vat-files-code';
 
@@ -18,6 +18,8 @@ export const runtime = 'nodejs';
 // addresses for "Who are you?" until the browser holds a valid proof, open or
 // closed alike (11.10: a closed row shows its data only after the code).
 // An expired row stays 410 'expired' with no data.
+// Round 4 D: `peopleNames` = the contact names (allowed_names) of the viewer
+// and of who sent / changed a reply; only after the code, never the list.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -34,7 +36,8 @@ export async function GET(
   if (!viewer.ok) {
     return NextResponse.json(viewer.body, { status: viewer.status, headers: { 'Cache-Control': 'no-store' } });
   }
-  return NextResponse.json({ ...scrubVatFilesRow(access.row), viewerEmail: viewer.email }, {
+  // Round 4 D: the names next to the emails this payload shows (code-confirmed viewers only).
+  return NextResponse.json(vatFilesViewerPayload(access.row, viewer.email), {
     headers: { 'Cache-Control': 'no-store' },
   });
 }

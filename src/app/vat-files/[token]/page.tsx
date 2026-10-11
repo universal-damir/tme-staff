@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   CalendarClock,
@@ -11,6 +12,7 @@ import {
   Loader2,
   Lock,
   Plus,
+  RefreshCw,
   Send,
   Trash2,
   UploadCloud,
@@ -30,6 +32,10 @@ import {
   formatDeadline,
   clientPeriodLabel,
   isAcceptedExtension,
+  vatFilesChangeNotice,
+  vatFilesSendResult,
+  type VatFilesChangeInfo,
+  type VatFilesPageConflict,
   type VatFilesReceivedFile,
 } from '@/lib/vat-files';
 import {
@@ -38,21 +44,40 @@ import {
   type VatCustomsDocKind,
   type VatCustomsLineAnswer,
   type VatCustomsPageLine,
+  type VatCustomsNote,
   type VatCustomsReplyMeta,
   type VatFilesCodeAddress,
   type VatFilesPagePayload,
+  vatFilesNamedEmail,
 } from '@/types/vat-files';
-import { demoReplyMeta, formatDubaiDateTime, initialPageAnswers, reconcileAfterReload, shownReplyMeta, withSavedReplyMeta } from '@/lib/vat-customs';
-import { DEMO_CODE_ADDRESSES, DEMO_REPLY_BY, demoPayload, isDemoCodeToken, isDemoToken } from './demo';
+import {
+  customsAnswerContentKey,
+  customsLineSavedAs,
+  customsLinesToSave,
+  customsPageHasUnsent,
+  customsPageSavedKeys,
+  customsUnsentLineIds,
+  demoNotes,
+  demoReplyMeta,
+  formatDubaiDateTime,
+  initialPageAnswers,
+  mergeLineAnswer,
+  reconcileAfterReload,
+  refusedReplyTexts,
+  sentRepliesByLine,
+  shownReplyMeta,
+  withSavedReplyMeta,
+} from '@/lib/vat-customs';
+import { DEMO_CODE_ADDRESSES, DEMO_REPLY_BY, demoExtras, demoPayload, isDemoCodeToken, isDemoToken } from './demo';
 import CodeGate from './CodeGate';
-import CustomsTable, { SaveStatus, type LineFileCounts, type SaveState } from './CustomsTable';
+import CustomsTable, { SaveStatus, type LineConflictNote, type LineFileCounts, type SaveState } from './CustomsTable';
 
 /**
  * 'code' = round 4 B: "Who are you?" + email code before the page.
  * 'closed' (11.10) = the same page read-only: what the client sent, no
  * inputs, no upload, no Send (every write route refuses a closed row too).
  */
-type PageState = 'loading' | 'code' | 'form' | 'sent' | 'closed' | 'not_found' | 'error';
+type PageState = 'loading' | 'code' | 'form' | 'sent' | 'closed' | 'not_found' | 'expired' | 'error';
 
 /** Round 4 B: the API asks for the email code; its body carries the masked addresses. */
 function codeGateFrom(outcome: RequestFailure): VatFilesCodeAddress[] | null {
@@ -91,27 +116,50 @@ const TABLE_MAX_PENDING = VAT_FILES_MAX_PER_ROUND * 4;
 
 const DOC_KIND_LABEL: Record<VatCustomsDocKind, string> = { boe: 'BOE', invoice: 'Invoice', other: 'Other file' };
 
-/** What one autosave / Send carries for a line: no timestamp, no empty reply. */
-function answerForSave(a: VatCustomsLineAnswer | undefined): VatCustomsLineAnswer {
-  const out: VatCustomsLineAnswer = { parts: a?.parts ?? [] };
+/** Round 5: a line as the page sends it, with the stored `updatedAt` it was loaded with (null = none). */
+type SaveLine = VatCustomsLineAnswer & { baseUpdatedAt?: string | null };
+
+/** What one autosave / Send carries for a line: no timestamp, no empty reply; `base` = round 5 conflict check. */
+function answerForSave(a: VatCustomsLineAnswer | undefined, base?: string | null): SaveLine {
+  const out: SaveLine = { parts: a?.parts ?? [] };
+  if (base !== undefined) out.baseUpdatedAt = base;
   const replies: Record<string, string> = {};
   for (const [qid, text] of Object.entries(a?.replies ?? {})) {
     if (typeof text === 'string' && text.trim()) replies[qid] = text;
   }
   if (Object.keys(replies).length > 0) out.replies = replies;
+  // Round 5 item 8: every note the page holds (id + text only; empty = a draft to remove).
+  // Always sent, so a removed draft goes away; the server keeps sent notes as they are.
+  const notes: Record<string, Array<{ id: string; text: string }>> = {};
+  for (const [qid, list] of Object.entries(a?.notes ?? {})) {
+    const items = (list ?? []).filter((n) => typeof n?.text === 'string' && n.text.trim()).map((n) => ({ id: n.id, text: n.text }));
+    if (items.length > 0) notes[qid] = items;
+  }
+  out.notes = notes;
   return out;
 }
 
 /** S2: TME replaced the list while the page was open. */
 const LIST_UPDATED_NOTE = 'The list of imports was updated by TME. Your answers for the remaining imports are kept.';
 const QUESTIONS_UPDATED_NOTE = 'TME has updated its questions on your imports. Please check your replies.';
+/** Round 5: a reply already sent cannot be changed any more. */
+const LOCKED_NOTE = 'This reply was already sent to TME, so it can no longer be changed. Need to add something? Add a note under the reply.';
+/** Round 5: how often the page asks "did someone else change the table?" while visible. */
+const CHANGE_CHECK_MS = 60_000;
+/** ...and not more often than this (focus + tab switch). */
+const CHANGE_CHECK_MIN_GAP_MS = 10_000;
 
-/** Answers changed after the last Send (the Send button has something to send). */
-function hasUnsentAnswers(payload: VatFilesPagePayload): boolean {
-  const sentAt = payload.customsAnswersSentAt ? Date.parse(payload.customsAnswersSentAt) : 0;
-  return Object.values(payload.customsAnswers ?? {}).some(
-    (a) => !!a?.updatedAt && Date.parse(a.updatedAt) > sentAt
-  );
+/** A copy of `map` without `key`. */
+function withoutKey<T>(map: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in map)) return map;
+  const next = { ...map };
+  delete next[key];
+  return next;
+}
+
+/** Round 5: the "who" of a conflict note. */
+function conflictWho(c: Pick<VatFilesPageConflict, 'by' | 'byName'>): string {
+  return c.byName || c.by || 'Someone else';
 }
 
 // Shell and Header live at module scope: defined inside the page they would
@@ -152,7 +200,7 @@ function TitleBlock({
       {company && <p className="text-[13px] text-gray-500 break-words leading-snug">{company}</p>}
       {data?.viewerEmail && (
         <p className="text-[11px] text-gray-500 leading-snug mt-0.5 break-all">
-          Confirmed as {data.viewerEmail}
+          Confirmed as {vatFilesNamedEmail(data.viewerEmail, data.peopleNames)}
           {onNotYou && (
             <>
               {' · '}
@@ -261,6 +309,34 @@ function ClosedNotice() {
 }
 
 /** One plain sentence for a failed upload. */
+/** Round 5: "Benedikt Klingler changed the table at 17:10." + Reload (never reloads by itself). */
+function ChangeBanner({ text, closed, onReload }: { text: string; closed: boolean; onReload: () => void }) {
+  return (
+    <div
+      className="rounded-xl px-3.5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-white shadow-[0_4px_14px_rgba(36,63,123,0.25)]"
+      style={{ backgroundColor: TME_COLORS.primary }}
+      role="status"
+      aria-live="polite"
+    >
+      <RefreshCw className="w-4 h-4 shrink-0" aria-hidden />
+      <p className="flex-1 min-w-[12rem] leading-snug">
+        <span className="font-semibold">{text}</span>{' '}
+        <span className="text-white/85">
+          {closed ? 'Reload to see what TME has.' : 'Reload to see the latest version. What you typed is kept.'}
+        </span>
+      </p>
+      <button
+        type="button"
+        onClick={onReload}
+        className={`shrink-0 h-8 px-3.5 rounded-lg bg-white text-[13px] font-semibold transition-colors hover:bg-white/90 ${FOCUS}`}
+        style={{ color: TME_COLORS.primary }}
+      >
+        Reload
+      </button>
+    </div>
+  );
+}
+
 function uploadErrorText(fileName: string, outcome: RequestFailure): string {
   if (outcome.code === 'unsupported_file_type' || outcome.kind === 'wrong_file') {
     return 'We cannot accept this file type. Please send PDF, Excel, Word, CSV, image or email files.';
@@ -314,13 +390,66 @@ export default function VatFilesPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inflight = useRef<Promise<boolean> | null>(null);
   const [save, setSave] = useState<SaveState>({ status: 'idle' });
-  /** The answers changed after the last Send. */
-  const [unsent, setUnsent] = useState(false);
+  // 11.10: "anything to send?" compares CONTENT, never "touched": `savedKeys`
+  // = per line the content key of what the server holds (customsPageSavedKeys),
+  // `serverUnsent` = the stored lines that differ from what the last Send
+  // carried (customsUnsentLineIds; from the payload and every save answer).
+  const [savedKeys, setSavedKeysState] = useState<Record<string, string>>({});
+  const savedKeysRef = useRef<Record<string, string>>({});
+  const [serverUnsent, setServerUnsent] = useState<string[]>([]);
+  /** Demo only (no server): the content keys of the last "Send" (undefined = not sent). */
+  const demoSentKeys = useRef<Record<string, string>>({});
   /** A calm note above the table (the list or the questions changed). */
   const [notice, setNotice] = useState<string | null>(null);
   const lineInputRef = useRef<HTMLInputElement>(null);
   const lineTarget = useRef<{ lineId: number; docKind: VatCustomsDocKind } | null>(null);
   const hasTable = lines.length > 0;
+  const linesRef = useRef<VatCustomsPageLine[]>([]);
+  linesRef.current = lines;
+  /** The answers differ in content from what was last sent (see savedKeys / serverUnsent). */
+  const unsent = useMemo(
+    () => hasTable && customsPageHasUnsent({ lines, answers, savedKeys, serverUnsent }),
+    [hasTable, lines, answers, savedKeys, serverUnsent]
+  );
+  const setSavedKeys = useCallback((next: Record<string, string>) => {
+    savedKeysRef.current = next;
+    setSavedKeysState(next);
+  }, []);
+  /** 11.10: what the server holds and what of it is not sent yet, from a fresh payload. */
+  const takeStored = useCallback(
+    (payload: VatFilesPagePayload) => {
+      setSavedKeys(customsPageSavedKeys(payload.customsLines ?? [], payload.customsAnswers ?? {}));
+      setServerUnsent(customsUnsentLineIds(payload.customsAnswers ?? {}, payload.customsAnswersSentAt ?? null));
+    },
+    [setSavedKeys]
+  );
+
+  // ---------- Round 5: two people on one page ----------
+  // `baseAt` = per line, the stored updatedAt this page loaded / last saved
+  // (sent with every save: the server refuses a line someone else changed).
+  // `knownVersion` = the fingerprint of what the page shows; `ownVersions` =
+  // the ones its own saves produced (never a "changed by" note);
+  // `knownClientAt` = the last client change the page knows (server time).
+  const baseAt = useRef<Record<string, string | null>>({});
+  const knownVersion = useRef<string | null>(null);
+  const knownClientAt = useRef<string | null>(null);
+  const ownVersions = useRef<string[]>([]);
+  /** Counts finished saves / Sends: a check that overlapped one is ignored. */
+  const writeCount = useRef(0);
+  const sendingRef = useRef(false);
+  const [changeNote, setChangeNote] = useState<{ text: string; closed: boolean } | null>(null);
+  const [conflicts, setConflicts] = useState<Record<string, LineConflictNote>>({});
+  const conflictsRef = useRef(conflicts);
+  conflictsRef.current = conflicts;
+  /** Round 5 review: text typed into replies already sent (refused), per line then question; kept until dismissed. */
+  const [lockedNotes, setLockedNotes] = useState<Record<string, Record<string, string>>>({});
+  /**
+   * Round 5 review: lines of a save whose answer never came back (offline,
+   * timeout, 5xx), with what it carried. It may have been stored: before the
+   * next save the page reads the stored stamps (customsLineSavedAs), so it
+   * does not conflict with its own lost save.
+   */
+  const lostSave = useRef<Record<string, SaveLine>>({});
   const maxPending = useRef<number>(VAT_FILES_MAX_PER_ROUND);
   maxPending.current = hasTable ? TABLE_MAX_PENDING : VAT_FILES_MAX_PER_ROUND;
 
@@ -328,6 +457,74 @@ export default function VatFilesPage() {
     answersRef.current = next;
     setAnswers(next);
   }, []);
+
+  /** Round 5: take the stamps of a fresh payload; lines in `keep` (typed, not saved) keep the base they were typed on. */
+  const takeSync = useCallback((payload: VatFilesPagePayload, keep: Iterable<string> = []) => {
+    const keepSet = new Set(keep);
+    const next: Record<string, string | null> = {};
+    for (const l of payload.customsLines ?? []) {
+      const id = String(l.id);
+      next[id] =
+        keepSet.has(id) && id in baseAt.current ? baseAt.current[id] : payload.customsAnswers?.[id]?.updatedAt ?? null;
+    }
+    baseAt.current = next;
+    if (payload.version) knownVersion.current = payload.version;
+    if (payload.clientChangedAt !== undefined) knownClientAt.current = payload.clientChangedAt ?? null;
+  }, []);
+
+  /** Round 5: an own save / Send produced this version (it never shows the "changed by" note). */
+  const noteOwnVersion = useCallback((version: string | undefined, clientAt?: string | null) => {
+    writeCount.current += 1;
+    if (!version) return;
+    knownVersion.current = version;
+    ownVersions.current = [...ownVersions.current.slice(-19), version];
+    if (clientAt !== undefined) knownClientAt.current = clientAt ?? null;
+  }, []);
+
+  /**
+   * Round 5: lines the server refused because someone else saved them since
+   * this page loaded them. The line now shows their version; a note keeps
+   * what this person had typed ("Use mine" puts it back on top).
+   */
+  const applyConflicts = useCallback(
+    (found: Record<string, VatFilesPageConflict> | undefined, typed: VatCustomsAnswers) => {
+      const ids = Object.keys(found ?? {});
+      if (!found || ids.length === 0) return;
+      const nextAnswers: VatCustomsAnswers = { ...answersRef.current };
+      const notes: Record<string, LineConflictNote> = {};
+      for (const id of ids) {
+        const c = found[id];
+        const line = linesRef.current.find((l) => String(l.id) === id);
+        if (!line) continue;
+        nextAnswers[id] = mergeLineAnswer(line, c.answer);
+        baseAt.current[id] = c.answer.updatedAt ?? c.at ?? null;
+        dirty.current.delete(id);
+        notes[id] = { mine: typed[id] ?? { parts: [] }, who: conflictWho(c), at: c.at };
+      }
+      setData((d) => (d ? { ...d, customsAnswers: { ...(d.customsAnswers ?? {}), ...Object.fromEntries(ids.map((id) => [id, found[id].answer])) } } : d));
+      setAllAnswers(nextAnswers);
+      // 11.10: their version is what the server holds for these lines.
+      const keys = { ...savedKeysRef.current };
+      for (const id of Object.keys(notes)) keys[id] = customsAnswerContentKey(nextAnswers[id]);
+      setSavedKeys(keys);
+      setConflicts((prev) => ({ ...prev, ...notes }));
+    },
+    [setAllAnswers, setSavedKeys]
+  );
+
+  /** Round 5 review: keep what this person typed into replies the server refused as already sent. */
+  const keepRefusedReplies = useCallback(
+    (ids: readonly string[], typed: Record<string, SaveLine | VatCustomsLineAnswer | undefined>, payload: VatFilesPagePayload) => {
+      const found = refusedReplyTexts(ids, typed, payload.customsAnswers, payload.customsAnswersSentAt);
+      if (Object.keys(found).length === 0) return;
+      setLockedNotes((prev) => {
+        const next = { ...prev };
+        for (const [id, texts] of Object.entries(found)) next[id] = { ...(next[id] ?? {}), ...texts };
+        return next;
+      });
+    },
+    []
+  );
 
   /**
    * TME closed the request while the page was open (a save, upload or Send
@@ -377,6 +574,10 @@ export default function VatFilesPage() {
           return setState('code');
         }
         payload = demoPayload(token);
+        const extras = demoExtras(token);
+        setConflicts(extras?.conflicts ?? {});
+        setLockedNotes(extras?.lockedNotes ?? {});
+        setChangeNote(extras?.changeNote ? { text: extras.changeNote, closed: false } : null);
       } else {
         const got = await fetchPayload(false);
         if (cancelled) return;
@@ -388,7 +589,8 @@ export default function VatFilesPage() {
             return setState('code');
           }
           reportClientFailure({ form: FORM, action: 'load', ref: token }, outcome);
-          if (outcome.status === 404 || outcome.code === 'expired') return setState('not_found');
+          if (outcome.code === 'expired') return setState('expired');
+          if (outcome.status === 404) return setState('not_found');
           if (outcome.code === 'closed') return setState('closed');
           setLoadError(failureMessage(outcome));
           return setState('error');
@@ -399,13 +601,26 @@ export default function VatFilesPage() {
       setData(payload);
       setLines(customsLines);
       setAllAnswers(initialPageAnswers(customsLines, payload.customsAnswers ?? {}));
-      setUnsent(hasUnsentAnswers(payload));
-      setState(payload.expired ? 'not_found' : payload.status === 'closed' ? 'closed' : 'form');
+      takeStored(payload);
+      if (demo) {
+        // Demo: the loaded answers count as sent, except the lines the stamps call unsent.
+        const notSent = new Set(customsUnsentLineIds(payload.customsAnswers ?? {}, payload.customsAnswersSentAt ?? null));
+        demoSentKeys.current = Object.fromEntries(
+          Object.entries(customsPageSavedKeys(customsLines, payload.customsAnswers ?? {})).filter(([id]) => !notSent.has(id))
+        );
+      }
+      takeSync(payload);
+      if (!demo) {
+        setConflicts({});
+        setChangeNote(null);
+        setLockedNotes({});
+      }
+      setState(payload.expired ? 'expired' : payload.status === 'closed' ? 'closed' : 'form');
     })();
     return () => {
       cancelled = true;
     };
-  }, [token, demo, fetchPayload, setAllAnswers, loadKey]);
+  }, [token, demo, fetchPayload, setAllAnswers, takeSync, takeStored, loadKey]);
 
   /**
    * TME changed the lines while the client was typing (S2: a "replace" upload
@@ -415,11 +630,21 @@ export default function VatFilesPage() {
    * is no longer open is dropped, never moved to another question. True when
    * it worked.
    */
-  const reloadLines = useCallback(async (reason: 'list' | 'questions' = 'list'): Promise<boolean> => {
+  const reloadLines = useCallback(async (
+    reason: 'list' | 'questions' | 'locked' | 'sync' = 'list',
+    /** Round 5 review: lines the server refused as already sent, with what this page tried to save (kept as a note). */
+    refused?: { ids: string[]; typed: Record<string, SaveLine> }
+  ): Promise<boolean> => {
     if (demo) return true;
     const got = await fetchPayload();
     if (!got.ok) {
       askForCodeIfNeeded(got.outcome);
+      return false;
+    }
+    if (refused) keepRefusedReplies(refused.ids, refused.typed, got.payload);
+    // Round 5: TME closed the request meanwhile: the read-only view.
+    if (got.payload.status === 'closed' || got.payload.expired) {
+      reloadClosed();
       return false;
     }
     const fresh = got.payload.customsLines ?? [];
@@ -431,17 +656,49 @@ export default function VatFilesPage() {
             ...d,
             customsLines: fresh,
             customsAnswers: got.payload.customsAnswers,
+            customsAnswersSentAt: got.payload.customsAnswersSentAt,
+            files: got.payload.files,
             lineFiles: got.payload.lineFiles,
             viewerEmail: got.payload.viewerEmail,
+            peopleNames: got.payload.peopleNames,
+            version: got.payload.version,
+            clientChangedAt: got.payload.clientChangedAt,
           }
         : d
     );
     setAllAnswers(r.answers);
     dirty.current = new Set(r.dirty);
+    takeSync(got.payload, r.dirty);
+    // 11.10: lines still typed (not saved) differ from these keys by content, so they still count.
+    takeStored(got.payload);
+    // Notes of lines that are gone or that the other person's version now shows anyway stay until answered.
+    setConflicts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => fresh.some((l) => String(l.id) === id))));
     if (r.listChanged) setNotice(LIST_UPDATED_NOTE);
+    else if (reason === 'locked') setNotice(LOCKED_NOTE);
     else if (r.repliesDropped || reason === 'questions') setNotice(QUESTIONS_UPDATED_NOTE);
+    // Refused-text notes of lines that are gone go too.
+    setLockedNotes((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => fresh.some((l) => String(l.id) === id))));
     return true;
-  }, [demo, fetchPayload, setAllAnswers, askForCodeIfNeeded]);
+  }, [demo, fetchPayload, setAllAnswers, askForCodeIfNeeded, reloadClosed, takeSync, takeStored, keepRefusedReplies]);
+
+  /**
+   * Round 5 review: an earlier save / Send got no answer (lostSave) and may be
+   * stored. Read the stored answers; a line holding exactly what that save
+   * carried takes the stored stamp as its base (customsLineSavedAs), so the
+   * next save does not conflict with this page's own lost save. A line with
+   * other content keeps its old base (a real conflict stays a conflict).
+   */
+  const refreshLostBases = useCallback(async () => {
+    if (demo || Object.keys(lostSave.current).length === 0) return;
+    const got = await fetchPayload(false);
+    if (!got.ok) return;
+    for (const [id, sent] of Object.entries(lostSave.current)) {
+      const line = (got.payload.customsLines ?? []).find((l) => String(l.id) === id);
+      const stored = got.payload.customsAnswers?.[id];
+      if (line && stored && customsLineSavedAs(line, sent, stored)) baseAt.current[id] = stored.updatedAt ?? null;
+    }
+    lostSave.current = {};
+  }, [demo, fetchPayload]);
 
   // ---------- Autosave ----------
   const saveNowRef = useRef<() => Promise<boolean>>(async () => true);
@@ -463,10 +720,18 @@ export default function VatFilesPage() {
     while (inflight.current) await inflight.current;
     if (dirty.current.size === 0) return true;
 
-    const ids = [...dirty.current];
+    // 11.10: only lines whose content differs from what the server holds (a
+    // box opened and closed, typed and deleted back: nothing to write). A line
+    // of a save that got no answer is saved anyway (it may hold something else).
+    const ids = customsLinesToSave(dirty.current, answersRef.current, savedKeysRef.current, new Set(Object.keys(lostSave.current)));
     dirty.current.clear();
-    const body: VatCustomsAnswers = {};
-    for (const id of ids) body[id] = answerForSave(answersRef.current[id]);
+    if (ids.length === 0) return true;
+    const body: Record<string, SaveLine> = {};
+    for (const id of ids) body[id] = answerForSave(answersRef.current[id], baseAt.current[id] ?? null);
+    /** The content key of each line as this save carries it (what the server holds once it is taken). */
+    const bodyKeys: Record<string, string> = {};
+    for (const id of ids) bodyKeys[id] = customsAnswerContentKey(answersRef.current[id]);
+    const seen = { version: knownVersion.current, clientAt: knownClientAt.current };
     setSave({ status: 'saving' });
 
     const run = (async (): Promise<boolean> => {
@@ -481,38 +746,81 @@ export default function VatFilesPage() {
                 customsAnswers: withSavedReplyMeta(
                   d.customsAnswers ?? {},
                   body,
-                  demoReplyMeta(d.customsAnswers ?? {}, body, now, d.viewerEmail ?? DEMO_REPLY_BY)
+                  demoReplyMeta(d.customsAnswers ?? {}, body, now, d.viewerEmail ?? DEMO_REPLY_BY),
+                  demoNotes(d.customsAnswers ?? {}, body, linesRef.current, now, d.viewerEmail ?? DEMO_REPLY_BY, d.customsAnswersSentAt ?? null)
                 ),
               }
             : d
         );
         setSave({ status: 'saved', at: now });
+        // Demo: what is "stored" now, and which lines differ from the last "Send".
+        setSavedKeys({ ...savedKeysRef.current, ...bodyKeys });
+        setServerUnsent((prev) => {
+          const next = new Set(prev);
+          for (const id of ids) {
+            if (bodyKeys[id] !== demoSentKeys.current[id]) next.add(id);
+            else next.delete(id);
+          }
+          return [...next];
+        });
         return true;
+      }
+      // Round 5 review: an earlier save got no answer: take the stamps of what it stored.
+      if (Object.keys(lostSave.current).length > 0) {
+        await refreshLostBases();
+        for (const id of ids) if (body[id]) body[id].baseUpdatedAt = baseAt.current[id] ?? null;
       }
       const outcome = await requestJson<{
         savedAt: string | null;
         updated: Record<string, string>;
         staleReplies?: string[];
         replyMeta?: Record<string, Record<string, VatCustomsReplyMeta>>;
+        notes?: Record<string, Record<string, VatCustomsNote[]>>;
+        lockedReplies?: string[];
+        conflicts?: Record<string, VatFilesPageConflict>;
+        bases?: Record<string, string | null>;
+        version?: string;
+        clientChangedAt?: string | null;
+        otherChange?: VatFilesChangeInfo;
+        unsentLines?: string[];
       }>(
         `/api/vat-files/${token}/answers`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ answers: body }),
+          body: JSON.stringify(seen.version ? { answers: body, seen } : { answers: body }),
         },
         { form: FORM, action: 'autosave', ref: token }
       );
       if (outcome.ok) {
-        setSave({ status: 'saved', at: outcome.data.savedAt ?? new Date().toISOString() });
-        // Round 4 C: "Sent by ... on ..." under each reply of the saved lines.
-        const meta = outcome.data.replyMeta;
+        const res = outcome.data;
+        setSave({ status: 'saved', at: res.savedAt ?? new Date().toISOString() });
+        // Round 5: the stamps of this save (the next save of these lines builds on them).
+        for (const [id, at] of Object.entries(res.bases ?? {})) baseAt.current[id] = at;
+        noteOwnVersion(res.version, res.clientChangedAt);
+        // 11.10: the server holds these lines as carried (refused ones: applyConflicts / the reload below set them).
+        const refused = new Set([...Object.keys(res.conflicts ?? {}), ...(res.lockedReplies ?? [])]);
+        const keys = { ...savedKeysRef.current };
+        for (const id of ids) if (!refused.has(id)) keys[id] = bodyKeys[id];
+        setSavedKeys(keys);
+        if (Array.isArray(res.unsentLines)) setServerUnsent(res.unsentLines);
+        // Round 4 C: "Sent by ... on ..." under each reply of the saved lines (refused lines left out).
+        const meta = res.replyMeta;
         if (meta && Object.keys(meta).length > 0) {
-          setData((d) => (d ? { ...d, customsAnswers: withSavedReplyMeta(d.customsAnswers ?? {}, body, meta) } : d));
+          // Round 5 item 8: and the stored notes of those lines ("Saved by ... Not sent yet.").
+          setData((d) => (d ? { ...d, customsAnswers: withSavedReplyMeta(d.customsAnswers ?? {}, body, meta, res.notes) } : d));
         }
-        // A reply went to a question TME has closed meanwhile: it was not
-        // stored; show the current questions.
-        if ((outcome.data.staleReplies?.length ?? 0) > 0) await reloadLines('questions');
+        // Round 5: someone else saved a line this page changed too: show theirs + a note.
+        applyConflicts(res.conflicts, { ...body, ...answersRef.current });
+        // Round 5: someone else (or TME) changed the table since this page looked.
+        if (res.otherChange) {
+          const text = vatFilesChangeNotice({ knownVersion: seen.version, pageStatus: 'open', change: res.otherChange });
+          if (text) setChangeNote({ text, closed: res.otherChange.status === 'closed' });
+        }
+        // A reply went to a question TME has closed meanwhile, or changed a
+        // reply that was already sent: not stored; show the lines as stored.
+        if ((res.lockedReplies?.length ?? 0) > 0) await reloadLines('locked', { ids: res.lockedReplies ?? [], typed: body });
+        else if ((res.staleReplies?.length ?? 0) > 0) await reloadLines('questions');
         return true;
       }
       // Not saved: the lines stay marked, the text stays on the page.
@@ -526,7 +834,11 @@ export default function VatFilesPage() {
         reloadClosed();
         return false;
       }
-      if (outcome.code === 'expired' || outcome.status === 404) {
+      if (outcome.code === 'expired') {
+        setState('expired');
+        return false;
+      }
+      if (outcome.status === 404) {
         setState('not_found');
         return false;
       }
@@ -536,6 +848,10 @@ export default function VatFilesPage() {
         setSave({ status: 'idle' });
         if (dirty.current.size > 0) scheduleSave(200);
         return false;
+      }
+      // No answer (offline, timeout, 5xx): the save may have landed anyway.
+      if (outcome.kind === 'offline' || outcome.kind === 'timeout' || outcome.kind === 'server_error') {
+        for (const id of ids) lostSave.current[id] = body[id];
       }
       setSave({
         status: 'error',
@@ -554,24 +870,43 @@ export default function VatFilesPage() {
     } finally {
       inflight.current = null;
     }
-  }, [demo, token, reloadLines, scheduleSave, askForCodeIfNeeded, reloadClosed]);
+  }, [demo, token, refreshLostBases, reloadLines, scheduleSave, askForCodeIfNeeded, reloadClosed, noteOwnVersion, applyConflicts, setSavedKeys]);
   saveNowRef.current = saveNow;
 
   const onLineChange = useCallback(
     (lineId: string, next: VatCustomsLineAnswer) => {
       setAllAnswers({ ...answersRef.current, [lineId]: next });
       dirty.current.add(lineId);
-      setUnsent(true);
       scheduleSave();
+      // Round 5: typing on a line with a conflict note = the person decided.
+      if (conflictsRef.current[lineId]) setConflicts((prev) => withoutKey(prev, lineId));
     },
     [scheduleSave, setAllAnswers]
   );
+
+  /** Round 5, the conflict note: put what this person had typed back on top of the other version (saved as usual). */
+  const onUseMine = useCallback(
+    (lineId: string) => {
+      const note = conflictsRef.current[lineId];
+      if (!note) return;
+      setAllAnswers({ ...answersRef.current, [lineId]: { ...note.mine } });
+      dirty.current.add(lineId);
+      scheduleSave(200);
+      setConflicts((prev) => withoutKey(prev, lineId));
+    },
+    [scheduleSave, setAllAnswers]
+  );
+  const onKeepTheirs = useCallback((lineId: string) => {
+    setConflicts((prev) => withoutKey(prev, lineId));
+  }, []);
+  const onDismissLocked = useCallback((lineId: string) => {
+    setLockedNotes((prev) => withoutKey(prev, lineId));
+  }, []);
 
   const onFill = useCallback(
     (next: VatCustomsAnswers, changed: string[]) => {
       setAllAnswers(next);
       changed.forEach((id) => dirty.current.add(id));
-      setUnsent(true);
       scheduleSave(300);
     },
     [scheduleSave, setAllAnswers]
@@ -728,6 +1063,9 @@ export default function VatFilesPage() {
   // of the answers); hidden for a reply while its typed text is not saved yet.
   const savedAnswers = data?.customsAnswers;
   const replyMetaByLine = useMemo(() => shownReplyMeta(savedAnswers, answers), [savedAnswers, answers]);
+  // Round 5: replies already sent: read-only text on the page.
+  const sentAtStamp = data?.customsAnswersSentAt ?? null;
+  const sentReplies = useMemo(() => sentRepliesByLine(savedAnswers, sentAtStamp), [savedAnswers, sentAtStamp]);
 
   // Per-line ticks: TME already has it, sent through this link, or uploaded and waiting for Send.
   const lineFiles = data?.lineFiles;
@@ -772,6 +1110,7 @@ export default function VatFilesPage() {
     if (!canSend) return;
     setSendError(null);
     setSending(true);
+    sendingRef.current = true;
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -779,11 +1118,13 @@ export default function VatFilesPage() {
     // A running autosave first, so it can never land after the Send.
     while (inflight.current) await inflight.current;
 
+    // Round 5 review: an earlier save / Send got no answer: take the stamps of what it stored.
+    await refreshLostBases();
     // The answers not autosaved yet travel with the Send.
     const answerIds = hasTable ? [...dirty.current] : [];
     dirty.current.clear();
-    const answersBody: VatCustomsAnswers = {};
-    for (const id of answerIds) answersBody[id] = answerForSave(answersRef.current[id]);
+    const answersBody: Record<string, SaveLine> = {};
+    for (const id of answerIds) answersBody[id] = answerForSave(answersRef.current[id], demo ? undefined : baseAt.current[id] ?? null);
     const withAnswers = hasTable && unsent;
 
     const rounds: PendingItem[][] = [];
@@ -803,6 +1144,13 @@ export default function VatFilesPage() {
               ...d,
               files: [...d.files, ...sent],
               lineFiles: [...d.lineFiles, ...newLineFiles],
+              // Like the server: the answers not autosaved yet are stored with the Send (round 5: then sent = read-only).
+              customsAnswers: withSavedReplyMeta(
+                d.customsAnswers ?? {},
+                answersBody,
+                demoReplyMeta(d.customsAnswers ?? {}, answersBody, now, d.viewerEmail ?? DEMO_REPLY_BY),
+                demoNotes(d.customsAnswers ?? {}, answersBody, linesRef.current, now, d.viewerEmail ?? DEMO_REPLY_BY, d.customsAnswersSentAt ?? null)
+              ),
               customsAnswersSentAt: withAnswers ? now : d.customsAnswersSentAt,
             }
           : d
@@ -810,9 +1158,14 @@ export default function VatFilesPage() {
       setItems([]);
       setSentFiles(sent);
       setSentAnswers(withAnswers);
-      setUnsent(false);
+      // Demo: what the page shows now is what was sent.
+      const nowKeys = Object.fromEntries(Object.entries(answersRef.current).map(([id, a]) => [id, customsAnswerContentKey(a)]));
+      setSavedKeys(nowKeys);
+      demoSentKeys.current = nowKeys;
+      setServerUnsent([]);
       setSave((s) => (withAnswers ? { status: 'saved', at: now } : s));
       setSending(false);
+      sendingRef.current = false;
       setState('sent');
       return;
     }
@@ -820,6 +1173,10 @@ export default function VatFilesPage() {
     const sentAll: VatFilesReceivedFile[] = [];
     const sentItemIds = new Set<number>();
     let lastPayload: VatFilesPagePayload | null = null;
+    let sendConflicts: Record<string, VatFilesPageConflict> = {};
+    const sendLocked: string[] = [];
+    /** 11.10 review: what the server did with the answers (they travel with the first round). */
+    let serverAnswersSent = false;
     for (let r = 0; r < rounds.length; r++) {
       const body: Record<string, unknown> = {
         files: rounds[r].map((i) => ({
@@ -830,7 +1187,15 @@ export default function VatFilesPage() {
         comment,
       };
       if (r === 0 && hasTable) body.answers = answersBody;
-      const outcome = await requestJson<VatFilesPagePayload & { sent: VatFilesReceivedFile[]; answersSent?: boolean; staleReplies?: string[] }>(
+      const outcome = await requestJson<
+        VatFilesPagePayload & {
+          sent: VatFilesReceivedFile[];
+          answersSent?: boolean;
+          staleReplies?: string[];
+          lockedReplies?: string[];
+          conflicts?: Record<string, VatFilesPageConflict>;
+        }
+      >(
         `/api/vat-files/${token}/send`,
         {
           method: 'POST',
@@ -841,10 +1206,17 @@ export default function VatFilesPage() {
       );
       if (!outcome.ok) {
         if (r === 0) answerIds.forEach((id) => dirty.current.add(id));
+        // No answer (offline, timeout, 5xx): the answers may have been stored anyway (see lostSave).
+        if (r === 0 && (outcome.kind === 'offline' || outcome.kind === 'timeout' || outcome.kind === 'server_error')) {
+          for (const id of answerIds) lostSave.current[id] = answersBody[id];
+        }
         // Rounds that went through stay sent.
         if (sentItemIds.size > 0) setItems((prev) => prev.filter((i) => !sentItemIds.has(i.id)));
-        if (r > 0) setUnsent(false);
+        // Earlier rounds went through (the answers travel with the first): take what the server holds now.
+        if (r > 0 && lastPayload) takeStored(lastPayload);
         setSending(false);
+        sendingRef.current = false;
+        writeCount.current += 1;
         if (askForCodeIfNeeded(outcome)) return;
         if (outcome.code === 'closed') return reloadClosed();
         if ((outcome.code === 'question_changed' || outcome.code === 'unknown_line') && (await reloadLines())) {
@@ -866,30 +1238,137 @@ export default function VatFilesPage() {
         return;
       }
       rounds[r].forEach((i) => sentItemIds.add(i.id));
-      const { sent, answersSent: _answersSent, staleReplies: _staleReplies, ...payload } = outcome.data;
-      void _answersSent;
+      const {
+        sent,
+        answersSent,
+        staleReplies: _staleReplies,
+        lockedReplies,
+        conflicts: refused,
+        ...payload
+      } = outcome.data;
       void _staleReplies;
+      if (answersSent === true) serverAnswersSent = true;
       sentAll.push(...(sent ?? []));
       lastPayload = payload;
+      if (refused) sendConflicts = { ...sendConflicts, ...refused };
+      sendLocked.push(...(lockedReplies ?? []));
     }
 
     if (lastPayload) {
       setData(lastPayload);
       // Take the lines again (TME may have added or closed a question). The
       // answers are what was just sent; replies to closed questions drop out.
+      const typed = answersRef.current;
       const fresh = lastPayload.customsLines ?? [];
       const r = reconcileAfterReload(answersRef.current, dirty.current, fresh, lastPayload.customsAnswers ?? {});
       setLines(fresh);
+      linesRef.current = fresh;
       setAllAnswers(r.answers);
       dirty.current = new Set(r.dirty);
+      takeSync(lastPayload, r.dirty);
+      takeStored(lastPayload);
+      noteOwnVersion(lastPayload.version, lastPayload.clientChangedAt);
+      // Round 5: lines someone else changed at the same time: their version + a note.
+      applyConflicts(sendConflicts, typed);
+      if (sendLocked.length > 0) {
+        setNotice(LOCKED_NOTE);
+        keepRefusedReplies(sendLocked, answersBody, lastPayload);
+      }
+    }
+    // Round 5 review: a refused line = the answers were NOT sent (the server
+    // saved the other lines like an autosave). Stay on the table: the person
+    // settles each conflict (Use mine / Keep theirs) and presses Send again.
+    const conflictIds = Object.keys(sendConflicts);
+    if (conflictIds.length > 0) {
+      const nos = conflictIds
+        .map((id) => linesRef.current.find((l) => String(l.id) === id)?.lineNo)
+        .filter((n): n is number => typeof n === 'number')
+        .sort((a, b) => a - b);
+      const which = nos.length === 0 ? 'an import' : nos.length === 1 ? `import ${nos[0]}` : `imports ${nos.join(', ')}`;
+      const filesSent =
+        sentAll.length === 0 ? '' : sentAll.length === 1 ? 'Your file was sent. ' : `Your ${sentAll.length} files were sent. `;
+      setItems((prev) => prev.filter((i) => !sentItemIds.has(i.id)));
+      if (sentAll.length > 0) setComment('');
+      setSendError(`${filesSent}Not sent yet: someone else changed ${which}. Choose Use mine or Keep theirs, then press Send again.`);
+      setSending(false);
+      sendingRef.current = false;
+      return;
+    }
+    // 11.10 review: the confirmation says what the SERVER sent. Nothing went
+    // out (e.g. only a locked reply changed, or the page's "unsent" was stale):
+    // stay on the table; the lines are the stored ones again (taken above).
+    const result = vatFilesSendResult({ answersSent: serverAnswersSent, filesSent: sentAll.length, locked: sendLocked.length > 0 });
+    if (result.stay) {
+      setItems((prev) => prev.filter((i) => !sentItemIds.has(i.id)));
+      if (result.message) setSendError(result.message);
+      setSending(false);
+      sendingRef.current = false;
+      return;
     }
     setItems([]);
     setSentFiles(sentAll);
-    setSentAnswers(withAnswers);
-    setUnsent(false);
+    setSentAnswers(result.answersSent);
     setSending(false);
+    sendingRef.current = false;
     setState('sent');
-  }, [canSend, done, demo, token, comment, hasTable, unsent, reloadLines, scheduleSave, setAllAnswers, askForCodeIfNeeded, reloadClosed]);
+  }, [canSend, done, demo, token, comment, hasTable, unsent, reloadLines, scheduleSave, setAllAnswers, askForCodeIfNeeded, reloadClosed, takeSync, takeStored, setSavedKeys, noteOwnVersion, applyConflicts, keepRefusedReplies, refreshLostBases]);
+
+  // ---------- Round 5: did someone else change the table? ----------
+  // Every 60 s while the tab is visible, and when it gets the focus back. A
+  // change shows a note with Reload; the page never reloads by itself.
+  useEffect(() => {
+    if (demo || state !== 'form') return;
+    let stopped = false;
+    let last = 0;
+    const check = async () => {
+      if (stopped || document.visibilityState !== 'visible') return;
+      if (Date.now() - last < CHANGE_CHECK_MIN_GAP_MS) return;
+      if (inflight.current || sendingRef.current || !knownVersion.current) return;
+      last = Date.now();
+      const writes = writeCount.current;
+      const since = knownClientAt.current;
+      const outcome = await requestJson<VatFilesChangeInfo>(
+        `/api/vat-files/${token}/version${since ? `?since=${encodeURIComponent(since)}` : ''}`,
+        { cache: 'no-store' }
+      );
+      // Round 5 review: the link ran out while the page was open: say so (no silent stop).
+      if (!stopped && !outcome.ok && outcome.code === 'expired') {
+        setState('expired');
+        return;
+      }
+      // A save of this page finished meanwhile: its version may not be known yet; ask again next time.
+      if (stopped || !outcome.ok || writes !== writeCount.current || inflight.current || sendingRef.current) return;
+      const text = vatFilesChangeNotice({
+        knownVersion: knownVersion.current,
+        ownVersions: ownVersions.current,
+        pageStatus: 'open',
+        change: outcome.data,
+      });
+      if (text) setChangeNote({ text, closed: outcome.data.status === 'closed' });
+    };
+    const timer = setInterval(() => void check(), CHANGE_CHECK_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [demo, state, token]);
+
+  /** Round 5, Reload on the note: save what was typed first (a line both changed comes back as a conflict note), then load. */
+  const reloadForChange = useCallback(async () => {
+    const closed = changeNote?.closed === true;
+    setChangeNote(null);
+    if (demo) return;
+    if (closed) return reloadClosed();
+    await saveNowRef.current();
+    await reloadLines('sync');
+  }, [changeNote, demo, reloadClosed, reloadLines]);
 
   // ---------- Round 4 B: email code ----------
   const onCodeConfirmed = useCallback(() => {
@@ -953,6 +1432,22 @@ export default function VatFilesPage() {
           title="We could not open this page"
         >
           <p>{loadError}</p>
+        </Message>
+      </Shell>
+    );
+  }
+
+  if (state === 'expired') {
+    return (
+      <Shell>
+        <Message
+          icon={<XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />}
+          title="This link has expired"
+        >
+          <p>
+            Please use the link from our latest email, or reply to that email and we will send you a new
+            one.
+          </p>
         </Message>
       </Shell>
     );
@@ -1131,7 +1626,39 @@ export default function VatFilesPage() {
             </div>
           </div>
         </div>
+        {/* Round 5: someone else changed the table (laptop: under the sticky header). */}
+        <AnimatePresence initial={false}>
+          {!readOnly && changeNote && (
+            <motion.div
+              key="change-note"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="hidden md:block overflow-hidden"
+            >
+              <div className={`mx-auto ${maxW} px-4 sm:px-6 pb-3`}>
+                <ChangeBanner text={changeNote.text} closed={changeNote.closed} onReload={reloadForChange} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
+      {/* Phone: the same note at the bottom of the screen (the header does not stick there). */}
+      <AnimatePresence>
+        {!readOnly && changeNote && (
+          <motion.div
+            key="change-note-phone"
+            initial={{ y: 24, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 24, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="md:hidden fixed inset-x-3 bottom-3 z-40"
+          >
+            <ChangeBanner text={changeNote.text} closed={changeNote.closed} onReload={reloadForChange} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className={`mx-auto ${maxW} px-4 sm:px-6 py-4 sm:py-5 space-y-4`}>
         {readOnly && <ClosedNotice />}
@@ -1234,6 +1761,14 @@ export default function VatFilesPage() {
             onRetrySave={retrySave}
             readOnly={readOnly}
             replyMeta={replyMetaByLine}
+            peopleNames={data?.peopleNames}
+            sentReplies={sentReplies}
+            savedAnswers={data?.customsAnswers}
+            conflicts={conflicts}
+            onUseMine={onUseMine}
+            onKeepTheirs={onKeepTheirs}
+            lockedNotes={lockedNotes}
+            onDismissLocked={onDismissLocked}
           />
         )}
         {!readOnly && (
@@ -1441,7 +1976,10 @@ export default function VatFilesPage() {
                     </p>
                   )}
                   {hasTable && !unsent && done.length === 0 && data?.customsAnswersSentAt && (
-                    <p className="text-xs text-gray-500">Your answers are already with TME. Any change you make is sent with the next Send.</p>
+                    <p className="text-xs text-gray-500">
+                      Your answers are already with TME. Any change you make is sent with the next Send. Replies to TME questions cannot be
+                      changed after Send.
+                    </p>
                   )}
                   {demo && <p className="text-xs text-gray-400">Demo page: nothing is saved.</p>}
                 </div>

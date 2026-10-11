@@ -496,6 +496,18 @@ describe('round 4 C: who asked, who replied', () => {
     expect(replyWhoLine(undefined)).toBe('');
   });
 
+  it('round 4 D: the contact name next to the email; no name = the email alone', () => {
+    const names = { 'b.klingler@star.de.com': 'Bernd Klingler' };
+    expect(replyWhoLine({ sentAt: T0, sentBy: 'b.klingler@star.de.com', savedAt: T0 }, names)).toBe(
+      'Sent by Bernd Klingler (b.klingler@star.de.com) on 11.10.2026 13:09'
+    );
+    expect(replyWhoLine({ sentAt: T0, sentBy: 'a@x.com', changedAt: T60, changedBy: 'b.klingler@star.de.com', savedAt: T60 }, names)).toBe(
+      'Changed by Bernd Klingler (b.klingler@star.de.com) on 11.10.2026 14:09'
+    );
+    expect(replyWhoLine({ sentAt: T0, sentBy: 'a@x.com', savedAt: T0 }, names)).toBe('Sent by a@x.com on 11.10.2026 13:09');
+    expect(replyWhoLine({ sentAt: T0, savedAt: T0 }, names)).toBe('Sent on 11.10.2026 13:09');
+  });
+
   it('page state after a save: replies + stamps of the saved lines, others untouched; demo stamps like the server', () => {
     const current = { '1': { parts: [FULL] }, '2': { parts: [], replies: { '77': 'Yes' }, replyMeta: { '77': { sentAt: T0, savedAt: T0 } } } };
     const meta = demoReplyMeta(current, { '2': { parts: [], replies: { '77': 'Yes ', '78': 'Paid by us' } } }, T5, 'anna@x.com');

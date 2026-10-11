@@ -16,17 +16,23 @@ import {
   vatFileExtension,
   vatFileNameFromPath,
   vatFileStoragePath,
+  normaliseVatFilesEmail,
+  readVatAllowedNames,
   type VatFileEntry,
   type VatFileRequestRow,
   type VatCustomsAnswers,
   type VatCustomsDocKind,
+  type VatCustomsLineAnswer,
   type VatFilesPagePayload,
 } from '@/types/vat-files';
 import {
   buildLineFiles,
+  canonicalIso,
   isVatCustomsDocKind,
+  mergeLineAnswer,
   readDefaults,
   readStoredAnswers,
+  sameInstant,
   sanitizePageLines,
 } from './vat-customs';
 
@@ -267,9 +273,293 @@ export function scrubVatFilesRow(row: VatFileRequestRow, now: number = Date.now(
     customsLines,
     customsAnswers: withoutSavedBy(readStoredAnswers(row.customs_answers, customsLines)),
     customsDefaults: customsLines.length > 0 ? readDefaults(row.customs_defaults) : null,
-    customsAnswersSentAt: typeof row.customs_answers_sent_at === 'string' ? row.customs_answers_sent_at : null,
+    // Round 5: one spelling (Supabase reads "+00:00", a Send writes "Z").
+    customsAnswersSentAt: canonicalIso(row.customs_answers_sent_at),
     lineFiles: buildLineFiles(files, customsLines),
   };
+}
+
+/**
+ * Round 4 D: the names the page may show next to an email, from the row's
+ * allowed_names (portal-written). Only for addresses the payload already
+ * names (the viewer, who sent / changed a reply), never the whole list, and
+ * only for a viewer who confirmed an address with the code (no viewer = no
+ * names, so a visitor without a code learns nothing new). Looked up at every
+ * load, so older stamps get the name too. Pure.
+ */
+export function vatFilesPeopleNames(
+  allowedNames: unknown,
+  payload: Pick<VatFilesPagePayload, 'customsAnswers'>,
+  viewerEmail: string | null | undefined
+): Record<string, string> {
+  const viewer = normaliseVatFilesEmail(viewerEmail);
+  if (!viewer) return {};
+  const names = readVatAllowedNames(allowedNames);
+  const shown = new Set<string>([viewer]);
+  for (const a of Object.values(payload.customsAnswers ?? {})) {
+    // Round 5 item 8: who wrote a note is named like who sent a reply.
+    const metas = [...Object.values(a?.replyMeta ?? {}), ...Object.values(a?.notes ?? {}).flat()];
+    for (const m of metas) {
+      for (const e of [m?.sentBy, m?.changedBy]) {
+        const key = normaliseVatFilesEmail(e);
+        if (key) shown.add(key);
+      }
+    }
+  }
+  const out: Record<string, string> = {};
+  for (const e of shown) if (names[e]) out[e] = names[e];
+  return out;
+}
+
+/**
+ * The page data for a viewer: the scrubbed row plus `viewerEmail` and
+ * `peopleNames` (vatFilesPeopleNames: names only for a code-confirmed viewer,
+ * only the viewer and reply authors). Every route whose answer replaces the
+ * page data (GET, Send) builds it here, so "Sent by Name (email)" and
+ * "Confirmed as ..." survive a Send. Pure.
+ */
+export function vatFilesViewerPayload(
+  row: VatFileRequestRow,
+  viewerEmail: string | null | undefined,
+  now: number = Date.now()
+): VatFilesPagePayload {
+  const payload = scrubVatFilesRow(row, now);
+  const email = viewerEmail ?? null;
+  return {
+    ...payload,
+    viewerEmail: email,
+    peopleNames: vatFilesPeopleNames(row.allowed_names, payload, email),
+    // Round 5: for the "changed by someone else?" check.
+    version: vatFilesPageVersion(payload),
+    clientChangedAt: vatFilesLastClientChange(row).at,
+  };
+}
+
+// ------------------------------------------------------------------
+// Round 5: two people on one page
+// ------------------------------------------------------------------
+
+/** An ISO timestamp, in any spelling ("Z" or "+00:00", any number of fraction digits). */
+const ISO_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * JSON with object keys sorted (jsonb re-orders keys, so the same data must
+ * give the same text) and every timestamp in one spelling (canonicalIso), so
+ * a "+00:00" read and a "Z" write of the same moment hash alike.
+ */
+function stableJson(value: unknown): string {
+  if (typeof value === 'string' && ISO_STAMP.test(value)) return JSON.stringify(canonicalIso(value) ?? value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/** A 53-bit string hash (cyrb53), as 14 hex characters. Not for security: only "did it change?". */
+function hash53(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0');
+}
+
+/**
+ * Round 5: the fingerprint of what the page shows and what a second person
+ * could change under the client's hands: status, the client answers (with
+ * who / when per reply), the last Send, per line the open questions and the
+ * answer the page shows (TME's answer when it is the newer one), and the
+ * number of files. NOT the portal's ticks or stamps: the portal re-writes the
+ * lines after every sync, which alone must not say "TME updated the table".
+ * Viewer-independent. Pure.
+ */
+export function vatFilesPageVersion(
+  payload: Pick<VatFilesPagePayload, 'status' | 'customsLines' | 'customsAnswers' | 'customsAnswersSentAt' | 'files'>
+): string {
+  const answers = payload.customsAnswers ?? {};
+  const shown = {
+    s: payload.status,
+    a: answers,
+    t: canonicalIso(payload.customsAnswersSentAt),
+    l: (payload.customsLines ?? []).map((l) => {
+      const merged = mergeLineAnswer(l, answers[String(l.id)]);
+      return [l.id, (l.questions ?? []).map((q) => [q.id, q.text]), merged.parts, merged.filledBy ? 1 : 0];
+    }),
+    f: (payload.files ?? []).length,
+  };
+  return hash53(stableJson(shown));
+}
+
+/**
+ * Round 5: the last change the CLIENT side made (autosave or Send) and who:
+ * the later of customs_answers_saved_at (who = savedBy of the line saved
+ * then) and last_submitted_at (who = last_submitted_by). Pure.
+ */
+export function vatFilesLastClientChange(row: VatFileRequestRow): { at: string | null; by: string | null } {
+  // One spelling (canonicalIso): Supabase reads "+00:00", the line stamps are "Z".
+  const savedAt = canonicalIso(row.customs_answers_saved_at);
+  const sentAt = canonicalIso(row.last_submitted_at);
+  const t = (s: string | null) => (s ? Date.parse(s) || 0 : 0);
+  if (!savedAt && !sentAt) return { at: null, by: null };
+  if (sentAt && t(sentAt) >= t(savedAt)) {
+    return { at: sentAt, by: normaliseVatFilesEmail(row.last_submitted_by) };
+  }
+  let by: string | null = null;
+  const raw = row.customs_answers;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const a of Object.values(raw as Record<string, { updatedAt?: unknown; savedBy?: unknown }>)) {
+      if (a && typeof a.updatedAt === 'string' && sameInstant(a.updatedAt, savedAt)) {
+        by = normaliseVatFilesEmail(a.savedBy);
+        if (by) break;
+      }
+    }
+  }
+  return { at: savedAt, by };
+}
+
+/** Round 5: what the "changed by someone else?" check answers (GET /version, and a save that saw a change). */
+export interface VatFilesChangeInfo {
+  /** vatFilesPageVersion of the row now. */
+  version: string;
+  status: 'open' | 'closed';
+  /** 'client' = a save / Send on the page after `since`; 'tme' = the portal (questions, lines, closed). */
+  source: 'client' | 'tme';
+  /** When (server time); null = unknown. */
+  at: string | null;
+  /** Who (confirmed address), ONLY for a code-confirmed viewer; null otherwise. */
+  by: string | null;
+  /** That person's contact name (allowed_names), only with `by`; null = none known. */
+  byName: string | null;
+  /** The viewer's own address saved it (another tab or device of the same person). */
+  self: boolean;
+  /** The last client change (server time): the page's next `since`. */
+  clientChangedAt: string | null;
+}
+
+/**
+ * Round 5: describe the row's latest change for a viewer. `since` = the last
+ * client change the page knows (its payload's clientChangedAt, or its own
+ * last save): a client change after it is "someone on the client side",
+ * otherwise it was TME. Names follow vatFilesPeopleNames: only for a viewer
+ * who confirmed an address with the code; without the code no address and
+ * no name ("Someone else"). Pure.
+ */
+export function vatFilesChangeInfo(
+  row: VatFileRequestRow,
+  viewerEmail: string | null | undefined,
+  since: string | null | undefined,
+  now: number = Date.now()
+): VatFilesChangeInfo {
+  const payload = scrubVatFilesRow(row, now);
+  const viewer = normaliseVatFilesEmail(viewerEmail);
+  const last = vatFilesLastClientChange(row);
+  const sinceAt = Date.parse(since ?? '');
+  const lastAt = Date.parse(last.at ?? '');
+  const byClient = !Number.isNaN(lastAt) && (Number.isNaN(sinceAt) || lastAt > sinceAt);
+  const by = byClient && viewer ? last.by : null;
+  const name = by ? readVatAllowedNames(row.allowed_names)[by] ?? null : null;
+  return {
+    version: vatFilesPageVersion(payload),
+    status: payload.status,
+    source: byClient ? 'client' : 'tme',
+    at: byClient ? last.at : canonicalIso(row.updated_at),
+    by,
+    byName: name,
+    self: !!by && by === viewer,
+    clientChangedAt: last.at,
+  };
+}
+
+/**
+ * 11.10 review: what the page does after a Send (no conflicts) from what the
+ * SERVER did, never from what the page expected. `answersSent` = the server
+ * stamped the answers (its `answersSent`); `filesSent` = files it took.
+ * Something went out = the "thank you" page, saying answers only when they
+ * were stamped. Nothing went out = stay on the table (the page has taken the
+ * stored lines again) with a short note: the locked note when a sent reply
+ * was refused, otherwise "Nothing new to send.". Pure.
+ */
+export function vatFilesSendResult(input: {
+  answersSent: boolean;
+  filesSent: number;
+  locked: boolean;
+}): { stay: false; answersSent: boolean } | { stay: true; reason: 'locked' | 'nothing_new'; message: string | null } {
+  if (input.answersSent || input.filesSent > 0) return { stay: false, answersSent: input.answersSent };
+  // The locked note itself is shown by the page (setNotice); no second message.
+  if (input.locked) return { stay: true, reason: 'locked', message: null };
+  return { stay: true, reason: 'nothing_new', message: 'Nothing new to send.' };
+}
+
+/**
+ * Round 5, the page's decision: show "X changed the table at 17:10" or not.
+ * Nothing when the version is the one the page shows, or one its own saves
+ * produced. A request TME closed always shows. Text names the person only
+ * when the server gave a name / address (code-confirmed viewers). Pure.
+ */
+export function vatFilesChangeNotice(input: {
+  knownVersion: string | null | undefined;
+  ownVersions?: readonly string[];
+  pageStatus: 'open' | 'closed';
+  change: Pick<VatFilesChangeInfo, 'version' | 'status' | 'source' | 'at' | 'by' | 'byName' | 'self'>;
+}): string | null {
+  const { change } = input;
+  const time = formatChangeTime(change.at);
+  const at = time ? ` at ${time}` : '';
+  if (input.pageStatus === 'open' && change.status === 'closed') return `TME closed this request${at}.`;
+  if (!change.version || !input.knownVersion) return null;
+  if (change.version === input.knownVersion || (input.ownVersions ?? []).includes(change.version)) return null;
+  if (change.source === 'tme') return `TME updated the table${at}.`;
+  if (change.self) return `You changed the table in another window${at}.`;
+  const who = change.byName || change.by || 'Someone else';
+  return `${who} changed the table${at}.`;
+}
+
+/** 'hh:mm' Dubai time ('' when unknown); the page's other times use Dubai time too. */
+function formatChangeTime(iso: string | null | undefined): string {
+  const t = Date.parse(iso ?? '');
+  if (Number.isNaN(t)) return '';
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t));
+}
+
+/** Round 5: a refused line as the page gets it. */
+export interface VatFilesPageConflict {
+  /** The stored answer now (never `savedBy`). */
+  answer: VatCustomsLineAnswer;
+  at: string | null;
+  /** Who saved it, ONLY for a code-confirmed viewer; null otherwise. */
+  by: string | null;
+  byName: string | null;
+}
+
+/**
+ * Round 5: the conflicts of a save, for the page. `savedBy` is never sent;
+ * who saved it (address + contact name) only to a code-confirmed viewer, as
+ * vatFilesPeopleNames. Pure.
+ */
+export function vatFilesConflictsForPage(
+  conflicts: Record<string, { answer: VatCustomsLineAnswer; at: string | null; savedBy: string | null }>,
+  viewerEmail: string | null | undefined,
+  allowedNames: unknown
+): Record<string, VatFilesPageConflict> {
+  const viewer = normaliseVatFilesEmail(viewerEmail);
+  const names = viewer ? readVatAllowedNames(allowedNames) : {};
+  const out: Record<string, VatFilesPageConflict> = {};
+  for (const [id, c] of Object.entries(conflicts)) {
+    const { savedBy: _by, ...answer } = c.answer;
+    void _by;
+    const by = viewer ? normaliseVatFilesEmail(c.savedBy) : null;
+    out[id] = { answer, at: c.at, by, byName: by ? names[by] ?? null : null };
+  }
+  return out;
 }
 
 /**

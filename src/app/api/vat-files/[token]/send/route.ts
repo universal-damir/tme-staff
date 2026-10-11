@@ -5,10 +5,19 @@ import {
   buildFinalizeEntries,
   linkFolder,
   parseFinalizeBody,
-  scrubVatFilesRow,
+  vatFilesConflictsForPage,
   vatFilesRateLimited,
+  vatFilesViewerPayload,
+  type VatFilesPageConflict,
 } from '@/lib/vat-files';
-import { applyCustomsAnswersUpdate, sanitizePageLines } from '@/lib/vat-customs';
+import {
+  applyCustomsAnswersUpdate,
+  customsUnsentLineIds,
+  dropClosedDraftNotes,
+  sanitizePageLines,
+  vatCustomsSendStamp,
+  withCustomsSentKeys,
+} from '@/lib/vat-customs';
 import { listVatLinkFolder, verifyVatFilesAccess, vatFilesAccessErrorBody } from '@/lib/vat-files-token';
 import { vatFilesViewer } from '@/lib/vat-files-code';
 import {
@@ -38,9 +47,31 @@ const MAX_WRITE_ATTEMPTS = 4;
 // customs_answers_sent_at) picks them up. A repeated Send with nothing new
 // stamps nothing. Replies follow the answers route (only to open questions;
 // `staleReplies` names lines where one was dropped). The row stays open, so the client can send more later
-// through the same link. Answer: the page data.
+// through the same link. Answer: the page data, with viewerEmail + peopleNames like the GET.
 // Round 4 B: with an email code, each new file carries `uploadedBy`, changed
 // answer lines `savedBy`, and the row `last_submitted_by` (the confirmed address).
+// Round 5: the answers follow the answers route: a reply already SENT stays
+// as it is (`lockedReplies`), a line somebody else saved since the page
+// loaded it is refused (`conflicts`, who only for a code-confirmed viewer).
+// A Send that brings nothing new writes nothing (not even updated_at).
+// A Send with a refused line (conflict) does NOT stamp customs_answers_sent_at:
+// the taken lines are saved as an autosave would, `answersSent` is false, and
+// the page asks the person to settle the conflicts and press Send again (files
+// in the same Send still go out).
+// Round 5 item 8: notes under a sent reply travel like replies (same merge,
+// same locks); a Send stamps every draft note as sent (its last save is then
+// not later than customs_answers_sent_at), so it becomes read-only.
+// Round 5 review: before that stamp, unsent draft notes of questions that are
+// no longer open are removed from every line (dropClosedDraftNotes), so they
+// never turn "sent" and reopen a question TME closed. The stamp is never
+// earlier than customs_answers_saved_at (vatCustomsSendStamp: a draft saved by
+// another server instance with a slightly fast clock still counts as sent);
+// last_submitted_at gets the same stamp.
+// 11.10: the stamp needs a real change: a line whose content (texts cleaned,
+// empty notes / replies left out) differs from what the last Send carried
+// (customsUnsentLineIds, against each line's `sentKey`); the stamping Send
+// writes the new `sentKey` on every line. A Send whose answers came back to
+// the sent content saves them like an autosave, without a stamp.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -111,33 +142,70 @@ export async function POST(
     const files = [...existing, ...built.entries];
     const patch: Record<string, unknown> = { files, updated_at: nowIso };
     let stampAnswers = false;
+    // Round 5 review: the Send stamp (customs_answers_sent_at + last_submitted_at), never before the last save.
+    let sendStamp = nowIso;
+    let saveOnly = false;
     let staleReplies: string[] = [];
+    let lockedReplies: string[] = [];
+    let conflicts: Record<string, VatFilesPageConflict> = {};
     if (withAnswers) {
-      const update = applyCustomsAnswersUpdate(current.customs_answers, parsed.answers ?? {}, currentLines, nowIso, by);
+      const update = applyCustomsAnswersUpdate(current.customs_answers, parsed.answers ?? {}, currentLines, nowIso, by, {
+        answersSentAt: current.customs_answers_sent_at ?? null,
+      });
       if (!update.ok) {
         return NextResponse.json({ error: update.error, lineId: update.lineId ?? null }, { status: 400 });
       }
       staleReplies = update.staleReplies;
-      if (update.changed.length > 0) {
-        patch.customs_answers = update.answers;
-        patch.customs_answers_saved_at = nowIso;
-      }
+      lockedReplies = update.lockedReplies;
+      conflicts = vatFilesConflictsForPage(update.conflicts, by, current.allowed_names);
+      const swept = dropClosedDraftNotes(update.answers, currentLines, current.customs_answers_sent_at ?? null);
+      if (update.changed.length > 0 || swept.changed.length > 0) patch.customs_answers = swept.answers;
+      if (update.changed.length > 0) patch.customs_answers_saved_at = nowIso;
       const savedAt = current.customs_answers_saved_at ?? null;
       const sentAt = current.customs_answers_sent_at ?? null;
-      const unsentSave = !!savedAt && (!sentAt || Date.parse(savedAt) > Date.parse(sentAt));
-      stampAnswers = update.changed.length > 0 || unsentSave;
-      if (stampAnswers) patch.customs_answers_sent_at = nowIso;
-      if (built.entries.length === 0 && !stampAnswers) {
-        // Nothing new: a double click after a Send is fine, a first empty Send is not.
-        if (sentAt) {
-          return NextResponse.json({ ...scrubVatFilesRow(current), sent: [] });
+      // 11.10: something to send = a line whose content differs from what the
+      // last Send carried (customsUnsentLineIds), never "saved after the last
+      // Send": typed and deleted back, an emptied note: nothing new.
+      const unsentContent = customsUnsentLineIds(swept.answers, sentAt).length > 0;
+      // Round 5: a line refused as a conflict = the answers are NOT sent: the
+      // other lines are saved like an autosave (no Send stamp), so nobody's
+      // unsent draft becomes "sent" / read-only. The page shows the conflicts;
+      // after "Use mine" / "Keep theirs" the person presses Send again.
+      const hasConflicts = Object.keys(conflicts).length > 0;
+      stampAnswers = !hasConflicts && unsentContent;
+      // A change that brings the content back to what was sent is saved like an autosave (no Send stamp).
+      saveOnly = !stampAnswers && update.changed.length > 0;
+      if (stampAnswers) {
+        sendStamp = vatCustomsSendStamp(nowIso, (patch.customs_answers_saved_at as string | undefined) ?? savedAt);
+        patch.customs_answers_sent_at = sendStamp;
+        // 11.10: each line keeps the fingerprint of what this Send carried.
+        patch.customs_answers = withCustomsSentKeys(swept.answers);
+      }
+      if (built.entries.length === 0 && !stampAnswers && !saveOnly) {
+        // Nothing new: a double click after a Send is fine, a first empty Send is
+        // not (unless lines were refused: the page must hear about them).
+        const refused = lockedReplies.length > 0 || Object.keys(conflicts).length > 0;
+        if (sentAt || refused) {
+          return NextResponse.json({
+            ...vatFilesViewerPayload(current, viewer.email),
+            answersSent: false,
+            staleReplies,
+            lockedReplies,
+            conflicts,
+            sent: [],
+          });
         }
         return NextResponse.json({ error: 'no_files' }, { status: 400 });
       }
     }
-    // A double click sends nothing new: keep the timestamps as they were.
+    // Round 5: a repeated Send of files already in the row (double click) changes nothing: no write.
+    if (built.entries.length === 0 && !stampAnswers && !saveOnly) {
+      return NextResponse.json({ ...vatFilesViewerPayload(current, viewer.email), answersSent: false, sent: [] });
+    }
+    // A double click sends nothing new: keep the timestamps as they were. A
+    // save-only (conflicts, no files) is no Send: no last_submitted_at either.
     if (built.entries.length > 0 || stampAnswers) {
-      patch.last_submitted_at = nowIso;
+      patch.last_submitted_at = sendStamp;
       // Only with a code (the column comes with the round 4 SQL, like allowed_emails).
       if (by) patch.last_submitted_by = by;
       if (parsed.comment) patch.client_comment = parsed.comment;
@@ -154,9 +222,11 @@ export async function POST(
     }
     if (written && written.length > 0) {
       return NextResponse.json({
-        ...scrubVatFilesRow({ ...current, ...patch, files } as VatFileRequestRow),
+        ...vatFilesViewerPayload({ ...current, ...patch, files } as VatFileRequestRow, viewer.email),
         answersSent: stampAnswers,
         staleReplies,
+        lockedReplies,
+        conflicts,
         sent: built.entries.map((e) => ({ name: e.name, size: e.size, uploadedAt: e.uploadedAt })),
       });
     }

@@ -95,6 +95,12 @@ export interface VatFileRequestRow {
   allowed_emails?: string[] | null;
   /** Round 4. Client-owned: the confirmed email of the last Send; null = unknown. */
   last_submitted_by?: string | null;
+  /**
+   * Round 4 D. Portal-owned: { "<allowed email, lower case>": "First Last" }
+   * from the client's contacts; an address without a name is not in it.
+   * Missing column / {} = the page shows the email only (as before).
+   */
+  allowed_names?: Record<string, string> | null;
 }
 
 /** What the tme-staff page shows (built from the row; never the storage paths). */
@@ -126,6 +132,20 @@ export interface VatFilesPagePayload {
   lineFiles: Array<{ lineId: number; docKind: VatCustomsDocKind; name: string; uploadedAt: string }>;
   /** Round 4: the email the viewer confirmed with a code; null / missing = no code needed. */
   viewerEmail?: string | null;
+  /**
+   * Round 4 D: names of the people this payload already names by email (the
+   * viewer, who sent / changed a reply), from allowed_names. Never the whole
+   * list. Missing / {} = emails only.
+   */
+  peopleNames?: Record<string, string>;
+  /**
+   * Round 5: a short fingerprint of what the page shows (answers, questions,
+   * sent time, status, file count). The page compares it with the "changed by
+   * someone else?" check. Missing = an older server (no check).
+   */
+  version?: string;
+  /** Round 5: the last client save or Send on the row (server time); null = none yet. */
+  clientChangedAt?: string | null;
 }
 
 /** Upload limits, the same as the portal's VAT filing documents (period-documents.ts). */
@@ -309,10 +329,27 @@ export interface VatCustomsLineAnswer {
    */
   replyMeta?: Record<string, VatCustomsReplyMeta>;
   /**
+   * Round 5 (item 8): the client's notes under a SENT reply, keyed by question
+   * id like `replies`, oldest first, at most VAT_CUSTOMS_MAX_NOTES_PER_QUESTION
+   * per question. The id is made by the page; the who / when on each note is
+   * written ONLY by the page's server (never trusted from the browser). See
+   * "Round 5: notes under a sent reply" below.
+   */
+  notes?: Record<string, VatCustomsNote[]>;
+  /**
    * Round 4 C, portal-written on VatCustomsPageLine.answer only: TME typed this
    * answer. `name` = the colleague's full name (first + last); null = unknown.
    */
   filledBy?: { name: string | null };
+  /**
+   * 11.10 (Send only on a real change): the fingerprint of this line's content
+   * (parts, replies, notes; texts cleaned, empty ones left out) at the last
+   * Send that stamped customs_answers_sent_at. Written ONLY by the page's
+   * server on that Send. The page's Send button counts a line as "not sent"
+   * only while its content differs from this. Absent = no Send since this
+   * field exists (then `updatedAt` later than customs_answers_sent_at decides).
+   */
+  sentKey?: string;
 }
 
 /** vat_file_requests.customs_answers: { "<portal line id>": VatCustomsLineAnswer } */
@@ -507,4 +544,115 @@ export function vatCustomsReplyVersionAt(meta: VatCustomsReplyMeta | null | unde
 /** Who wrote the current version of a reply (lower case); null = unknown. */
 export function vatCustomsReplyBy(meta: VatCustomsReplyMeta | null | undefined): string | null {
   return (meta?.changedAt ? meta.changedBy : meta?.sentBy) || null;
+}
+
+// ============================================
+// Round 5 (11.10.2026): a reply is read-only after Send
+// ============================================
+//
+// The client page autosaves a reply while it is typed; the Send button
+// stamps vat_file_requests.customs_answers_sent_at. A reply whose last save
+// (replyMeta.savedAt, else its version stamp, else the line's updatedAt for
+// rows from before round 4 C) is not later than that stamp has been SENT:
+// the page shows it as text and the tme-staff server refuses to change it.
+// A reply saved after the last Send is still a draft and stays editable.
+// More from the client = TME asks a follow-up question (a new question id).
+
+/** True when this reply (with text) went out with a Send: read-only on the page. Pure. */
+export function isVatCustomsReplySent(
+  meta: VatCustomsReplyMeta | null | undefined,
+  lineUpdatedAt: string | null | undefined,
+  answersSentAt: string | null | undefined
+): boolean {
+  const sent = Date.parse(answersSentAt ?? '');
+  if (Number.isNaN(sent)) return false;
+  const at = Date.parse(meta?.savedAt || vatCustomsReplyVersionAt(meta) || lineUpdatedAt || '');
+  // No stamp at all (never written by the page's server): a Send exists, so treat it as sent.
+  if (Number.isNaN(at)) return true;
+  return at <= sent;
+}
+
+// ============================================
+// Round 5 (item 8, 11.10.2026): notes under a sent reply
+// ============================================
+//
+// A sent reply is read-only. To add something the client presses "Add a
+// note" under it: a short text, autosaved like a reply draft and sent with
+// the next Send. A note saved after the last Send is a draft (editable; an
+// empty draft is removed); once sent it is read-only, like the reply
+// (isVatCustomsReplySent on the note's own stamps). Several notes per
+// question, oldest first. Notes go only under a SENT reply of an OPEN
+// question (a note to a question TME closed is dropped, like a reply). The
+// portal takes in SENT notes only (vat_customs_questions.client_notes); a new
+// one makes the question a reply to read again.
+
+/** One note: its id, the text, and its who / when (the reply stamps, same rules). */
+export interface VatCustomsNote extends VatCustomsReplyMeta {
+  /** Made by the page when the note is added (4 to 40 of A-Z a-z 0-9 _ -); unique per question. */
+  id: string;
+  text: string;
+}
+
+/** Most notes under one reply. */
+export const VAT_CUSTOMS_MAX_NOTES_PER_QUESTION = 10;
+
+/** A note id as the page makes it. */
+export function isVatCustomsNoteId(v: unknown): v is string {
+  return typeof v === 'string' && /^[A-Za-z0-9_-]{4,40}$/.test(v);
+}
+
+// ============================================
+// Round 4 D (11.10.2026): the client's name next to the email
+// ============================================
+//
+// The PORTAL writes vat_file_requests.allowed_names ({ email: "First Last" })
+// with allowed_emails (same update, same compare-and-set), from the client's
+// contacts in the portal. The page shows "Sent by Bernd Klingler
+// (b.klingler@star.de) on ..."; the portal history "Client (Bernd Klingler,
+// b.klingler@star.de) ...". Names are looked up when shown, so older stamps
+// (email only) get the name too. No name = the email alone, as before. The
+// "Who are you?" list stays masked addresses only (no names before the code).
+
+/** Longest name kept. */
+export const VAT_FILES_MAX_PERSON_NAME_CHARS = 120;
+
+/** A person's name cleaned for display: no control characters or <>, one space between words, capped; '' when empty. */
+export function cleanVatFilesPersonName(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/[\u0000-\u001F\u007F<>]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, VAT_FILES_MAX_PERSON_NAME_CHARS)
+    .trim();
+}
+
+/** The stored names, read leniently: valid lower-case address keys with a non-empty cleaned name. */
+export function readVatAllowedNames(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const email = normaliseVatFilesEmail(k);
+    const name = cleanVatFilesPersonName(v);
+    if (email && name) out[email] = name;
+  }
+  return out;
+}
+
+/** The stored names with new ones laid over (a new name for the same address wins). Never removes one. */
+export function mergeVatAllowedNames(existing: unknown, add: unknown): Record<string, string> {
+  return { ...readVatAllowedNames(existing), ...readVatAllowedNames(add) };
+}
+
+/** The name for an address (any case), or null. */
+export function vatFilesPersonName(names: Record<string, string> | null | undefined, email: string | null | undefined): string | null {
+  const key = normaliseVatFilesEmail(email);
+  if (!key || !names) return null;
+  return cleanVatFilesPersonName(names[key]) || null;
+}
+
+/** "Bernd Klingler (b.klingler@star.de)", or the email alone when no name is known. */
+export function vatFilesNamedEmail(email: string, names: Record<string, string> | null | undefined): string {
+  const name = vatFilesPersonName(names, email);
+  return name ? `${name} (${email})` : email;
 }

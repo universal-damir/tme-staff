@@ -20,10 +20,11 @@
 // in, no menus, no split / remove, no "Copy to empty rows". Nothing can
 // call onChange / onFill / onAddFile.
 
-import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
+  Copy,
   CopyCheck,
   Download,
   History,
@@ -39,10 +40,12 @@ import {
   Scissors,
   X,
 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { TME_COLORS } from '@/lib/constants';
 import ChoiceSelect, { type ChoiceOption } from './ChoiceSelect';
 import {
   copyableAnswer,
+  describeLineAnswer,
   fillEmptyLines,
   filterCustomsLineIds,
   formatAmount,
@@ -51,25 +54,31 @@ import {
   formatPageDate,
   filledByLine,
   isFillableLine,
+  isRefusedNoteKey,
+  newCustomsNoteId,
   questionAskedLine,
-  replyWhoLine,
+  replyStatusLine,
+  shownCustomsNotes,
   type CustomsLineFilter,
 } from '@/lib/vat-customs';
 import {
   VAT_CUSTOMS_DELIVERY_OPTIONS,
   VAT_CUSTOMS_INCOTERM_OPTIONS,
+  VAT_CUSTOMS_MAX_NOTES_PER_QUESTION,
   VAT_CUSTOMS_MAX_PARTS,
   VAT_CUSTOMS_MAX_TEXT_CHARS,
   VAT_CUSTOMS_PAYMENT_OPTIONS,
   VAT_CUSTOMS_PURPOSE_OPTIONS,
   isVatCustomsLineComplete,
   isVatCustomsPartComplete,
+  isVatCustomsReplySent,
   vatCustomsOptionLabel,
   type VatCustomsAnswerPart,
   type VatCustomsAnswers,
   type VatCustomsDefaults,
   type VatCustomsDocKind,
   type VatCustomsLineAnswer,
+  type VatCustomsNote,
   type VatCustomsPageLine,
   type VatCustomsReplyMeta,
 } from '@/types/vat-files';
@@ -96,7 +105,20 @@ export type SaveState =
   | { status: 'saved'; at: string }
   | { status: 'error'; message: string };
 
+/**
+ * Round 5: a line the server refused because someone else saved it after this
+ * page loaded it. The line shows their version; `mine` = what this person had
+ * typed ("Use mine" puts it back). `who` = name, address or "Someone else".
+ */
+export interface LineConflictNote {
+  mine: VatCustomsLineAnswer;
+  who: string;
+  at: string | null;
+}
+
 type OnLineChange = (lineId: string, next: VatCustomsLineAnswer) => void;
+/** Round 5 item 8: type into a note under a sent reply (a new id = a new note); `text` null = remove the draft. */
+type OnNote = (questionId: number, noteId: string, text: string | null) => void;
 type OnAddFile = (lineId: number, kind: VatCustomsDocKind) => void;
 type LineQuestion = NonNullable<VatCustomsPageLine['questions']>[number];
 /** Round 4 C: who / when per reply of one line, keyed by question id. */
@@ -119,11 +141,302 @@ function earlierReplies(questions: LineQuestion[], replies: Record<string, strin
     .map(([id, text]) => [id, text.trim()]);
 }
 
-/** Round 4 C: "Sent by x on dd.mm.yyyy hh:mm" under a reply (nothing when unknown). */
-function ReplyWho({ meta, className = '' }: { meta: VatCustomsReplyMeta | undefined; className?: string }) {
-  const text = replyWhoLine(meta);
+/** Round 4 D: { email: name } of the people the page names (VatFilesPagePayload.peopleNames). */
+const PeopleNamesContext = createContext<Record<string, string> | undefined>(undefined);
+
+/** Round 5: the row's last Send (the time a sent reply without its own stamp shows). */
+const SentAtContext = createContext<string | null>(null);
+
+/**
+ * The line under a reply. Round 5: sent = "Sent by Name (x) on dd.mm.yyyy
+ * hh:mm" (read-only); not sent yet = "Saved by ... on .... Not sent yet."
+ */
+function ReplyWho({ meta, sent, className = '' }: { meta: VatCustomsReplyMeta | undefined; sent: boolean; className?: string }) {
+  const names = useContext(PeopleNamesContext);
+  const sentAt = useContext(SentAtContext);
+  const text = replyStatusLine(meta, names, sent, sentAt);
   if (!text) return null;
   return <span className={`block text-[11px] leading-snug text-gray-500 break-words ${className}`}>{text}</span>;
+}
+
+/** Round 5: a reply that went out with a Send: plain text, who sent it; round 5 item 8: the notes under it (children). */
+function SentReply({
+  text,
+  meta,
+  className = '',
+  children,
+}: {
+  text: string;
+  meta: VatCustomsReplyMeta | undefined;
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className={className}>
+      <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-1.5">
+        <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500 mb-0.5">
+          <Lock className="w-3 h-3" aria-hidden />
+          Your reply
+        </span>
+        <p className="text-[13px] leading-snug break-words whitespace-pre-line text-gray-900">{text}</p>
+        <ReplyWho meta={meta} sent className="mt-1" />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Round 5 item 8: a note as text (sent, or any note on a closed request). */
+function NoteText({ text, meta, sent, locked }: { text: string; meta: VatCustomsReplyMeta | undefined; sent: boolean; locked: boolean }) {
+  return (
+    <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-1.5">
+      <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500 mb-0.5">
+        {locked && <Lock className="w-3 h-3" aria-hidden />}
+        Your note
+      </span>
+      <p className="text-[13px] leading-snug break-words whitespace-pre-line text-gray-900">{text}</p>
+      <ReplyWho meta={meta} sent={sent} className="mt-1" />
+    </div>
+  );
+}
+
+/**
+ * Round 5 item 8: the notes under a SENT reply and "Add a note". A sent note
+ * is text; a note not sent yet is a small box (autosaved like a reply,
+ * "Saved by ... Not sent yet.", sent with the next Send; empty = removed).
+ */
+function ReplyNotes({
+  questionId,
+  typed,
+  saved,
+  savedUpdatedAt,
+  onNote,
+  disabled,
+  idPrefix,
+  ctx,
+}: {
+  questionId: number;
+  typed: VatCustomsNote[] | undefined;
+  saved: VatCustomsNote[] | undefined;
+  savedUpdatedAt: string | undefined;
+  onNote: OnNote;
+  disabled: boolean;
+  idPrefix: string;
+  ctx: string;
+}) {
+  const sentAt = useContext(SentAtContext);
+  // A note box opened with "Add a note" that has no text yet (not in the answer until typed in).
+  const [adding, setAdding] = useState<string | null>(null);
+  const shown = shownCustomsNotes(typed, saved, savedUpdatedAt, sentAt);
+  const pending = adding !== null && !shown.some((n) => n.id === adding) ? adding : null;
+  const count = shown.length + (pending ? 1 : 0);
+  const emptyOpen = pending !== null || shown.some((n) => !n.sent && !n.text.trim());
+  const canAdd = count < VAT_CUSTOMS_MAX_NOTES_PER_QUESTION;
+  const box = (noteId: string, value: string, meta: VatCustomsReplyMeta | undefined, autoFocus: boolean) => {
+    const id = `${idPrefix}-q${questionId}-note-${noteId}`;
+    return (
+      <div key={noteId}>
+        <div className="flex items-start gap-1.5">
+          <label htmlFor={id} className="sr-only">
+            Your note to TME on {ctx}
+          </label>
+          <textarea
+            id={id}
+            value={value}
+            disabled={disabled}
+            autoFocus={autoFocus}
+            maxLength={VAT_CUSTOMS_MAX_TEXT_CHARS}
+            onChange={(e) => onNote(questionId, noteId, e.target.value)}
+            rows={2}
+            placeholder="Your note"
+            className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-base md:text-[13px] leading-snug text-gray-900 placeholder:text-gray-400 resize-y focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20 disabled:bg-gray-50"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (noteId === adding) setAdding(null);
+              onNote(questionId, noteId, null);
+            }}
+            disabled={disabled}
+            title="Remove this note"
+            aria-label={`Remove this note, ${ctx}`}
+            className={`shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 ${FOCUS_RING}`}
+          >
+            <X className="w-4 h-4" aria-hidden />
+          </button>
+        </div>
+        {value.trim() && meta ? <ReplyWho meta={meta} sent={false} className="mt-1" /> : null}
+      </div>
+    );
+  };
+  // One list (the new box included), so the box keeps its focus when its first letter makes it a note.
+  const items = pending ? [...shown, { id: pending, text: '', sent: false, meta: undefined }] : shown;
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {items.map((n) =>
+        n.sent ? <NoteText key={n.id} text={n.text} meta={n.meta} sent locked /> : box(n.id, n.text, n.meta, n.id === adding)
+      )}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="text-[11px] leading-snug text-gray-500">{canAdd ? 'Sent. Need to add something? Add a note.' : 'Sent.'}</p>
+        {canAdd && !emptyOpen && (
+          <button
+            type="button"
+            onClick={() => setAdding(newCustomsNoteId())}
+            disabled={disabled}
+            aria-label={`Add a note, ${ctx}`}
+            className={`inline-flex items-center gap-1 rounded-md px-1.5 h-7 text-[12px] font-medium hover:bg-[#243F7B]/5 disabled:opacity-50 ${FOCUS_RING}`}
+            style={{ color: PRIMARY }}
+          >
+            <Plus className="w-3.5 h-3.5" aria-hidden />
+            Add a note
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Round 5 item 8, read-only: the stored notes of one question as text. */
+function ReadOnlyNotes({ notes, savedUpdatedAt }: { notes: VatCustomsNote[] | undefined; savedUpdatedAt: string | undefined }) {
+  const sentAt = useContext(SentAtContext);
+  if (!notes || notes.length === 0) return null;
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {notes.map((n) => (
+        <NoteText
+          key={n.id}
+          text={n.text}
+          meta={n}
+          sent={!!sentAt && isVatCustomsReplySent(n, savedUpdatedAt, sentAt)}
+          locked={false}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Round 5: "Benedikt Klingler changed this import at 17:10." + what this person had typed + Use mine / Keep theirs. */
+function ConflictNote({
+  note,
+  lineId,
+  onUseMine,
+  onKeepTheirs,
+  disabled,
+}: {
+  note: LineConflictNote;
+  lineId: string;
+  onUseMine?: (lineId: string) => void;
+  onKeepTheirs?: (lineId: string) => void;
+  disabled: boolean;
+}) {
+  const time = formatDubaiTime(note.at);
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+      className="rounded-lg border px-3 py-2.5 text-[13px]"
+      style={{ backgroundColor: '#FFFBEB', borderColor: '#FCD34D' }}
+      role="alert"
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-amber-900 leading-snug">
+            {note.who} changed this import{time ? ` at ${time}` : ''}. You see their version now.
+          </p>
+          <p className="mt-0.5 text-gray-700 leading-snug break-words">
+            Your text: <span className="text-gray-900">{describeLineAnswer(note.mine)}</span>
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onUseMine?.(lineId)}
+              disabled={disabled}
+              className={`h-8 px-3 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50 ${FOCUS_RING}`}
+              style={{ backgroundColor: PRIMARY }}
+            >
+              Use mine
+            </button>
+            <button
+              type="button"
+              onClick={() => onKeepTheirs?.(lineId)}
+              disabled={disabled}
+              className={`h-8 px-3 rounded-lg text-[13px] font-medium text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 ${FOCUS_RING}`}
+            >
+              Keep theirs
+            </button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/**
+ * Round 5 review: the person typed a change to a reply that was already
+ * sent; the server kept the sent text. What they typed stays here (Copy),
+ * until they dismiss it. `texts` = question id (a note: refusedNoteKey) -> the refused text.
+ */
+function LockedReplyNote({
+  texts,
+  lineId,
+  onDismiss,
+}: {
+  texts: Record<string, string>;
+  lineId: string;
+  onDismiss?: (lineId: string) => void;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = useCallback(async (qid: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(qid);
+      setTimeout(() => setCopied((c) => (c === qid ? null : c)), 2000);
+    } catch {
+      // No clipboard (old browser / not allowed): the text stays on screen to select by hand.
+    }
+  }, []);
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+      className="rounded-lg border px-3 py-2.5 text-[13px]"
+      style={{ backgroundColor: '#FFFBEB', borderColor: '#FCD34D' }}
+      role="alert"
+    >
+      <div className="flex items-start gap-2">
+        <Lock className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" aria-hidden />
+        <div className="min-w-0 flex-1 space-y-2">
+          {Object.entries(texts).map(([qid, text]) => (
+            <div key={qid}>
+              <p className="font-semibold text-amber-900 leading-snug">
+                {isRefusedNoteKey(qid) ? 'This note was already sent.' : 'This reply was already sent.'} Your text was not saved:
+              </p>
+              <p className="mt-0.5 text-gray-900 leading-snug break-words whitespace-pre-line select-text">{text}</p>
+              <button
+                type="button"
+                onClick={() => void copy(qid, text)}
+                className={`mt-1.5 h-8 px-3 rounded-lg inline-flex items-center gap-1.5 text-[13px] font-medium text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 ${FOCUS_RING}`}
+              >
+                {copied === qid ? <Check className="w-3.5 h-3.5" aria-hidden /> : <Copy className="w-3.5 h-3.5" aria-hidden />}
+                {copied === qid ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => onDismiss?.(lineId)}
+          aria-label="Dismiss"
+          className={`shrink-0 -mr-1 -mt-0.5 p-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-amber-100 ${FOCUS_RING}`}
+        >
+          <X className="w-4 h-4" aria-hidden />
+        </button>
+      </div>
+    </motion.div>
+  );
 }
 
 /** Round 4 C: "Filled in by Anshad Muhammed, TME Services, on 08.10.2026" when the shown answer is TME's. */
@@ -919,7 +1232,25 @@ function useLineActions(lineId: string, answer: VatCustomsLineAnswer | undefined
     },
     [answer, lineId, onChange]
   );
-  return { parts, setPart, split, removePart, setReply };
+  /** Round 5 item 8: a note under a sent reply (by its id; a new id appends it; null removes it). */
+  const setNote = useCallback<OnNote>(
+    (questionId, noteId, text) => {
+      const qid = String(questionId);
+      const list = answer?.notes?.[qid] ?? [];
+      const nextList =
+        text === null
+          ? list.filter((n) => n.id !== noteId)
+          : list.some((n) => n.id === noteId)
+            ? list.map((n) => (n.id === noteId ? { ...n, text } : n))
+            : [...list, { id: noteId, text }];
+      const notes = { ...(answer?.notes ?? {}) };
+      if (nextList.length > 0) notes[qid] = nextList;
+      else delete notes[qid];
+      onChange(lineId, { ...(answer ?? {}), parts: answer?.parts ?? [], notes });
+    },
+    [answer, lineId, onChange]
+  );
+  return { parts, setPart, split, removePart, setReply, setNote };
 }
 
 /** The "..." menu of an import: split, add an invoice part, add another file. */
@@ -1136,10 +1467,21 @@ function QuestionBoxes({
   idPrefix,
   sideBySide,
   readOnly = false,
+  sent,
+  notes,
+  savedAnswer,
+  onNote,
 }: {
   line: Pick<VatCustomsPageLine, 'lineNo' | 'declarationNo'>;
   questions: LineQuestion[];
   replies: Record<string, string> | undefined;
+  /** Round 5 item 8: the notes on the page (typed), per question id. */
+  notes?: Record<string, VatCustomsNote[]>;
+  /** Round 5 item 8: the server's copy of this line (stored notes with who / when, and its updatedAt). */
+  savedAnswer?: VatCustomsLineAnswer;
+  onNote?: OnNote;
+  /** Round 5: replies already sent (question id -> the sent text): read-only. */
+  sent?: Record<string, string>;
   /** Round 4 C: who sent each reply and when. */
   replyMeta: LineReplyMeta;
   onReply: (questionId: number, text: string) => void;
@@ -1154,14 +1496,15 @@ function QuestionBoxes({
   if (readOnly) {
     const earlier = earlierReplies(questions, replies);
     const box = `rounded-lg border p-2.5 ${sideBySide ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-start' : ''}`;
-    const replyText = (text: string, meta: VatCustomsReplyMeta | undefined) =>
+    const replyText = (text: string, meta: VatCustomsReplyMeta | undefined, qid: string) =>
       text ? (
         <div className={`rounded-lg bg-white border border-gray-100 px-2.5 py-1.5 ${sideBySide ? '' : 'mt-2'}`}>
           <p className="text-[13px] leading-snug break-words whitespace-pre-line text-gray-900">
             <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply</span>
             {text}
           </p>
-          <ReplyWho meta={meta} className="mt-1" />
+          <ReplyWho meta={meta} sent={sent?.[qid] !== undefined} className="mt-1" />
+          <ReadOnlyNotes notes={savedAnswer?.notes?.[qid]} savedUpdatedAt={savedAnswer?.updatedAt} />
         </div>
       ) : (
         <p className={`text-[13px] text-gray-400 ${sideBySide ? 'py-1.5' : 'mt-2'}`}>No reply sent.</p>
@@ -1177,14 +1520,15 @@ function QuestionBoxes({
                 {q.text}
               </p>
             </div>
-            {replyText((replies?.[String(q.id)] ?? '').trim(), replyMeta?.[String(q.id)])}
+            {replyText((replies?.[String(q.id)] ?? '').trim(), replyMeta?.[String(q.id)], String(q.id))}
           </div>
         ))}
         {earlier.map(([qid, text]) => (
           <div key={`e${qid}`} className="rounded-lg border border-gray-200 bg-gray-50/80 px-2.5 py-2 text-[13px] leading-snug break-words whitespace-pre-line">
             <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply to an earlier TME question</span>
             <span className="text-gray-900">{text}</span>
-            <ReplyWho meta={replyMeta?.[qid]} className="mt-1" />
+            <ReplyWho meta={replyMeta?.[qid]} sent={sent?.[qid] !== undefined} className="mt-1" />
+            <ReadOnlyNotes notes={savedAnswer?.notes?.[qid]} savedUpdatedAt={savedAnswer?.updatedAt} />
           </div>
         ))}
       </div>
@@ -1208,6 +1552,23 @@ function QuestionBoxes({
                 {q.text}
               </p>
             </div>
+            {sent?.[String(q.id)] !== undefined ? (
+              <SentReply text={sent[String(q.id)]} meta={replyMeta?.[String(q.id)]} className={sideBySide ? '' : 'mt-2'}>
+                {onNote ? (
+                  <ReplyNotes
+                    questionId={q.id}
+                    typed={notes?.[String(q.id)]}
+                    saved={savedAnswer?.notes?.[String(q.id)]}
+                    savedUpdatedAt={savedAnswer?.updatedAt}
+                    onNote={onNote}
+                    disabled={disabled}
+                    idPrefix={idPrefix}
+                    ctx={ctx}
+                  />
+                ) : null}
+              </SentReply>
+            ) : (
+            <>
             <label htmlFor={replyId} className="sr-only">
               Your reply to TME question {questions.length > 1 ? `${i + 1} ` : ''}on {ctx}
             </label>
@@ -1225,8 +1586,10 @@ function QuestionBoxes({
               }`}
             />
             {(replies?.[String(q.id)] ?? '').trim() && replyMeta?.[String(q.id)] ? (
-              <ReplyWho meta={replyMeta[String(q.id)]} className={sideBySide ? 'col-start-2 -mt-2' : 'mt-1'} />
+              <ReplyWho meta={replyMeta[String(q.id)]} sent={false} className={sideBySide ? 'col-start-2 -mt-2' : 'mt-1'} />
             ) : null}
+            </>
+            )}
           </div>
         );
       })}
@@ -1310,6 +1673,17 @@ interface LineProps {
   disabled: boolean;
   /** A closed request: everything as text, no controls. */
   readOnly: boolean;
+  /** Round 5: this line's replies already sent (question id -> text): read-only. */
+  sentReplies?: Record<string, string>;
+  /** Round 5 item 8: the server's copy of this line (stored notes, who / when). */
+  savedAnswer?: VatCustomsLineAnswer;
+  /** Round 5: someone else changed this line meanwhile. */
+  conflict?: LineConflictNote;
+  onUseMine?: (lineId: string) => void;
+  onKeepTheirs?: (lineId: string) => void;
+  /** Round 5 review: refused text of this line's sent replies (question id -> text). */
+  lockedNote?: Record<string, string>;
+  onDismissLocked?: (lineId: string) => void;
 }
 
 const LineRows = memo(function LineRows({
@@ -1326,9 +1700,16 @@ const LineRows = memo(function LineRows({
   onAddFile,
   disabled,
   readOnly,
+  sentReplies,
+  savedAnswer,
+  conflict,
+  onUseMine,
+  onKeepTheirs,
+  lockedNote,
+  onDismissLocked,
 }: LineProps) {
   const key = String(line.id);
-  const { parts, setPart, split, removePart, setReply } = useLineActions(key, answer, onChange);
+  const { parts, setPart, split, removePart, setReply, setNote } = useLineActions(key, answer, onChange);
   const status = lineState(answer);
   const isSplit = parts.length > 1;
   const idPrefix = `l${line.id}`;
@@ -1513,6 +1894,20 @@ const LineRows = memo(function LineRows({
             {strip(part, i, SUB_BG)}
           </React.Fragment>
         ))}
+      {conflict && !readOnly && (
+        <tr>
+          <td className={`${TD} ${EDGE} pt-0 pb-2.5 pl-4 pr-3`} colSpan={COLS}>
+            <ConflictNote note={conflict} lineId={key} onUseMine={onUseMine} onKeepTheirs={onKeepTheirs} disabled={disabled} />
+          </td>
+        </tr>
+      )}
+      {lockedNote && !readOnly && (
+        <tr>
+          <td className={`${TD} ${EDGE} pt-0 pb-2.5 pl-4 pr-3`} colSpan={COLS}>
+            <LockedReplyNote texts={lockedNote} lineId={key} onDismiss={onDismissLocked} />
+          </td>
+        </tr>
+      )}
       {filledByLine(answer) && (
         <tr>
           <td className={`${TD} ${EDGE} pt-0 pb-2`} colSpan={4} />
@@ -1534,6 +1929,10 @@ const LineRows = memo(function LineRows({
               idPrefix={idPrefix}
               sideBySide
               readOnly={readOnly}
+              sent={sentReplies}
+              notes={answer?.notes}
+              savedAnswer={savedAnswer}
+              onNote={setNote}
             />
           </td>
         </tr>
@@ -1560,9 +1959,16 @@ const LineCard = memo(function LineCard({
   onAddFile,
   disabled,
   readOnly,
+  sentReplies,
+  savedAnswer,
+  conflict,
+  onUseMine,
+  onKeepTheirs,
+  lockedNote,
+  onDismissLocked,
 }: LineProps) {
   const key = String(line.id);
-  const { parts, setPart, split, removePart, setReply } = useLineActions(key, answer, onChange);
+  const { parts, setPart, split, removePart, setReply, setNote } = useLineActions(key, answer, onChange);
   const status = lineState(answer);
   const isSplit = parts.length > 1;
   const idPrefix = `c${line.id}`;
@@ -1669,6 +2075,18 @@ const LineCard = memo(function LineCard({
         </div>
       </div>
 
+      {conflict && !readOnly && (
+        <div className="mt-3">
+          <ConflictNote note={conflict} lineId={key} onUseMine={onUseMine} onKeepTheirs={onKeepTheirs} disabled={disabled} />
+        </div>
+      )}
+
+      {lockedNote && !readOnly && (
+        <div className="mt-3">
+          <LockedReplyNote texts={lockedNote} lineId={key} onDismiss={onDismissLocked} />
+        </div>
+      )}
+
       {showQuestions && (
         <div className="mt-3">
           <QuestionBoxes
@@ -1681,6 +2099,10 @@ const LineCard = memo(function LineCard({
             idPrefix={idPrefix}
             sideBySide={false}
             readOnly={readOnly}
+            sent={sentReplies}
+            notes={answer?.notes}
+            savedAnswer={savedAnswer}
+            onNote={setNote}
           />
         </div>
       )}
@@ -1820,9 +2242,32 @@ export interface CustomsTableProps {
   readOnly?: boolean;
   /** Round 4 C: who sent each reply and when, per line id then question id. */
   replyMeta?: Record<string, LineReplyMeta>;
+  /** Round 4 D: contact names next to the emails under the replies; missing = emails only. */
+  peopleNames?: Record<string, string>;
+  /** Round 5: replies already sent, per line id then question id (the sent text): read-only. */
+  sentReplies?: Record<string, Record<string, string>>;
+  /** Round 5 item 8: the server's copy of the answers (stored notes with who / when). */
+  savedAnswers?: VatCustomsAnswers;
+  /** Round 5: lines someone else changed meanwhile (their version shows, plus a note). */
+  conflicts?: Record<string, LineConflictNote>;
+  onUseMine?: (lineId: string) => void;
+  onKeepTheirs?: (lineId: string) => void;
+  /** Round 5 review: text typed into replies already sent (refused), per line id then question id; shown until dismissed. */
+  lockedNotes?: Record<string, Record<string, string>>;
+  onDismissLocked?: (lineId: string) => void;
 }
 
-export default function CustomsTable(props: CustomsTableProps) {
+export default function CustomsTable({ peopleNames, ...props }: CustomsTableProps) {
+  return (
+    <PeopleNamesContext.Provider value={peopleNames}>
+      <SentAtContext.Provider value={props.sentAt}>
+        <CustomsTableBody {...props} />
+      </SentAtContext.Provider>
+    </PeopleNamesContext.Provider>
+  );
+}
+
+function CustomsTableBody(props: Omit<CustomsTableProps, 'peopleNames'>) {
   const {
     lines,
     answers,
@@ -1841,6 +2286,13 @@ export default function CustomsTable(props: CustomsTableProps) {
     onRetrySave,
     readOnly = false,
     replyMeta,
+    sentReplies,
+    savedAnswers,
+    conflicts,
+    onUseMine,
+    onKeepTheirs,
+    lockedNotes,
+    onDismissLocked,
   } = props;
   const wide = useIsWide();
   const [confirm, setConfirm] = useState<Confirm>(null);
@@ -1918,6 +2370,13 @@ export default function CustomsTable(props: CustomsTableProps) {
       onAddFile,
       disabled: disabled || readOnly,
       readOnly,
+      sentReplies: sentReplies?.[String(line.id)],
+      savedAnswer: savedAnswers?.[String(line.id)],
+      conflict: conflicts?.[String(line.id)],
+      onUseMine,
+      onKeepTheirs,
+      lockedNote: lockedNotes?.[String(line.id)],
+      onDismissLocked,
     };
   };
 
