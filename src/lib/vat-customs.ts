@@ -1130,7 +1130,7 @@ export function copyableAnswer(part: VatCustomsAnswerPart | null | undefined): V
     incoterm: p.incoterm,
     incotermOther: p.incoterm === 'other' ? p.incotermOther : undefined,
     delivery: p.delivery,
-    deliveryPlace: p.delivery === 'outside_uae' || p.delivery === 'other' ? p.deliveryPlace : undefined,
+    deliveryPlace: p.delivery === 'other' ? p.deliveryPlace : undefined,
   });
 }
 
@@ -1677,7 +1677,7 @@ const PURPOSE_LABELS = new Map<string, string>(VAT_CUSTOMS_PURPOSE_OPTIONS.map((
 const PAYMENT_LABELS = new Map<string, string>(VAT_CUSTOMS_PAYMENT_OPTIONS.map((o) => [o.value, o.label]));
 const DELIVERY_LABELS = new Map<string, string>(VAT_CUSTOMS_DELIVERY_OPTIONS.map((o) => [o.value, o.label]));
 
-/** One part in a few words: "For sale / stock / trading, Paid, CIF, Outside the UAE (Milan)". */
+/** One part in a few words: "For sale / stock / trading, Paid, CIF, Other location (Milan)". */
 function describeAnswerPart(p: VatCustomsAnswerPart): string {
   const bits: string[] = [];
   if (p.invoiceRef) bits.push(`Invoice ${p.invoiceRef}`);

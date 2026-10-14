@@ -104,7 +104,7 @@ const PENNYPRESS_LINES = demoLines(5101, [
 PENNYPRESS_LINES[0].hasBoe = true;
 PENNYPRESS_LINES[0].hasInvoice = true;
 PENNYPRESS_LINES[0].answer = {
-  parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' }],
+  parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'dubai_port_dz' }],
   updatedAt: '2026-10-08T07:30:00.000Z',
   filledBy: { name: 'Anshad Muhammed' },
 };
@@ -241,16 +241,16 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
     clientComment: 'The September imports are machines for our own workshop. The freight for import 3 was paid by us to DHL, invoice attached.',
     customsLines: CLOSED_LINES,
     customsAnswers: {
-      '6301': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'outside_uae', deliveryPlace: 'Shanghai, China' }], updatedAt: CLOSED_SENT_AT },
+      '6301': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'other', deliveryPlace: 'Shanghai, China' }], updatedAt: CLOSED_SENT_AT },
       '6302': {
         parts: [
-          { invoiceRef: 'INV-2207', purpose: 'sale_stock', payment: 'paid', incoterm: 'DAP', delivery: 'uae_premises' },
-          { invoiceRef: 'INV-2208', purpose: 'samples', payment: 'foc', incoterm: 'DAP', delivery: 'uae_premises' },
+          { invoiceRef: 'INV-2207', purpose: 'sale_stock', payment: 'paid', incoterm: 'DAP', delivery: 'dubai_fz' },
+          { invoiceRef: 'INV-2208', purpose: 'samples', payment: 'foc', incoterm: 'DAP', delivery: 'dubai_fz' },
         ],
         updatedAt: CLOSED_SENT_AT,
       },
       '6303': {
-        parts: [{ purpose: 'fixed_asset', payment: 'will_be_paid', incoterm: 'EXW', delivery: 'outside_uae', deliveryPlace: 'Milan, Italy' }],
+        parts: [{ purpose: 'office_use', payment: 'will_be_paid', incoterm: 'EXW', delivery: 'other', deliveryPlace: 'Milan, Italy' }],
         replies: { '911': 'We paid DHL directly. The DHL invoice is in the files.' },
         // Changed once: first sent 10.10 13:20, changed 10.10 18:05 (Dubai).
         replyMeta: {
@@ -317,9 +317,9 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
     customsAnswers: {
       // Line 2: the client started (saved, not sent yet).
       '5102': { parts: [{ purpose: 'office_use', payment: 'paid' }], updatedAt: '2026-10-10T09:00:00.000Z' },
-      // Line 3: a customer return, original BOE given.
+      // Line 3: a customer return, written under Other.
       '5103': {
-        parts: [{ purpose: 'customer_return', purposeOther: '302-06945947-21', payment: 'foc', incoterm: 'not_stated' }],
+        parts: [{ purpose: 'other', purposeOther: 'Customer return, original BOE 302-06945947-21', payment: 'foc', incoterm: 'not_stated' }],
         updatedAt: '2026-10-10T09:05:00.000Z',
       },
       // Line 5: one of the two questions already has a reply.
@@ -330,7 +330,7 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
         updatedAt: '2026-10-10T09:10:00.000Z',
       },
     },
-    customsDefaults: { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' },
+    customsDefaults: { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'dubai_port_dz' },
     customsAnswersSentAt: null,
     lineFiles: [],
   },
@@ -354,17 +354,17 @@ const DEMOS: Record<string, VatFilesPagePayload> = {
     clientComment: null,
     customsLines: SPG_LINES,
     customsAnswers: {
-      '6201': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'outside_uae', deliveryPlace: 'Shanghai, China' }], updatedAt: SPG_SENT_AT },
+      '6201': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'other', deliveryPlace: 'Shanghai, China' }], updatedAt: SPG_SENT_AT },
       '6202': {
         parts: [
-          { invoiceRef: 'INV-2207', purpose: 'sale_stock', payment: 'paid', incoterm: 'DAP', delivery: 'uae_premises' },
-          { invoiceRef: 'INV-2208', purpose: 'samples', payment: 'foc', incoterm: 'DAP', delivery: 'uae_premises' },
+          { invoiceRef: 'INV-2207', purpose: 'sale_stock', payment: 'paid', incoterm: 'DAP', delivery: 'dubai_fz' },
+          { invoiceRef: 'INV-2208', purpose: 'samples', payment: 'foc', incoterm: 'DAP', delivery: 'dubai_fz' },
         ],
         updatedAt: SPG_SENT_AT,
       },
-      '6203': { parts: [{ purpose: 'fixed_asset', payment: 'will_be_paid', incoterm: 'EXW', delivery: 'outside_uae', deliveryPlace: 'Milan, Italy' }], updatedAt: SPG_SENT_AT },
+      '6203': { parts: [{ purpose: 'office_use', payment: 'will_be_paid', incoterm: 'EXW', delivery: 'other', deliveryPlace: 'Milan, Italy' }], updatedAt: SPG_SENT_AT },
     },
-    customsDefaults: { purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'outside_uae', deliveryPlace: 'Shanghai, China' },
+    customsDefaults: { purpose: 'sale_stock', payment: 'paid', incoterm: 'FOB', delivery: 'other', deliveryPlace: 'Shanghai, China' },
     customsAnswersSentAt: SPG_SENT_AT,
     lineFiles: [
       { lineId: 6202, docKind: 'boe', name: 'BOE 1010146613726.pdf', uploadedAt: SPG_SENT_AT },
@@ -480,7 +480,7 @@ export function demoExtras(token: string): {
     changeNote: 'Benedikt Klingler changed the table at 17:10.',
     conflicts: {
       '5102': {
-        mine: { parts: [{ purpose: 'office_use', payment: 'paid', incoterm: 'EXW', delivery: 'outside_uae', deliveryPlace: 'Loughborough, UK' }] },
+        mine: { parts: [{ purpose: 'office_use', payment: 'paid', incoterm: 'EXW', delivery: 'other', deliveryPlace: 'Loughborough, UK' }] },
         who: 'Benedikt Klingler',
         at: '2026-10-11T13:10:00.000Z',
       },

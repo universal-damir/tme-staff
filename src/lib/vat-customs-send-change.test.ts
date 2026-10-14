@@ -29,7 +29,7 @@ const LINE: VatCustomsPageLine = {
   questions: [{ id: 31, text: 'Samples?', askedAt: '2026-10-10T08:00:00Z' }],
 } as VatCustomsPageLine;
 const LINES = [LINE];
-const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' } as const;
+const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'dubai_port_dz' } as const;
 const SENT_AT = '2026-10-11T09:00:00.000Z';
 
 /** What the server holds after a Send: a sent reply, its sentKey stamped. */

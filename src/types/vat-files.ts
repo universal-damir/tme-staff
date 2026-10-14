@@ -226,19 +226,16 @@ export function vatFileNameFromPath(path: string | null | undefined): string | n
 // CLIENT PAGE writes customs_answers + customs_answers_saved_at /
 // customs_answers_sent_at. Neither side ever writes the other's columns.
 
-/** Purpose of import. The last option is always 'other' (free text required). */
+/**
+ * Purpose of import (VAT team list, 13.10.2026). The last option is always
+ * 'other' (free text required).
+ */
 export const VAT_CUSTOMS_PURPOSE_OPTIONS = [
   { value: 'sale_stock', label: 'For sale / stock / trading' },
-  { value: 'office_use', label: 'Office use / tools' },
-  { value: 'fixed_asset', label: 'Shop fit-out / fixed asset' },
+  { value: 'office_use', label: 'Office use / tools / fixed asset' },
   { value: 'spare_parts', label: 'Spare parts / maintenance / repair' },
   { value: 'marketing_gifts', label: 'Marketing / gifts / give-away' },
-  { value: 'packaging', label: 'Packaging' },
-  { value: 'staff_uniforms', label: 'Staff uniforms' },
-  { value: 'demo_display', label: 'Demo / testing / event display' },
-  { value: 'samples', label: 'Samples (not for sale)' },
-  { value: 'replacement', label: 'Replacement (not for sale)' },
-  { value: 'customer_return', label: 'Customer return / sales return' },
+  { value: 'samples', label: 'Samples / testing / display (not for sale)' },
   { value: 'other', label: 'Other (please explain)' },
 ] as const;
 
@@ -269,14 +266,15 @@ export const VAT_CUSTOMS_INCOTERM_OPTIONS = [
 
 /**
  * Delivery point = the place named next to the Incoterm on the supplier
- * invoice (e.g. "CIP Dubai Airport" -> UAE - port / airport), NOT where the
- * goods went afterwards. 'outside_uae' and 'other' need the place text.
+ * invoice (e.g. "CIP Dubai Airport" -> Dubai - seaport, airport or DZ), NOT
+ * where the goods went afterwards. VAT team list, 13.10.2026. 'other' needs
+ * the place text.
  */
 export const VAT_CUSTOMS_DELIVERY_OPTIONS = [
-  { value: 'uae_premises', label: 'UAE - our office / warehouse' },
-  { value: 'uae_port', label: 'UAE - port / airport (e.g. "CIP Dubai Airport")' },
-  { value: 'outside_uae', label: 'Outside the UAE (please name the place on the invoice)' },
-  { value: 'other', label: 'Other (please explain)' },
+  { value: 'dubai_port_dz', label: 'Dubai - seaport, airport or Designated Zone (DZ)' },
+  { value: 'dubai_fz', label: 'Dubai Free Zone (FZ)' },
+  { value: 'dubai_mainland', label: 'Dubai Mainland (other than FZ and DZ)' },
+  { value: 'other', label: 'Other location (please specify)' },
 ] as const;
 
 export type VatCustomsPurpose = (typeof VAT_CUSTOMS_PURPOSE_OPTIONS)[number]['value'];
@@ -303,7 +301,7 @@ export interface VatCustomsAnswerPart {
   incoterm?: VatCustomsIncoterm | null;
   incotermOther?: string;
   delivery?: VatCustomsDelivery | null;
-  /** The place (city / country / site); required for 'outside_uae' and 'other'. */
+  /** The place (city / country / site); required for 'other'. */
   deliveryPlace?: string;
   comment?: string;
 }
@@ -399,8 +397,8 @@ function hasText(s: string | undefined | null): boolean {
 
 /**
  * One part is answered: purpose, payment, incoterm and delivery chosen, with
- * the text each 'other' needs, and the place for 'outside_uae' / 'other'
- * delivery. Used by the page AND the portal, so both count progress alike.
+ * the text each 'other' needs (for delivery: the place). Used by the page
+ * AND the portal, so both count progress alike.
  */
 export function isVatCustomsPartComplete(part: VatCustomsAnswerPart | null | undefined): boolean {
   if (!part) return false;
@@ -410,7 +408,7 @@ export function isVatCustomsPartComplete(part: VatCustomsAnswerPart | null | und
   // No Incoterm on the invoice = no named place to give; the delivery point is optional then.
   if (part.incoterm === 'not_stated' && !part.delivery) return true;
   if (!part.delivery) return false;
-  if ((part.delivery === 'outside_uae' || part.delivery === 'other') && !hasText(part.deliveryPlace)) return false;
+  if (part.delivery === 'other' && !hasText(part.deliveryPlace)) return false;
   return true;
 }
 

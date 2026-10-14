@@ -379,7 +379,7 @@ const LINES = [
   { id: 501, lineNo: 1, declarationDate: '2026-08-03', declarationNo: '1010135960026', transactionRefNo: '6505210394', totalValue: 252203.24, totalVat: 12610.16, hasBoe: false, hasInvoice: false, answer: null, questions: [] },
   { id: 502, lineNo: 2, declarationDate: '2026-08-19', declarationNo: '1010146613726', transactionRefNo: '6507604297', totalValue: 6472.57, totalVat: 323.63, hasBoe: false, hasInvoice: false, answer: null, questions: [{ id: 31, text: 'Samples?', askedAt: '2026-10-10T08:00:00Z' }, { id: 32, text: 'Paid by whom?', askedAt: '2026-10-10T08:01:00Z' }] },
 ];
-const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' };
+const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'dubai_port_dz' };
 const answers = (body: unknown, raw = false) =>
   ANSWERS(new NextRequest(url('/answers'), { method: 'POST', body: raw ? (body as string) : JSON.stringify(body) }), params());
 

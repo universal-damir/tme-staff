@@ -53,7 +53,7 @@ function line(id: number, over: Partial<VatCustomsPageLine> = {}): VatCustomsPag
 const Q77 = { id: 77, text: 'Is this a sample?', askedAt: EARLIER };
 const Q78 = { id: 78, text: 'Who paid the invoice?', askedAt: EARLIER };
 const LINES = [line(1), line(2, { questions: [Q77, Q78] }), line(3)];
-const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' } as const;
+const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'dubai_port_dz' } as const;
 
 describe('answers validation (autosave + Send)', () => {
   it('stores a valid line, stamps updatedAt on the server, keeps other lines', () => {

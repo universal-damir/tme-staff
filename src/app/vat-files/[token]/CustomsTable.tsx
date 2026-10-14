@@ -487,8 +487,6 @@ interface FieldDef {
   textKey: 'purposeOther' | 'paymentOther' | 'incotermOther' | 'deliveryPlace';
   /** The text box is required for this value. */
   needsText: (value: string | null | undefined) => boolean;
-  /** The text box is shown but optional for this value. */
-  optionalText?: (value: string | null | undefined) => boolean;
   /** The details field's label and placeholder for this value. */
   detail: (value: string | null | undefined) => { label: string; placeholder: string };
   /** The choice itself is optional for this part (e.g. delivery when no Incoterm is stated). */
@@ -504,12 +502,7 @@ const FIELDS: FieldDef[] = [
     options: VAT_CUSTOMS_PURPOSE_OPTIONS,
     textKey: 'purposeOther',
     needsText: (v) => v === 'other',
-    // U10: a customer return needs the original BOE (optional text, no new field).
-    optionalText: (v) => v === 'customer_return',
-    detail: (v) =>
-      v === 'customer_return'
-        ? { label: 'Original BOE no. (optional)', placeholder: 'The BOE of the first import, if you have it' }
-        : { label: 'Purpose: please explain', ...EXPLAIN },
+    detail: () => ({ label: 'Purpose: please explain', ...EXPLAIN }),
   },
   {
     key: 'payment',
@@ -532,11 +525,8 @@ const FIELDS: FieldDef[] = [
     label: 'Delivery place on the invoice',
     options: VAT_CUSTOMS_DELIVERY_OPTIONS,
     textKey: 'deliveryPlace',
-    needsText: (v) => v === 'outside_uae' || v === 'other',
-    detail: (v) =>
-      v === 'outside_uae'
-        ? { label: 'Delivery place: name the place on the invoice', placeholder: 'e.g. "FCA Loughborough"' }
-        : { label: 'Delivery place: please explain', ...EXPLAIN },
+    needsText: (v) => v === 'other',
+    detail: () => ({ label: 'Other location: please specify', placeholder: 'As on the invoice, e.g. "CIP Sharjah Airport"' }),
     // No Incoterm on the invoice = no named place (isVatCustomsPartComplete agrees).
     optional: (part) => part.incoterm === 'not_stated',
   },
@@ -544,8 +534,7 @@ const FIELDS: FieldDef[] = [
 
 /** Short table labels where the full option label is too long for one line. */
 const SHORT_LABELS: Record<string, Record<string, string>> = {
-  delivery: { uae_premises: 'UAE office / warehouse', uae_port: 'UAE port / airport', outside_uae: 'Outside the UAE' },
-  purpose: { customer_return: 'Customer return' },
+  delivery: { dubai_port_dz: 'Dubai port / airport / DZ', dubai_fz: 'Dubai Free Zone', dubai_mainland: 'Dubai Mainland' },
 };
 
 /**
@@ -568,7 +557,7 @@ const MENU_OPTIONS: Record<FieldDef['key'], ChoiceOption[]> = Object.fromEntries
   FIELDS.map((def) => [
     def.key,
     def.options.map((o): ChoiceOption => {
-      if (o.value === 'other') return { value: o.value, label: 'Other (please explain)', pencil: true };
+      if (o.value === 'other') return { value: o.value, label: o.label, pencil: true };
       if (def.key === 'incoterm' && o.value !== 'not_stated') {
         const [code, ...rest] = o.label.split(' - ');
         return { value: o.value, label: code, sub: rest.join(' - '), strong: true };
@@ -578,14 +567,14 @@ const MENU_OPTIONS: Record<FieldDef['key'], ChoiceOption[]> = Object.fromEntries
         const sub = m[2].charAt(0).toUpperCase() + m[2].slice(1);
         return { value: o.value, label: m[1], sub, pencil: def.needsText(o.value) };
       }
-      return { value: o.value, label: o.label, pencil: !!def.optionalText?.(o.value) };
+      return { value: o.value, label: o.label };
     }),
   ])
 ) as Record<FieldDef['key'], ChoiceOption[]>;
 
-/** The fields of a part whose answer needs (or may take) a few words. */
+/** The fields of a part whose answer needs a few words. */
 function detailDefs(part: VatCustomsAnswerPart): FieldDef[] {
-  return FIELDS.filter((f) => f.needsText(part[f.key]) || !!f.optionalText?.(part[f.key]));
+  return FIELDS.filter((f) => f.needsText(part[f.key]));
 }
 
 /** Answers still missing in a part (choices + required texts; + the invoice no. of a split part). */
@@ -635,15 +624,16 @@ function hasAnyAnswer(part: VatCustomsAnswerPart): boolean {
   return FIELDS.some((f) => !!part[f.key]) || !!part.invoiceRef;
 }
 
-/** "For sale / stock / trading, Paid, CIF, UAE - port / airport" */
+/** "For sale / stock / trading, Paid, CIF, Dubai Free Zone (FZ)" */
 function describePart(part: VatCustomsAnswerPart): string {
   const bits: string[] = [];
   for (const f of FIELDS) {
     const v = part[f.key];
     if (!v) continue;
-    if (v === 'other') bits.push(part[f.textKey] ? `Other: ${part[f.textKey]}` : 'Other');
-    else if (f.key === 'incoterm' && v !== 'not_stated') bits.push(v);
-    else if (f.key === 'delivery' && v === 'outside_uae') bits.push(part.deliveryPlace ? `Outside the UAE (${part.deliveryPlace})` : 'Outside the UAE');
+    if (v === 'other') {
+      const other = f.key === 'delivery' ? 'Other location' : 'Other';
+      bits.push(part[f.textKey] ? `${other}: ${part[f.textKey]}` : other);
+    } else if (f.key === 'incoterm' && v !== 'not_stated') bits.push(v);
     else bits.push(vatCustomsOptionLabel(f.options, v));
   }
   return bits.join(', ');
@@ -882,14 +872,14 @@ const AnswerField = memo(function AnswerField({
   const neededId = `${selectId}-needed`;
   const optional = !!def.optional?.(part);
   const choiceMissing = hasAnyAnswer(part) && !value && !optional;
-  const hasDetail = !!value && (def.needsText(value) || !!def.optionalText?.(value));
+  const hasDetail = !!value && def.needsText(value);
   const short = value ? cellLabel(def, value, inTable) : '';
-  // The written words show in the cell only where they ARE the answer (Other, the place outside the UAE).
+  // The written words show in the cell only where they ARE the answer (Other purpose, Other location).
   // Paid / FOC and Incoterms are narrow: there the cell keeps "Other" + pencil (words in the tooltip).
   const inline = hasDetail && !!text && def.needsText(value) && (def.key === 'purpose' || def.key === 'delivery');
   const shown = inline ? `${short}: ${text}` : short;
   const full = value ? vatCustomsOptionLabel(def.options, value) : '';
-  const title = hasDetail && text && def.needsText(value) ? `${value === 'other' ? 'Other' : full.replace(/\s*\([^)]*\)\s*$/, '')}: ${text}` : full;
+  const title = hasDetail && text ? `${full.replace(/\s*\([^)]*\)\s*$/, '')}: ${text}` : full;
 
   /** Show the details strip and put the cursor in this answer's field. */
   const editDetails = () => {
@@ -899,7 +889,7 @@ const AnswerField = memo(function AnswerField({
   const pickValue = (next: string | null) => {
     onPart({ [def.key]: next } as Partial<VatCustomsAnswerPart>);
     // The answer needs a few words: the details strip opens under the row; go there.
-    if (next && (def.needsText(next) || def.optionalText?.(next))) editDetails();
+    if (next && def.needsText(next)) editDetails();
   };
 
   return (
@@ -1005,7 +995,7 @@ function readOnlyDetails(part: VatCustomsAnswerPart): Array<{ label: string; tex
     const text = (part[def.textKey] ?? '').trim();
     if (!text) continue;
     if (def.needsText(value) && (def.key === 'purpose' || def.key === 'delivery')) continue;
-    out.push({ label: value === 'customer_return' ? 'Original BOE no.' : def.label, text });
+    out.push({ label: def.label, text });
   }
   return out;
 }

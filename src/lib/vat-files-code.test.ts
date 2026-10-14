@@ -551,7 +551,7 @@ describe('the code flow', () => {
       status: 'closed',
       client_comment: 'All imports are for stock.',
       files: [{ name: 'BOE 101.pdf', path: `${ENV}/${TOKEN}/aaaaaaaa-BOE 101.pdf`, size: 120, uploadedAt: '2026-10-09T09:00:00Z', lineId: 501, docKind: 'boe' }],
-      customs_answers: { '501': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' }] } },
+      customs_answers: { '501': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'dubai_port_dz' }] } },
     });
     const proof = await confirm(ANNA);
     const page = await load(proof);
@@ -643,7 +643,7 @@ describe('who did what', () => {
     const res = await sendAs(ben, {
       files: [{ path: b.path, name: 'ben.pdf' }],
       comment: '',
-      answers: { '501': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'EXW', delivery: 'uae_premises' }] } },
+      answers: { '501': { parts: [{ purpose: 'sale_stock', payment: 'paid', incoterm: 'EXW', delivery: 'dubai_mainland' }] } },
     });
     expect(res.status).toBe(200);
     const row = db.requests[0] as { files: Row[]; last_submitted_by: string; customs_answers: Record<string, Row> };
@@ -662,7 +662,7 @@ describe('who did what', () => {
       new NextRequest(url('/answers'), {
         method: 'POST',
         headers: withCookie(anna),
-        body: JSON.stringify({ answers: { '501': { parts: [{ purpose: 'samples', payment: 'foc', incoterm: 'EXW', delivery: 'uae_premises' }] } } }),
+        body: JSON.stringify({ answers: { '501': { parts: [{ purpose: 'samples', payment: 'foc', incoterm: 'EXW', delivery: 'dubai_mainland' }] } } }),
       }),
       params()
     );

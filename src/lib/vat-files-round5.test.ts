@@ -43,7 +43,7 @@ const LINES: VatCustomsPageLine[] = [
     ],
   },
 ];
-const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' } as const;
+const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'dubai_port_dz' } as const;
 const T0 = '2026-10-11T08:00:00.000Z'; // reply saved
 const T1 = '2026-10-11T09:00:00.000Z'; // Send
 const T2 = '2026-10-11T10:00:00.000Z'; // later save
@@ -255,7 +255,7 @@ function row(over: Partial<VatFileRequestRow> = {}): VatFileRequestRow {
 describe('the version (what the page shows)', () => {
   it('the same data in another key order gives the same version; a client save changes it', () => {
     const a = row({ customs_answers: { '501': { parts: [FULL], updatedAt: T1 } } });
-    const b = row({ customs_answers: { '501': { updatedAt: T1, parts: [{ delivery: 'uae_port', incoterm: 'CIF', payment: 'paid', purpose: 'sale_stock' }] } } });
+    const b = row({ customs_answers: { '501': { updatedAt: T1, parts: [{ delivery: 'dubai_port_dz', incoterm: 'CIF', payment: 'paid', purpose: 'sale_stock' }] } } });
     expect(vatFilesPageVersion(scrubVatFilesRow(a))).toBe(vatFilesPageVersion(scrubVatFilesRow(b)));
     const c = row({ customs_answers: { '501': { parts: [FULL], updatedAt: T2 } } });
     expect(vatFilesPageVersion(scrubVatFilesRow(c))).not.toBe(vatFilesPageVersion(scrubVatFilesRow(a)));
@@ -376,7 +376,7 @@ describe('page helpers', () => {
 
   it('describeLineAnswer: one short line for the conflict note', () => {
     expect(describeLineAnswer({ parts: [{ ...FULL }], replies: { '31': 'Yes' } })).toBe(
-      'For sale / stock / trading, Paid, CIF, UAE - port / airport | Reply: "Yes"'
+      'For sale / stock / trading, Paid, CIF, Dubai - seaport, airport or Designated Zone | Reply: "Yes"'
     );
     expect(describeLineAnswer({ parts: [] })).toBe('Nothing filled in');
   });

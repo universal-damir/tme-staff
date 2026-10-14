@@ -47,7 +47,7 @@ const LINES: VatCustomsPageLine[] = [
     ],
   },
 ];
-const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'uae_port' } as const;
+const FULL = { purpose: 'sale_stock', payment: 'paid', incoterm: 'CIF', delivery: 'dubai_port_dz' } as const;
 const T0 = '2026-10-11T08:00:00.000Z'; // reply saved
 const T1 = '2026-10-11T09:00:00.000Z'; // Send
 const T2 = '2026-10-11T10:00:00.000Z'; // note saved (draft)
