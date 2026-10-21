@@ -18,6 +18,7 @@
 import type { StaffDocumentReferences, EmployeeFormData } from '@/types';
 import { uploadFileToRoute } from './upload-client';
 import { failureMessage, requestJson } from './request-outcome';
+import { cloudflareClientIp } from './cloudflare-ip';
 
 // ===================================================================
 // AUTO-SAVE EMPLOYEE DATA (partial save without signature/completion)
@@ -223,6 +224,8 @@ export function getDocumentUrl(path: string): string {
 // ===================================================================
 
 export function getClientIP(headers: Headers): string | null {
+  const viaCloudflare = cloudflareClientIp(headers);
+  if (viaCloudflare) return viaCloudflare;
   const forwarded = headers.get('x-forwarded-for');
   if (forwarded) {
     return forwarded.split(',')[0].trim();

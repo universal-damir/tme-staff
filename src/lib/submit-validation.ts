@@ -30,6 +30,7 @@ import {
   usesDocumentsOnFile,
 } from '@/lib/staff-form-logic';
 import { isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
+import { cloudflareClientIp } from './cloudflare-ip';
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
 const IPV6 = /^([0-9a-fA-F:]+)$/;
@@ -50,6 +51,10 @@ function isPlausibleIp(value: string): boolean {
  * rather than a guess.
  */
 export function getSignerIp(req: NextRequest): string | null {
+  // Behind the Cloudflare proxy (21.10.2026) Netlify sees Cloudflare's address.
+  const viaCloudflare = cloudflareClientIp(req.headers);
+  if (viaCloudflare) return viaCloudflare;
+
   const netlify = req.headers.get('x-nf-client-connection-ip');
   if (netlify && isPlausibleIp(netlify.trim())) return netlify.trim();
 

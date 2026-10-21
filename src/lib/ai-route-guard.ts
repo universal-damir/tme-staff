@@ -27,6 +27,7 @@ import {
   type CompanySetupSubmissionRow,
 } from './company-setup-token';
 import { countPdfPagesServer } from './pdf-page-count-server';
+import { cloudflareClientIp } from './cloudflare-ip';
 
 export const MAX_AI_IMAGE_BYTES = 12 * 1024 * 1024;
 
@@ -44,12 +45,17 @@ const rateState = new Map<string, RateBucket>();
 /** Best-effort client IP from the proxy headers (exported for the non-AI
  *  company-setup upload route, which reuses the same per-IP budget).
  *
+ *  Behind the Cloudflare proxy (21.10.2026) the person's own address comes
+ *  first, see cloudflare-ip.ts.
+ *
  *  Order (round 4 B fix, 11.10.2026): the FIRST x-forwarded-for value is
  *  whatever the caller typed, so it must never key a limit.
  *   1. `x-nf-client-connection-ip`: set by Netlify's edge, cannot be faked.
  *   2. the LAST x-forwarded-for value: the hop the last proxy saw.
  *   3. `x-real-ip`. */
 export function getClientIp(req: NextRequest): string {
+  const viaCloudflare = cloudflareClientIp(req.headers);
+  if (viaCloudflare) return viaCloudflare;
   const netlify = req.headers.get('x-nf-client-connection-ip')?.trim();
   if (netlify && IP_REGEX.test(netlify)) return netlify;
   const forwarded = req.headers.get('x-forwarded-for');
