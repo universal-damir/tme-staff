@@ -124,21 +124,377 @@ function looksLikeText(bytes: Uint8Array): boolean {
 /**
  * The file type from its first bytes, checked against the extension the
  * client gave. Null = not a file we accept (or the name lies about it).
+ * Same check as checkVatFile; the reason is dropped.
  */
-export function detectVatFile(bytes: Uint8Array, filename: string): VatFileType | null {
-  if (!isAcceptedExtension(filename) || bytes.length < 4) return null;
-  const ext = vatFileExtension(filename);
-  const ok = (): VatFileType => ({ ext, mime: EXT_MIME[ext] });
+export function detectVatFile(bytes: Uint8Array, filename: string, opts: VatFileCheckOptions = {}): VatFileType | null {
+  const result = checkVatFile(bytes, filename, opts);
+  return result.ok ? result.type : null;
+}
 
-  if (ext === '.pdf') return startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]) ? ok() : null;
-  if (JPEG_EXTS.has(ext)) return startsWith(bytes, [0xff, 0xd8, 0xff]) ? ok() : null;
-  if (ext === '.png') return startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) ? ok() : null;
-  if (ZIP_EXTS.has(ext)) return startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]) ? ok() : null;
-  if (OLE_EXTS.has(ext)) {
-    return startsWith(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) ? ok() : null;
+// ------------------------------------------------------------------
+// Content check (STAFF-004): the types the VAT team needs stay, but a file
+// that can run code when opened is refused: Excel / Word with macros, an
+// .xls with a VBA project, an email that carries a program.
+// ------------------------------------------------------------------
+
+export type VatFileRefusal = 'wrong_type' | 'macros' | 'risky_attachment';
+
+export type VatFileCheck =
+  | { ok: true; type: VatFileType }
+  | { ok: false; reason: VatFileRefusal; message: string };
+
+export interface VatFileCheckOptions {
+  /**
+   * Raw-deflate decoder (the upload route passes node's zlib.inflateRawSync).
+   * Used to read `[Content_Types].xml` of an .xlsx / .docx. Kept out of this
+   * file so the page bundle stays browser-safe.
+   */
+  inflateRaw?: (data: Uint8Array) => Uint8Array;
+}
+
+export const VAT_FILE_REFUSAL_MESSAGES: Record<VatFileRefusal, string> = {
+  wrong_type: 'We cannot accept this file type. Please send PDF, Excel, Word, CSV, image or email files.',
+  macros: "This file contains macros and can't be uploaded. Please save it as a normal .xlsx or PDF.",
+  risky_attachment:
+    "This email has an attachment that is a program or script and can't be uploaded. Please send the documents themselves (PDF, Excel, Word or images).",
+};
+
+const refuse = (reason: VatFileRefusal): VatFileCheck => ({
+  ok: false,
+  reason,
+  message: VAT_FILE_REFUSAL_MESSAGES[reason],
+});
+
+/** Attachment names that run code (or are macro documents) when opened. */
+const RISKY_ATTACHMENT_EXT_REGEX = /\.(exe|js|vbs|bat|cmd|scr|ps1|jar|msi|hta|lnk|iso|com|wsf|xlsm|docm)$/i;
+
+/** Archive extensions that may wrap an attachment name (`invoice.pdf.exe.zip`). */
+const ARCHIVE_EXT_REGEX = /\.(zip|7z|rar)$/i;
+
+/**
+ * A name that runs code when opened, also when an archive extension was put
+ * after the program name (`report.exe.zip`). A plain `.zip` attachment stays
+ * allowed: zipped statements are common in VAT mail, and what is inside the
+ * archive cannot be seen here without unpacking it.
+ */
+export function isRiskyAttachmentName(name: string): boolean {
+  const clean = name.trim().replace(/[\s."']+$/, '');
+  if (RISKY_ATTACHMENT_EXT_REGEX.test(clean)) return true;
+  return ARCHIVE_EXT_REGEX.test(clean) && RISKY_ATTACHMENT_EXT_REGEX.test(clean.replace(ARCHIVE_EXT_REGEX, ''));
+}
+
+const OLE_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+
+/**
+ * The file type from its first bytes and its content, checked against the
+ * extension the client gave. A refusal carries a plain sentence for the page.
+ */
+export function checkVatFile(bytes: Uint8Array, filename: string, opts: VatFileCheckOptions = {}): VatFileCheck {
+  if (!isAcceptedExtension(filename) || bytes.length < 4) return refuse('wrong_type');
+  const ext = vatFileExtension(filename);
+  const ok = (): VatFileCheck => ({ ok: true, type: { ext, mime: EXT_MIME[ext] } });
+  const okIf = (cond: boolean): VatFileCheck => (cond ? ok() : refuse('wrong_type'));
+
+  if (ext === '.pdf') return okIf(startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]));
+  if (JPEG_EXTS.has(ext)) return okIf(startsWith(bytes, [0xff, 0xd8, 0xff]));
+  if (ext === '.png') return okIf(startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (ZIP_EXTS.has(ext)) {
+    if (!startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) return refuse('wrong_type');
+    const verdict = checkOoxml(bytes, ext, opts.inflateRaw);
+    return verdict === 'ok' ? ok() : refuse(verdict);
   }
-  if (TEXT_EXTS.has(ext)) return looksLikeText(bytes) ? ok() : null;
+  if (OLE_EXTS.has(ext)) {
+    if (!startsWith(bytes, OLE_MAGIC)) return refuse('wrong_type');
+    if (oleHasVbaProject(bytes)) return refuse('macros');
+    if (ext === '.xls' && xlsHasMacroSheet(bytes)) return refuse('macros');
+    if (ext === '.msg' && msgHasRiskyAttachmentName(bytes)) return refuse('risky_attachment');
+    return ok();
+  }
+  if (TEXT_EXTS.has(ext)) {
+    if (!looksLikeText(bytes)) return refuse('wrong_type');
+    if (ext === '.eml' && emlHasRiskyAttachment(bytes)) return refuse('risky_attachment');
+    return ok();
+  }
+  return refuse('wrong_type');
+}
+
+// --- OOXML (.xlsx / .docx): a real package, no macro project ---------
+
+const u16 = (b: Uint8Array, o: number) => (b[o] | (b[o + 1] << 8)) >>> 0;
+const u32 = (b: Uint8Array, o: number) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+
+interface ZipEntry {
+  name: string;
+  method: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  localOffset: number;
+}
+
+/** The central directory of a zip, or null when it is not a readable zip. */
+function readZipEntries(bytes: Uint8Array): ZipEntry[] | null {
+  // End of central directory: 22 bytes + a comment of up to 65535 bytes.
+  const minEocd = Math.max(0, bytes.length - 22 - 0xffff);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= minEocd; i--) {
+    if (bytes[i] === 0x50 && bytes[i + 1] === 0x4b && bytes[i + 2] === 0x05 && bytes[i + 3] === 0x06) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) return null;
+  const count = u16(bytes, eocd + 10);
+  const cdOffset = u32(bytes, eocd + 16);
+  // Zip64 (count / offset at their maximum) is never needed for a 20 MB Office file.
+  if (count === 0 || count === 0xffff || cdOffset >= bytes.length) return null;
+  const decoder = new TextDecoder('utf-8');
+  const entries: ZipEntry[] = [];
+  let p = cdOffset;
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > bytes.length || u32(bytes, p) !== 0x02014b50) return null;
+    const nameLen = u16(bytes, p + 28);
+    const extraLen = u16(bytes, p + 30);
+    const commentLen = u16(bytes, p + 32);
+    if (p + 46 + nameLen > bytes.length) return null;
+    entries.push({
+      name: decoder.decode(bytes.subarray(p + 46, p + 46 + nameLen)),
+      method: u16(bytes, p + 10),
+      compressedSize: u32(bytes, p + 20),
+      uncompressedSize: u32(bytes, p + 24),
+      localOffset: u32(bytes, p + 42),
+    });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+const MAX_CONTENT_TYPES_BYTES = 2 * 1024 * 1024;
+/**
+ * Most a zip part may inflate to. The upload route passes it to zlib as
+ * `maxOutputLength`, so a zip bomb throws (refused as not a package) before
+ * it fills the memory.
+ */
+export const VAT_ZIP_PART_MAX_BYTES = MAX_CONTENT_TYPES_BYTES;
+
+/** One small entry's content (stored, or deflated with an inflater), or null. */
+function readZipEntry(
+  bytes: Uint8Array,
+  entry: ZipEntry,
+  inflateRaw?: (data: Uint8Array) => Uint8Array
+): Uint8Array | null {
+  const lo = entry.localOffset;
+  if (lo + 30 > bytes.length || u32(bytes, lo) !== 0x04034b50) return null;
+  if (entry.uncompressedSize > MAX_CONTENT_TYPES_BYTES) return null;
+  const start = lo + 30 + u16(bytes, lo + 26) + u16(bytes, lo + 28);
+  const end = start + entry.compressedSize;
+  if (end > bytes.length) return null;
+  const data = bytes.subarray(start, end);
+  if (entry.method === 0) return data;
+  if (entry.method === 8 && inflateRaw) {
+    try {
+      const out = inflateRaw(data);
+      return out.length > MAX_CONTENT_TYPES_BYTES ? null : out;
+    } catch {
+      return null;
+    }
+  }
   return null;
+}
+
+/** Part names that hold a macro project, a macro sheet or VBA data. */
+const MACRO_PART_REGEX = /(^|\/)(vbaProject[^/]*\.bin|vbaData\.xml)$|^xl\/macrosheets\//i;
+/** Content types of macro documents and macro parts (.xlsm / .docm / VBA / XLM). */
+const MACRO_CONTENT_TYPE_REGEX = /macroEnabled|vbaProject|vbaData|macrosheet/i;
+
+const OOXML_MAIN: Record<string, { part: string; contentType: RegExp }> = {
+  '.xlsx': { part: 'xl/workbook.xml', contentType: /spreadsheetml\.(sheet|template)\.main\+xml/i },
+  '.docx': { part: 'word/document.xml', contentType: /wordprocessingml\.(document|template)\.main\+xml/i },
+};
+
+function checkOoxml(
+  bytes: Uint8Array,
+  ext: string,
+  inflateRaw?: (data: Uint8Array) => Uint8Array
+): 'ok' | 'wrong_type' | 'macros' {
+  const main = OOXML_MAIN[ext];
+  const entries = readZipEntries(bytes);
+  if (!entries || !main) return 'wrong_type';
+  const names = entries.map((e) => e.name.replace(/^\/+/, ''));
+  if (names.some((n) => MACRO_PART_REGEX.test(n))) return 'macros';
+  // A part hidden from the central directory still counts.
+  if (containsAscii(bytes, 'vbaProject')) return 'macros';
+  const typesEntry = entries.find((e) => e.name === '[Content_Types].xml');
+  if (!typesEntry) return 'wrong_type';
+  if (!names.some((n) => n.toLowerCase() === main.part)) return 'wrong_type';
+  const types = readZipEntry(bytes, typesEntry, inflateRaw);
+  if (types) {
+    const xml = new TextDecoder('utf-8').decode(types);
+    if (MACRO_CONTENT_TYPE_REGEX.test(xml)) return 'macros';
+    if (!main.contentType.test(xml)) return 'wrong_type';
+  } else if (inflateRaw || typesEntry.method !== 8) {
+    // We could have read it and could not: not a package Office would open.
+    return 'wrong_type';
+  }
+  return 'ok';
+}
+
+function containsAscii(bytes: Uint8Array, needle: string): boolean {
+  const n = Array.from(needle, (c) => c.charCodeAt(0));
+  let i = bytes.indexOf(n[0]);
+  while (i >= 0 && i + n.length <= bytes.length) {
+    let hit = true;
+    for (let j = 1; j < n.length; j++) {
+      if (bytes[i + j] !== n[j]) {
+        hit = false;
+        break;
+      }
+    }
+    if (hit) return true;
+    i = bytes.indexOf(n[0], i + 1);
+  }
+  return false;
+}
+
+// --- OLE (.xls / .msg): no VBA project, no program attached ----------
+
+/** Storage names a VBA project lives in (Excel `_VBA_PROJECT_CUR`, Word `Macros`, both `VBA`). */
+const OLE_VBA_NAMES = new Set(['_vba_project', '_vba_project_cur', 'vba', 'macros']);
+
+/**
+ * The names of the OLE directory entries. Directory sectors start at a
+ * multiple of 512 (or 4096), so every 128-byte entry sits on a 128-byte
+ * boundary: read each slot shaped like an entry (UTF-16LE name ending in
+ * NUL, name length even and <= 64, type storage / stream / root, colour red
+ * or black). Needs no FAT walk, and cell text is never laid out like this.
+ */
+function oleDirectoryNames(bytes: Uint8Array): string[] {
+  const names: string[] = [];
+  for (let o = 512; o + 128 <= bytes.length; o += 128) {
+    const nameLen = u16(bytes, o + 64);
+    const type = bytes[o + 66];
+    if (nameLen < 4 || nameLen > 64 || nameLen % 2 !== 0) continue;
+    if (type !== 1 && type !== 2 && type !== 5) continue;
+    if (bytes[o + 67] > 1) continue;
+    if (u16(bytes, o + nameLen - 2) !== 0) continue;
+    let name = '';
+    for (let i = 0; i < nameLen - 2; i += 2) {
+      const c = u16(bytes, o + i);
+      if (c === 0) {
+        name = '';
+        break;
+      }
+      name += String.fromCharCode(c);
+    }
+    if (name) names.push(name);
+  }
+  return names;
+}
+
+/** True when the OLE file holds a VBA project (macros). */
+export function oleHasVbaProject(bytes: Uint8Array): boolean {
+  return oleDirectoryNames(bytes).some((n) => OLE_VBA_NAMES.has(n.toLowerCase()));
+}
+
+/**
+ * True when an .xls (BIFF8) declares an Excel 4.0 macro sheet (XLM), the
+ * old macro format that needs no VBA project. The sheet list of the Workbook
+ * stream is a run of BOUNDSHEET records: type 0x0085, length, 4-byte stream
+ * offset, visibility (0 visible / 1 hidden / 2 very hidden), sheet type
+ * (0x01 = macro sheet), then the name (length, flags 0/1, characters). Scan
+ * for a record of exactly that shape whose length matches its name; random
+ * bytes almost never line up like this. Best effort: a Workbook stream laid
+ * out in non-contiguous sectors could split the record and be missed.
+ */
+export function xlsHasMacroSheet(bytes: Uint8Array): boolean {
+  for (let o = 512; o + 12 <= bytes.length; o++) {
+    if (bytes[o] !== 0x85 || bytes[o + 1] !== 0x00) continue;
+    const len = u16(bytes, o + 2);
+    if (len < 9 || len > 8 + 31 * 2) continue;
+    const r = o + 4; // record body
+    if (bytes[r + 4] > 2 || bytes[r + 5] !== 0x01) continue;
+    const cch = bytes[r + 6];
+    const flags = bytes[r + 7];
+    if (cch < 1 || cch > 31 || flags > 1) continue;
+    if (len !== 8 + cch * (flags === 1 ? 2 : 1)) continue;
+    if (r + len > bytes.length) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Best effort for Outlook .msg: attachment names (PR_ATTACH_LONG_FILENAME,
+ * PR_ATTACH_FILENAME, PR_ATTACH_EXTENSION) are small UTF-16LE streams, and a
+ * small stream starts on a 64-byte boundary of the file. Read the string at
+ * each boundary up to its NUL; refuse a whole name that ends in a program
+ * extension. Body text runs on past such a word, so it rarely matches.
+ */
+export function msgHasRiskyAttachmentName(bytes: Uint8Array): boolean {
+  for (let o = 512; o + 4 <= bytes.length; o += 64) {
+    if (bytes[o + 1] !== 0 || bytes[o] < 0x20) continue;
+    let s = '';
+    for (let i = o; i + 1 < bytes.length && s.length <= 260; i += 2) {
+      const c = u16(bytes, i);
+      if (c === 0) break;
+      if (c < 0x20) {
+        s = '';
+        break;
+      }
+      s += String.fromCharCode(c);
+    }
+    // '.com' is left out here: sender names and addresses ("Amazon.com") end in it too.
+    if (s.length >= 3 && !/[\\/:*?"<>|@]/.test(s) && !/\.com$/i.test(s.trim()) && isRiskyAttachmentName(s)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// --- .eml: no program attached ---------------------------------------
+
+/** RFC 2047 encoded words (=?utf-8?B?...?= / =?utf-8?Q?...?=) to text, best effort. */
+function decodeEncodedWords(value: string): string {
+  return value.replace(/=\?[^?]+\?([bq])\?([^?]*)\?=/gi, (_m, enc: string, data: string) => {
+    try {
+      if (enc.toLowerCase() === 'b') {
+        const bin = atob(data);
+        return new TextDecoder('utf-8').decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+      }
+      return data.replace(/_/g, ' ').replace(/=([0-9a-f]{2})/gi, (_x, h: string) => String.fromCharCode(parseInt(h, 16)));
+    } catch {
+      return data;
+    }
+  });
+}
+
+/**
+ * True when an .eml carries an attachment named like a program
+ * (Content-Disposition `filename=` / Content-Type `name=`, quoted or not,
+ * folded, RFC 2047 encoded, RFC 2231 `filename*=` and split `filename*0*=`).
+ */
+export function emlHasRiskyAttachment(bytes: Uint8Array): boolean {
+  const text = new TextDecoder('utf-8').decode(bytes).replace(/\r?\n[ \t]+/g, ' '); // unfold headers
+  // Only MIME part headers: a `name=` in an HTML body is not an attachment.
+  const headers = text.split(/\r?\n/).filter((line) => /^content-(type|disposition)\s*:/i.test(line)).join('\n');
+  const re = /\b(?:file)?name(\*\d+)?(\*)?\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;\r\n]*))/gi;
+  const joined: string[][] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(headers))) {
+    let value = (m[3] ?? m[4] ?? '').trim();
+    if (m[2]) {
+      value = value.replace(/^[^']*'[^']*'/, ''); // charset'lang'
+      try {
+        value = decodeURIComponent(value);
+      } catch {
+        /* keep as is */
+      }
+    }
+    value = decodeEncodedWords(value);
+    if (isRiskyAttachmentName(value)) return true;
+    if (m[1] === '*0' || (m[1] && joined.length === 0)) joined.push([value]);
+    else if (m[1]) joined[joined.length - 1].push(value);
+  }
+  return joined.some((parts) => isRiskyAttachmentName(parts.join('')));
 }
 
 // ------------------------------------------------------------------

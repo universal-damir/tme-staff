@@ -82,7 +82,17 @@ export function codeRequiredFor(row: Pick<VatFileRequestRow, 'allowed_emails'>):
   return vatFilesEmailCodeOn() && allowedEmailsOf(row).length > 0;
 }
 
+let warnedFallback = false;
+
 function secret(): string {
+  // VAT_FILES_CODE_SECRET should be set on Netlify. The service key fallback
+  // stays so codes and proofs already handed out keep matching if it is not
+  // (the Netlify env cannot be checked from here); it mixes a database key
+  // into a hash secret, so production says so once in the function log.
+  if (!process.env.VAT_FILES_CODE_SECRET && process.env.NODE_ENV === 'production' && !warnedFallback) {
+    warnedFallback = true;
+    console.warn('vat-files-code: VAT_FILES_CODE_SECRET is not set, using SUPABASE_SERVICE_KEY');
+  }
   const key = process.env.VAT_FILES_CODE_SECRET || process.env.SUPABASE_SERVICE_KEY;
   if (!key) throw new Error('VAT_FILES_CODE_SECRET / SUPABASE_SERVICE_KEY is not set');
   return key;

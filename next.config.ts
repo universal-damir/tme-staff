@@ -50,6 +50,8 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // No `X-Powered-By: Next.js` header.
+  poweredByHeader: false,
   images: {
     remotePatterns: [
       {

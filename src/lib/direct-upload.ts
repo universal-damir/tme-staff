@@ -17,6 +17,14 @@
 //
 // The incoming copy lives under `_incoming/<row id>/<uuid>` in the form's
 // own bucket and is removed once the file is checked and stored.
+//
+// Every minted upload URL also leaves a small marker
+// `_incoming/<row id>/.slot-<uuid>` (removed on finish), so the per-row cap
+// counts URLs handed out, not only files that already arrived: an open link
+// cannot mint unlimited URLs and park a file behind each one. Copies and
+// markers older than INCOMING_STALE_MS (the life of a signed upload URL) no
+// longer count and are removed when next counted, so leftovers of closed
+// tabs never block a row for good.
 
 import { randomUUID } from 'crypto';
 import { getSupabaseAdmin } from './supabase-server';
@@ -26,6 +34,18 @@ import { MAX_FILE_BYTES } from './file-validation';
 export const UPLOAD_MAX_BYTES = MAX_FILE_BYTES;
 
 const INCOMING_PREFIX = '_incoming';
+/**
+ * Incoming copies one row may have waiting at once. A normal form sends one
+ * large file at a time and removes its copy on finish; abandoned copies
+ * (closed tab mid-upload) stay until cleaned, so this caps what an open link
+ * can park in the bucket without ever finishing.
+ */
+export const MAX_PENDING_PER_ROW = 10;
+/** A signed upload URL lives 2 hours; anything older under _incoming is a leftover. */
+export const INCOMING_STALE_MS = 2 * 60 * 60 * 1000;
+const SLOT_MARKER_PREFIX = '.slot-';
+const LIST_PAGE = 100;
+const MAX_LIST_DEPTH = 3;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface DirectUploadRequest {
@@ -65,7 +85,28 @@ export async function startDirectUpload(
   if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0 || size > maxBytes) {
     return { ok: false, status: 413, error: 'file_size_out_of_range' };
   }
+  const pending = await countPendingUploads(bucket, rowId);
+  if (pending === null) {
+    console.error('direct-upload: could not count the pending uploads');
+    return { ok: false, status: 503, error: 'upload_failed' };
+  }
+  if (pending >= MAX_PENDING_PER_ROW) {
+    return { ok: false, status: 409, error: 'too_many_files' };
+  }
   const uploadId = randomUUID();
+  // The slot marker: counted until finish (or until it is stale). Best
+  // effort: without it the cap still counts the files that arrived.
+  try {
+    const { error: markErr } = await getSupabaseAdmin()
+      .storage.from(bucket)
+      .upload(slotMarkerPath(rowId, uploadId), new Uint8Array(0), {
+        contentType: 'application/octet-stream',
+        upsert: false,
+      });
+    if (markErr) console.error('direct-upload: could not write the slot marker');
+  } catch {
+    console.error('direct-upload: could not write the slot marker');
+  }
   const { data, error } = await getSupabaseAdmin()
     .storage.from(bucket)
     .createSignedUploadUrl(`${INCOMING_PREFIX}/${rowId}/${uploadId}`);
@@ -102,7 +143,11 @@ export async function readDirectUpload(
   return { ok: true, bytes: new Uint8Array(await data.arrayBuffer()) };
 }
 
-/** Remove the incoming copy. Best effort: a leftover in a private bucket harms nobody. */
+function slotMarkerPath(rowId: string, uploadId: string): string {
+  return `${INCOMING_PREFIX}/${rowId}/${SLOT_MARKER_PREFIX}${uploadId}`;
+}
+
+/** Remove the incoming copy and its slot marker. Best effort: a leftover in a private bucket harms nobody. */
 export async function removeDirectUpload(
   bucket: string,
   rowId: string,
@@ -112,8 +157,78 @@ export async function removeDirectUpload(
   try {
     await getSupabaseAdmin()
       .storage.from(bucket)
-      .remove([`${INCOMING_PREFIX}/${rowId}/${uploadId}`]);
+      .remove([`${INCOMING_PREFIX}/${rowId}/${uploadId}`, slotMarkerPath(rowId, uploadId)]);
   } catch {
     // ignore
   }
+}
+
+/**
+ * Direct uploads of a row still in progress: each upload id with a slot
+ * marker or an incoming copy younger than INCOMING_STALE_MS counts once.
+ * Older entries are removed (best effort) and not counted. Null when the
+ * folder could not be listed. Stops counting past MAX_PENDING_PER_ROW * 10
+ * entries (far beyond the cap).
+ */
+export async function countPendingUploads(
+  bucket: string,
+  rowId: string,
+  now: number = Date.now()
+): Promise<number | null> {
+  const storage = getSupabaseAdmin().storage.from(bucket);
+  const folder = `${INCOMING_PREFIX}/${rowId}`;
+  const live = new Set<string>();
+  const stale: string[] = [];
+  const maxEntries = MAX_PENDING_PER_ROW * 10;
+  let seen = 0;
+  for (let offset = 0; seen < maxEntries; offset += LIST_PAGE) {
+    const { data, error } = await storage.list(folder, { limit: LIST_PAGE, offset });
+    if (error || !data) return null;
+    for (const obj of data) {
+      seen += 1;
+      // A sub-folder (no id) is not something the direct upload writes; count it.
+      const created = obj.id ? Date.parse(String((obj as { created_at?: unknown }).created_at ?? '')) : NaN;
+      if (Number.isFinite(created) && now - created > INCOMING_STALE_MS) {
+        stale.push(`${folder}/${obj.name}`);
+        continue;
+      }
+      live.add(obj.name.startsWith(SLOT_MARKER_PREFIX) ? obj.name.slice(SLOT_MARKER_PREFIX.length) : obj.name);
+    }
+    if (data.length < LIST_PAGE) break;
+  }
+  if (stale.length > 0) {
+    try {
+      await storage.remove(stale);
+    } catch {
+      // ignore: counted as gone either way
+    }
+  }
+  return live.size;
+}
+
+/**
+ * Count the files under `prefix` (sub-folders included, a few levels deep).
+ * Stops once the count passes `stopAfter`. Null when listing failed.
+ */
+export async function countStoredObjects(
+  bucket: string,
+  prefix: string,
+  stopAfter: number
+): Promise<number | null> {
+  const storage = getSupabaseAdmin().storage.from(bucket);
+  let count = 0;
+  const walk = async (folder: string, depth: number): Promise<boolean> => {
+    for (let offset = 0; ; offset += LIST_PAGE) {
+      const { data, error } = await storage.list(folder, { limit: LIST_PAGE, offset });
+      if (error || !data) return false;
+      for (const obj of data) {
+        // Supabase lists a sub-folder as an entry without an id.
+        if (obj.id) count += 1;
+        else if (depth < MAX_LIST_DEPTH && !(await walk(`${folder}/${obj.name}`, depth + 1))) return false;
+        if (count > stopAfter) return true;
+      }
+      if (data.length < LIST_PAGE) return true;
+    }
+  };
+  return (await walk(prefix, 0)) ? count : null;
 }

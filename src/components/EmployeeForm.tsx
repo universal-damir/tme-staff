@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import type { StaffDocumentReferences } from '@/types';
 import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -44,6 +45,7 @@ import {
   requiresArrivalDate,
   shouldOfferManualReview,
   buildManualReviewPageRef,
+  readBackCheckedRef,
   sponsorDocsRequired,
   employeeVisaMandatoryOverride,
   sponsorshipTypeFromSponsor,
@@ -62,7 +64,7 @@ import {
   CANCEL_COPY_INTRO,
 } from '@/lib/staff-form-logic';
 import { buildNocText } from '@/lib/noc-letter';
-import { uploadDocument, updateDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData, isUploadFailure } from '@/lib/supabase';
+import { uploadDocument, updateDocumentReferences, saveDocumentReferences, uploadPassportPage, PassportPageKey, getDocumentUrl, autoSaveEmployeeData, isUploadFailure, type UploadResult, type UploadedRef } from '@/lib/supabase';
 import { calculateFullName, normalizePersonName } from '@/lib/utils';
 import { callAiCheck } from '@/lib/ai-check-client';
 import { FAILURE_MESSAGES } from '@/lib/request-outcome';
@@ -536,11 +538,11 @@ export function EmployeeForm({
   const [eidFrontDoc, setEidFrontDoc] = useState(submission.documents?.eid_front);
   const [eidBackDoc, setEidBackDoc] = useState(submission.documents?.eid_back);
   const [eidFrontUI, setEidFrontUI] = useState({
-    preview: submission.documents?.eid_front?.path ? getDocumentUrl(submission.documents.eid_front.path) : null as string | null,
+    preview: submission.documents?.eid_front?.path ? getDocumentUrl(submission.documents.eid_front.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const [eidBackUI, setEidBackUI] = useState({
-    preview: submission.documents?.eid_back?.path ? getDocumentUrl(submission.documents.eid_back.path) : null as string | null,
+    preview: submission.documents?.eid_back?.path ? getDocumentUrl(submission.documents.eid_back.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const eidFrontDocRef = React.useRef(eidFrontDoc);
@@ -572,7 +574,7 @@ export function EmployeeForm({
   // inside the same Yes/No section).
   const [previousVisaDoc, setPreviousVisaDoc] = useState(submission.documents?.previous_visa_document);
   const [previousVisaUI, setPreviousVisaUI] = useState({
-    preview: submission.documents?.previous_visa_document?.path ? getDocumentUrl(submission.documents.previous_visa_document.path) : null as string | null,
+    preview: submission.documents?.previous_visa_document?.path ? getDocumentUrl(submission.documents.previous_visa_document.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const previousVisaDocRef = React.useRef(previousVisaDoc);
@@ -582,11 +584,11 @@ export function EmployeeForm({
   const [pakistanIdFrontDoc, setPakistanIdFrontDoc] = useState(submission.documents?.pakistan_id_front);
   const [pakistanIdBackDoc, setPakistanIdBackDoc] = useState(submission.documents?.pakistan_id_back);
   const [pakistanIdFrontUI, setPakistanIdFrontUI] = useState({
-    preview: submission.documents?.pakistan_id_front?.path ? getDocumentUrl(submission.documents.pakistan_id_front.path) : null as string | null,
+    preview: submission.documents?.pakistan_id_front?.path ? getDocumentUrl(submission.documents.pakistan_id_front.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const [pakistanIdBackUI, setPakistanIdBackUI] = useState({
-    preview: submission.documents?.pakistan_id_back?.path ? getDocumentUrl(submission.documents.pakistan_id_back.path) : null as string | null,
+    preview: submission.documents?.pakistan_id_back?.path ? getDocumentUrl(submission.documents.pakistan_id_back.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const pakistanIdFrontDocRef = React.useRef(pakistanIdFrontDoc);
@@ -602,19 +604,19 @@ export function EmployeeForm({
   const [sponsorEidFrontDoc, setSponsorEidFrontDoc] = useState(submission.documents?.sponsor_eid_front);
   const [sponsorEidBackDoc, setSponsorEidBackDoc] = useState(submission.documents?.sponsor_eid_back);
   const [sponsorPassportUI, setSponsorPassportUI] = useState({
-    preview: submission.documents?.sponsor_passport?.path ? getDocumentUrl(submission.documents.sponsor_passport.path) : null as string | null,
+    preview: submission.documents?.sponsor_passport?.path ? getDocumentUrl(submission.documents.sponsor_passport.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const [sponsorVisaUI, setSponsorVisaUI] = useState({
-    preview: submission.documents?.sponsor_visa?.path ? getDocumentUrl(submission.documents.sponsor_visa.path) : null as string | null,
+    preview: submission.documents?.sponsor_visa?.path ? getDocumentUrl(submission.documents.sponsor_visa.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const [sponsorEidFrontUI, setSponsorEidFrontUI] = useState({
-    preview: submission.documents?.sponsor_eid_front?.path ? getDocumentUrl(submission.documents.sponsor_eid_front.path) : null as string | null,
+    preview: submission.documents?.sponsor_eid_front?.path ? getDocumentUrl(submission.documents.sponsor_eid_front.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const [sponsorEidBackUI, setSponsorEidBackUI] = useState({
-    preview: submission.documents?.sponsor_eid_back?.path ? getDocumentUrl(submission.documents.sponsor_eid_back.path) : null as string | null,
+    preview: submission.documents?.sponsor_eid_back?.path ? getDocumentUrl(submission.documents.sponsor_eid_back.path, submission.id) : null as string | null,
     validating: false, error: null as string | null, file: null as File | null,
   });
   const sponsorPassportDocRef = React.useRef(sponsorPassportDoc);
@@ -690,7 +692,7 @@ export function EmployeeForm({
   const initCover = submission.documents?.passportPages?.cover;
   const initInside = submission.documents?.passportPages?.insidePages;
   const [coverUI, setCoverUI] = useState({
-    preview: initCover?.path ? getDocumentUrl(initCover.path) : null as string | null,
+    preview: initCover?.path ? getDocumentUrl(initCover.path, submission.id) : null as string | null,
     validating: false,
     error: null as string | null,
     file: null as File | null,
@@ -698,14 +700,14 @@ export function EmployeeForm({
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
   const [pendingInsideFile, setPendingInsideFile] = useState<File | null>(null);
   const [insideUI, setInsideUI] = useState({
-    preview: initInside?.path ? getDocumentUrl(initInside.path) : null as string | null,
+    preview: initInside?.path ? getDocumentUrl(initInside.path, submission.id) : null as string | null,
     validating: false,
     error: null as string | null,
     file: null as File | null,
   });
   const initAdditional = submission.documents?.passportPages?.additionalPage;
   const [additionalPageUI, setAdditionalPageUI] = useState({
-    preview: initAdditional?.path ? getDocumentUrl(initAdditional.path) : null as string | null,
+    preview: initAdditional?.path ? getDocumentUrl(initAdditional.path, submission.id) : null as string | null,
     validating: false,
     error: null as string | null,
     file: null as File | null,
@@ -767,6 +769,27 @@ export function EmployeeForm({
   // manual-review submit to stamp samePhotoSuspected on the stored doc ref.
   const photoSamePhotoRef = React.useRef(false);
   const passportPagesRef = React.useRef(passportPages);
+
+  // After a hand check: show what the server stored for the slot (it decides
+  // validated / needsReview, STAFF-001), so "sent for review" is real.
+  const saveHandCheck = async (docs: StaffDocumentReferences, slot: 'photo' | PassportPageKey) => {
+    const saved = await saveDocumentReferences(submissionId, docs, aiToken);
+    if (!saved) return;
+    if (slot === 'photo') {
+      const back = readBackCheckedRef(photoDocRef.current, saved.photo);
+      if (back !== photoDocRef.current) {
+        photoDocRef.current = back;
+        setPhotoDoc(back);
+      }
+      return;
+    }
+    const cur = passportPagesRef.current[slot];
+    const back = readBackCheckedRef(cur, saved.passportPages?.[slot]);
+    if (back === cur) return;
+    const pages = { ...passportPagesRef.current, [slot]: back };
+    passportPagesRef.current = pages;
+    setPassportPages(pages);
+  };
   // Persisted "passport unchanged" attestation (renewal skip). Lives in a ref
   // (not just component state) because buildDocRefs merges from the INITIAL
   // submission.documents — without threading it through every save, a later
@@ -1573,7 +1596,7 @@ export function EmployeeForm({
     setPhotoDoc(updatedDoc);
     photoDocRef.current = updatedDoc;
     setPhotoError(null);
-    await saveDocRefs(buildDocRefs({ photo: updatedDoc }));
+    await saveHandCheck(buildDocRefs({ photo: updatedDoc }), 'photo');
     setPhotoRejectionCount(0);
     setPhotoManualReviewConfirmed(false);
     setPhotoManualReviewSubmitting(false);
@@ -1590,17 +1613,25 @@ export function EmployeeForm({
   // Passport validation helper. `failed` = the check could not give a verdict
   // (request failed or the check could not run); `countsAsStrike` says
   // whether that failure counts toward the manual-review option.
+  // The page is UPLOADED first and the route checks the stored file (`path`)
+  // and records the verdict server-side (STAFF-001); `upload` is the stored
+  // ref the caller saves when the page passed.
   const validatePassportPageType = async (
     imageBase64: string,
     expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE',
     file: File
-  ): Promise<{ valid: boolean; error?: string; failed: boolean; countsAsStrike: boolean }> => {
+  ): Promise<{ valid: boolean; error?: string; failed: boolean; countsAsStrike: boolean; upload?: UploadedRef }> => {
+    const pageKey: PassportPageKey = expectedType === 'COVER' ? 'cover' : expectedType === 'INSIDE_PAGES' ? 'insidePages' : 'additionalPage';
+    const upload = await uploadPassportPage(submission.id, pageKey, file);
+    if (isUploadFailure(upload)) {
+      return { valid: false, error: upload.error, failed: true, countsAsStrike: false };
+    }
     const outcome = await callAiCheck<{ matches?: boolean; errorMessage?: string }>(
       '/api/validate-passport-page',
       // nationality selects the additional-page prompt variant (Indian
       // family-details page vs Syrian issue-details page); ignored for
       // cover/inside checks.
-      { expectedType, nationality, submissionId: submission.id, token: aiToken },
+      { expectedType, nationality, submissionId: submission.id, token: aiToken, path: upload.path },
       imageBase64,
       failureContext(`check:passport-${expectedType.toLowerCase()}`, file)
     );
@@ -1614,6 +1645,7 @@ export function EmployeeForm({
       error: outcome.data.errorMessage,
       failed: false,
       countsAsStrike: false,
+      upload,
     };
   };
 
@@ -1697,8 +1729,10 @@ export function EmployeeForm({
 
     // Both images and PDFs run through page-type validation — PDFs use
     // Claude's `document` content block (handled in passport-page-validation.ts).
+    let checkedUpload: UploadResult | null = null;
     try {
       const validation = await validatePassportPageType(preview, 'COVER', file);
+      checkedUpload = validation.upload ?? null;
       if (!validation.valid) {
         // failed=true means the check gave no verdict (request failed or the
         // check could not run). Show the reason; it still counts as a strike
@@ -1724,7 +1758,8 @@ export function EmployeeForm({
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, 'cover', file);
+    // Uploaded (and checked from storage) by validatePassportPageType.
+    const result: UploadResult = checkedUpload ?? { error: FAILURE_MESSAGES.server_error };
     if (isUploadFailure(result)) {
       setCoverUI({ preview, validating: false, error: result.error, file });
       return false;
@@ -1768,8 +1803,10 @@ export function EmployeeForm({
     // Both images and PDFs go through the page-type validator. Anthropic
     // accepts PDFs natively via the `document` content block (handled in
     // passport-page-validation.ts), so no client-side rasterization needed.
+    let checkedUpload: UploadResult | null = null;
     try {
       const validation = await validatePassportPageType(preview, 'INSIDE_PAGES', file);
+      checkedUpload = validation.upload ?? null;
       if (!validation.valid) {
         // failed=true means the check gave no verdict (request failed or the
         // check could not run). Show the reason; it still counts as a strike
@@ -1797,7 +1834,8 @@ export function EmployeeForm({
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, 'insidePages', file);
+    // Uploaded (and checked from storage) by validatePassportPageType.
+    const result: UploadResult = checkedUpload ?? { error: FAILURE_MESSAGES.server_error };
     if (isUploadFailure(result)) {
       setInsideUI({ preview, validating: false, error: result.error, file });
       return false;
@@ -1907,7 +1945,7 @@ export function EmployeeForm({
     setPassportError(null);
     setCoverRejectionCount(0);
     setCoverManualReviewConfirmed(false);
-    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+    await saveHandCheck(buildDocRefs({ passportPages: updatedPages }), 'cover');
   };
 
   const handleInsideManualReview = async () => {
@@ -1957,7 +1995,7 @@ export function EmployeeForm({
     setInsideRejectionCount(0);
     setInsideManualReviewConfirmed(false);
     setPassportDataReady(true);
-    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+    await saveHandCheck(buildDocRefs({ passportPages: updatedPages }), 'insidePages');
   };
 
   // Helper: best-effort extraction of the additional-page fields from a
@@ -2019,8 +2057,10 @@ export function EmployeeForm({
     // (the prompt favours valid=true) because additional-page layouts vary,
     // but it still catches the common mistake of uploading the cover or
     // the data page here. Counter feeds the manual-review affordance.
+    let checkedUpload: UploadResult | null = null;
     try {
       const validation = await validatePassportPageType(preview, 'ADDITIONAL_PAGE', file);
+      checkedUpload = validation.upload ?? null;
       if (!validation.valid) {
         // failed=true means the check gave no verdict (request failed or the
         // check could not run). Show the reason; it still counts as a strike
@@ -2039,7 +2079,8 @@ export function EmployeeForm({
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, 'additionalPage', file);
+    // Uploaded (and checked from storage) by validatePassportPageType.
+    const result: UploadResult = checkedUpload ?? { error: FAILURE_MESSAGES.server_error };
     if (isUploadFailure(result)) {
       setAdditionalPageUI({ preview, validating: false, error: result.error, file });
       return false;
@@ -2091,7 +2132,7 @@ export function EmployeeForm({
     passportPagesRef.current = updatedPages;
     setAdditionalRejectionCount(0);
     setAdditionalManualReviewConfirmed(false);
-    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+    await saveHandCheck(buildDocRefs({ passportPages: updatedPages }), 'additionalPage');
   };
 
   const handleAdditionalPageRemove = async () => {

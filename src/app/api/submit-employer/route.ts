@@ -167,7 +167,10 @@ export async function POST(req: NextRequest) {
       );
 
       const notifyResult = await notifyResponse.json().catch(() => null);
-      console.log('[submit-employer] Portal notification result:', notifyResult);
+      // Only the outcome: the portal's answer may carry personal data.
+      console.log(
+        `[submit-employer] Portal notification result: ok=${notifyResponse.ok} status=${notifyResponse.status} staffId=${(notifyResult as { staffId?: unknown } | null)?.staffId ?? '-'}`
+      );
       employeeNotified = portalNotifiedEmployee(notifyResponse.status, notifyResult);
     } catch (notifyError) {
       console.error('[submit-employer] Portal notification failed:', notifyError);

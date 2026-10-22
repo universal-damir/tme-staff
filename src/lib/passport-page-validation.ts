@@ -356,7 +356,13 @@ export async function validatePassportPage(
       fold_visible?: boolean;
       is_uae_passport?: boolean;
     };
-    console.log('[Passport Validation] Result:', result);
+    // STAFF-008: never log the model's free text (observation / quality_issue
+    // can carry names and numbers) — only the verdict booleans.
+    console.log('[Passport Validation] Result:', {
+      valid: result.valid === true,
+      all_corners_visible: result.all_corners_visible,
+      has_quality_issue: !!(result.quality_issue || '').trim(),
+    });
 
     // Company-setup data page: the whole verdict is computed in CODE from the
     // observations. The model's own `valid` is ignored here: Tina (27.09) had

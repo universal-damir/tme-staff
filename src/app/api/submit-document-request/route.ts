@@ -15,7 +15,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { signWebhookBody } from '@/lib/webhook-signature';
-import { assertSubmittable, missingRequestedDocuments } from '@/lib/submit-validation';
+import {
+  FORM_CHANGED_MESSAGE,
+  assertSubmittable,
+  missingRequestedDocuments,
+} from '@/lib/submit-validation';
 import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
 import type { StaffDocumentReferences } from '@/types';
 
@@ -41,7 +45,7 @@ export async function POST(req: NextRequest) {
 
     const { data: existing, error: lookupError } = await supabase
       .from('staff_onboarding_submissions')
-      .select('status, onboarding_type, requested_documents, documents, employee_data, prefill_employee_data')
+      .select('status, onboarding_type, requested_documents, documents, employee_data, prefill_employee_data, updated_at')
       .eq('id', id)
       .maybeSingle();
 
@@ -100,7 +104,10 @@ export async function POST(req: NextRequest) {
 
     // Mark the request complete. No signature fields — document requests
     // carry uploads only.
-    const { error } = await supabase
+    // Only on the row version the gate above read: a documents save landing
+    // in between must not slip past the gate (and a second submit misses).
+    const gateUpdatedAt = (existing as { updated_at?: string | null } | null)?.updated_at ?? null;
+    let updateQuery = supabase
       .from('staff_onboarding_submissions')
       .update({
         current_step: 'complete',
@@ -108,10 +115,16 @@ export async function POST(req: NextRequest) {
         updated_at: now,
       })
       .eq('id', id);
+    updateQuery =
+      gateUpdatedAt === null ? updateQuery.is('updated_at', null) : updateQuery.eq('updated_at', gateUpdatedAt);
+    const { data: updatedRows, error } = await updateQuery.select('id');
 
     if (error) {
       console.error('[submit-document-request] Supabase update failed:', error);
       return NextResponse.json({ error: 'Failed to save submission' }, { status: 500 });
+    }
+    if (!updatedRows || updatedRows.length === 0) {
+      return NextResponse.json({ error: FORM_CHANGED_MESSAGE, code: 'changed' }, { status: 409 });
     }
 
     // Notify TME Portal to trigger sync (server-side — guaranteed to complete)
@@ -134,8 +147,13 @@ export async function POST(req: NextRequest) {
         }
       );
 
-      const notifyResult = await notifyResponse.json();
-      console.log('[submit-document-request] Portal sync result:', notifyResult);
+      // Only the outcome: the portal's answer may carry personal data.
+      const notifyResult = (await notifyResponse.json().catch(() => null)) as
+        | { success?: boolean; staffId?: unknown }
+        | null;
+      console.log(
+        `[submit-document-request] Portal sync result: ok=${notifyResponse.ok} status=${notifyResponse.status} staffId=${notifyResult?.staffId ?? '-'}`
+      );
     } catch (notifyError) {
       console.error('[submit-document-request] Portal notification failed:', notifyError);
       // Don't fail — cron will pick it up as fallback

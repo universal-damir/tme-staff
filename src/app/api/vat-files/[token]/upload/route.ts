@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
+import { inflateRawSync } from 'zlib';
 import { getClientIp } from '@/lib/ai-route-guard';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import {
@@ -13,8 +14,9 @@ import {
   VAT_FILES_MAX_BYTES,
   VAT_FILES_MAX_TOTAL,
   VAT_FILES_MAX_STORED,
+  VAT_ZIP_PART_MAX_BYTES,
   buildStoragePath,
-  detectVatFile,
+  checkVatFile,
   displayFileName,
   isAcceptedExtension,
   isUploadPathForLink,
@@ -133,10 +135,22 @@ async function store(
   originalName: string,
   target: { lineId?: number; docKind?: VatCustomsDocKind } = {}
 ): Promise<NextResponse> {
-  const detected = detectVatFile(bytes, originalName);
-  if (!detected) {
-    return NextResponse.json({ error: 'unsupported_file_type' }, { status: 415 });
+  // maxOutputLength: a zip bomb throws here (caught in the check = refused)
+  // instead of inflating gigabytes into memory.
+  const checked = checkVatFile(bytes, originalName, {
+    inflateRaw: (data) => inflateRawSync(data, { maxOutputLength: VAT_ZIP_PART_MAX_BYTES }),
+  });
+  if (!checked.ok) {
+    if (checked.reason === 'wrong_type') {
+      return NextResponse.json({ error: 'unsupported_file_type' }, { status: 415 });
+    }
+    // Macros / a program attached to an email: 422 + a sentence the page shows as is.
+    return NextResponse.json(
+      { error: checked.reason === 'macros' ? 'file_has_macros' : 'risky_attachment', errorMessage: checked.message },
+      { status: 422 }
+    );
   }
+  const detected = checked.type;
   const path = buildStoragePath(row.environment, row.link_token, randomUUID(), originalName);
   const { error } = await getSupabaseAdmin()
     .storage.from(VAT_FILES_BUCKET)

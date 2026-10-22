@@ -191,7 +191,7 @@ export default function EInvoicingIntakePage() {
           if (!outcome.ok) {
             const msg =
               outcome.code === 'unsupported_file_type' || outcome.kind === 'wrong_file'
-                ? `"${file.name}" is not a PDF, image or XML invoice.`
+                ? `"${file.name}" is not a PDF, an image or a UBL / PINT-AE XML invoice.`
                 : outcome.kind === 'too_large'
                 ? `"${file.name}" is too large. Please upload a file smaller than 10 MB.`
                 : outcome.code === 'too_many_files'

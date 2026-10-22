@@ -31,6 +31,7 @@ import {
 } from '@/lib/staff-form-logic';
 import { isUaeIban, validateIbanFormat } from '@/lib/uae-bank-directory';
 import { cloudflareClientIp } from './cloudflare-ip';
+import { isServerAccepted, type ServerCheckKind } from './document-checks';
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
 const IPV6 = /^([0-9a-fA-F:]+)$/;
@@ -109,9 +110,39 @@ export function assertStep(
   return { ok: true };
 }
 
+/**
+ * A submit found the row changed between the required-documents gate and the
+ * final write (a document save or a check landed in between), so the gate's
+ * view is stale. Nothing was written; sending again re-runs the gate.
+ */
+export const FORM_CHANGED_MESSAGE = 'Your form changed while submitting, please try again.';
+
 /** Shown to the employee when the employer took the form back. */
 export const RECALLED_MESSAGE =
   'This form was withdrawn by your employer to make a correction. You will receive a new email with a new link.';
+
+/**
+ * Uploaded passport pages that the server has not accepted: no passing AI
+ * check of the STORED page and no hand check (STAFF-001). A page that is not
+ * uploaded is not listed here (the callers decide whether it is required).
+ */
+function unacceptedPassportPages(docs: StaffDocumentReferences): string[] {
+  const pages = docs.passportPages ?? {};
+  const out: string[] = [];
+  const check = (
+    ref: { path?: string; validated?: boolean; needsReview?: boolean } | undefined,
+    kind: ServerCheckKind,
+    label: string
+  ) => {
+    if (ref?.path && !isServerAccepted(docs, ref, kind)) {
+      out.push(`${label} (must pass the check or be submitted for manual review)`);
+    }
+  };
+  check(pages.cover, 'passport:COVER', 'Passport cover page');
+  check(pages.insidePages, 'passport:INSIDE_PAGES', 'Passport data page');
+  check(pages.additionalPage, 'passport:ADDITIONAL_PAGE', 'Passport additional page');
+  return out;
+}
 
 /**
  * Server-side required-documents gate for `/api/submit-employee`.
@@ -166,7 +197,9 @@ export function missingRequiredDocuments(row: {
     docs.photo_unchanged === true;
   if (!photo?.path) {
     if (!photoKept) missing.push('ID photo');
-  } else if (!photo.validated && !photo.needsReview) {
+  } else if (!isServerAccepted(docs, photo, 'photo')) {
+    // The server's verdict for the stored file, never the browser's flag
+    // (STAFF-001, lib/document-checks.ts).
     missing.push('ID photo (must pass validation or be submitted for manual review)');
   }
 
@@ -186,6 +219,7 @@ export function missingRequiredDocuments(row: {
     if (!pages.cover?.path) missing.push('Passport cover page');
     if (!pages.insidePages?.path) missing.push('Passport data page');
   }
+  missing.push(...unacceptedPassportPages(docs));
 
   // Additional page (Indian address page / Syrian issue-details page).
   // Keyed off a freshly uploaded data page — exactly the client condition
@@ -352,9 +386,12 @@ export function missingRequestedDocuments(row: {
     passportAdditionalPageVariant(row.nationality) === 'syria' &&
     passportAdditionalPageRequiredForDocs(row.nationality, docs) === null;
 
+  // The server's verdict for the stored file (or a hand check), never the
+  // browser's flag (STAFF-001, lib/document-checks.ts).
   const accepted = (
-    doc: { path?: string; validated?: boolean; needsReview?: boolean } | undefined
-  ): boolean => !!doc?.path && (doc.validated === true || doc.needsReview === true);
+    doc: { path?: string; validated?: boolean; needsReview?: boolean } | undefined,
+    kind: ServerCheckKind
+  ): boolean => isServerAccepted(docs, doc, kind);
 
   const missing: string[] = [];
   for (const key of requested) {
@@ -367,24 +404,24 @@ export function missingRequestedDocuments(row: {
     }
     switch (key) {
       case 'photo':
-        if (!accepted(docs.photo)) missing.push(key);
+        if (!accepted(docs.photo, 'photo')) missing.push(key);
         break;
       case 'passport_cover':
-        if (!accepted(pages.cover)) missing.push(key);
+        if (!accepted(pages.cover, 'passport:COVER')) missing.push(key);
         break;
       case 'passport_inside':
-        if (!accepted(pages.insidePages)) missing.push(key);
+        if (!accepted(pages.insidePages, 'passport:INSIDE_PAGES')) missing.push(key);
         break;
       case 'passport_additional':
         // Skip entirely when this passport has no such page (see above).
         if (syrianWithoutAdditionalPage) break;
-        if (!accepted(pages.additionalPage)) missing.push(key);
+        if (!accepted(pages.additionalPage, 'passport:ADDITIONAL_PAGE')) missing.push(key);
         break;
       case 'eid_front':
-        if (!accepted(docs.eid_front)) missing.push(key);
+        if (!accepted(docs.eid_front, 'eid:front')) missing.push(key);
         break;
       case 'eid_back':
-        if (!accepted(docs.eid_back)) missing.push(key);
+        if (!accepted(docs.eid_back, 'eid:back')) missing.push(key);
         break;
       case 'degree_attested':
         if (!docs.degree_attested?.path) missing.push(key);
@@ -557,7 +594,7 @@ function dependentRequirements(
   const photo = docs.photo;
   if (!photo?.path) {
     missing.push('ID photo');
-  } else if (!photo.validated && !photo.needsReview) {
+  } else if (!isServerAccepted(docs, photo, 'photo')) {
     missing.push('ID photo (must pass validation or be submitted for manual review)');
   }
 
@@ -573,6 +610,7 @@ function dependentRequirements(
     if (!pages.cover?.path) missing.push('Passport cover page');
     if (!pages.insidePages?.path) missing.push('Passport data page');
   }
+  missing.push(...unacceptedPassportPages(docs));
   // Keyed off a FRESHLY uploaded data page (exactly the client condition), so
   // the renewal skip — where no pages are uploaded — skips this too.
   // RequiredForDocs, not the bare nationality check: a new-format Syrian

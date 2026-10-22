@@ -63,12 +63,18 @@ export async function GET() {
 
   // 2) Secondary: direct portal call (reachable only inside the network / dev).
   try {
+    // No secret = no portal call (never send an empty x-api-secret); the
+    // hardcoded list below answers instead. The portal expects this plain
+    // header; moving to a signed (HMAC) request needs a portal change too.
+    const apiSecret = process.env.STAFF_PORTAL_API_SECRET;
+    if (!apiSecret) throw new Error('STAFF_PORTAL_API_SECRET is not set');
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
 
     const response = await fetch(`${TME_PORTAL_URL}/api/mohre-professions`, {
       headers: {
-        'x-api-secret': process.env.STAFF_PORTAL_API_SECRET || '',
+        'x-api-secret': apiSecret,
       },
       cache: 'no-store',
       signal: controller.signal,

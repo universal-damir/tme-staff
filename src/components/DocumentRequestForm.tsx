@@ -16,6 +16,7 @@ import {
   shouldOfferManualReview,
   buildManualReviewPageRef,
   passportAdditionalPageVariant,
+  readBackCheckedRef,
 } from '@/lib/staff-form-logic';
 import {
   CUSTOM_REQUESTED_KEY_PREFIX,
@@ -26,9 +27,11 @@ import {
 import {
   uploadDocument,
   uploadPassportPage,
-  updateDocumentReferences,
+  saveDocumentReferences,
   isUploadFailure,
   PassportPageKey,
+  type UploadResult,
+  type UploadedRef,
 } from '@/lib/supabase';
 import { callAiCheck } from '@/lib/ai-check-client';
 import { requestJson, failureMessage } from '@/lib/request-outcome';
@@ -405,11 +408,35 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   const persistDocs = async (next: StaffDocumentReferences) => {
     docsRef.current = next;
     setDocs(next);
-    await updateDocumentReferences(
+    const saved = await saveDocumentReferences(
       submission.id,
       mergeStaffDocRefs(submission.documents, next),
       aiToken
     );
+    if (!saved) return;
+    // The server decides validated / needsReview of the checked slots (a
+    // hand check included): show what it stored, for the same files only.
+    const cur = docsRef.current;
+    const photo = readBackCheckedRef(cur.photo, saved.photo);
+    const eidFront = readBackCheckedRef(cur.eid_front, saved.eid_front);
+    const eidBack = readBackCheckedRef(cur.eid_back, saved.eid_back);
+    const pages = { ...(cur.passportPages ?? {}) };
+    let pagesChanged = false;
+    for (const key of ['cover', 'insidePages', 'additionalPage'] as const) {
+      const back = readBackCheckedRef(pages[key], saved.passportPages?.[key]);
+      if (back !== pages[key]) {
+        pages[key] = back;
+        pagesChanged = true;
+      }
+    }
+    if (photo === cur.photo && eidFront === cur.eid_front && eidBack === cur.eid_back && !pagesChanged) return;
+    const readBack: StaffDocumentReferences = { ...cur };
+    if (photo !== cur.photo) readBack.photo = photo;
+    if (eidFront !== cur.eid_front) readBack.eid_front = eidFront;
+    if (eidBack !== cur.eid_back) readBack.eid_back = eidBack;
+    if (pagesChanged) readBack.passportPages = pages;
+    docsRef.current = readBack;
+    setDocs(readBack);
   };
 
   const setFlatDoc = (
@@ -536,7 +563,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   };
 
   // ------------------------------------------------------------------
-  // Passport pages — same validate-then-upload flow as EmployeeForm
+  // Passport pages — same upload-then-validate flow as EmployeeForm
   // (validation only; extraction is skipped, there is no form to fill).
   // ------------------------------------------------------------------
 
@@ -545,7 +572,14 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE',
     key: PassportRequestKey,
     file: File
-  ): Promise<{ valid: boolean; error?: string; failed?: boolean; countsAsStrike?: boolean }> => {
+  ): Promise<{ valid: boolean; error?: string; failed?: boolean; countsAsStrike?: boolean; upload?: UploadedRef }> => {
+    // Upload FIRST: the route checks the stored file (`path`) and records
+    // the verdict server-side (STAFF-001). `upload` is saved when it passed.
+    const pageKey: PassportPageKey = expectedType === 'COVER' ? 'cover' : expectedType === 'INSIDE_PAGES' ? 'insidePages' : 'additionalPage';
+    const upload = await uploadPassportPage(submission.id, pageKey, file);
+    if (isUploadFailure(upload)) {
+      return { valid: false, error: upload.error, failed: true, countsAsStrike: false };
+    }
     const outcome = await callAiCheck<{ matches?: boolean; errorMessage?: string }>(
       '/api/validate-passport-page',
       {
@@ -555,6 +589,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
         nationality,
         submissionId: submission.id,
         token: aiToken,
+        path: upload.path,
       },
       imageBase64,
       { form: 'document-request', action: `check:${key}`, ref: submission.id, file: { size: file.size, type: file.type } }
@@ -567,6 +602,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     return {
       valid: outcome.data.matches === true,
       error: outcome.data.errorMessage,
+      upload,
     };
   };
 
@@ -592,8 +628,10 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
 
     setSlot(key, { preview, validating: true, error: null, file });
 
+    let checkedUpload: UploadResult | null = null;
     try {
       const validation = await validatePassportPageType(preview, cfg.expectedType, key, file);
+      checkedUpload = validation.upload ?? null;
       if (!validation.valid) {
         // The check itself failed: show why, and count it toward the
         // manual-review option so a person is never stuck retrying.
@@ -614,7 +652,8 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, cfg.pageKey, file);
+    // Uploaded (and checked from storage) by validatePassportPageType.
+    const result: UploadResult = checkedUpload ?? { error: "We couldn't upload this file. Please try again." };
     if (isUploadFailure(result)) {
       setSlot(key, { preview, validating: false, error: result.error, file });
       return false;
@@ -646,7 +685,7 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
   };
 
   // ------------------------------------------------------------------
-  // Emirates ID — type-check via /api/extract-eid (validate-then-store,
+  // Emirates ID — type-check via /api/extract-eid (store-then-validate,
   // extracted data kept on the ref like EmployeeForm; no form fields to
   // fill here). Hard on an explicit invalid verdict and on a failed check
   // (the failure counts as a strike), with the 2-strike manual-review
@@ -675,10 +714,19 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
 
     setSlot(key, { preview, validating: true, error: null, file });
 
+    // Upload FIRST: the route reads the stored file (`path`) and records the
+    // verdict server-side (STAFF-001); the request gate accepts the Emirates
+    // ID only with that verdict (or a hand check).
+    const result = await uploadDocument(submission.id, key, file);
+    if (isUploadFailure(result)) {
+      setSlot(key, { preview, validating: false, error: result.error, file });
+      return false;
+    }
+
     let extractedData: Record<string, unknown> | null = null;
     const outcome = await callAiCheck<{ success?: boolean; data?: Record<string, unknown> & { emirates_id_number?: string } }>(
       '/api/extract-eid',
-      { side: cfg.side, submissionId: submission.id, token: aiToken },
+      { side: cfg.side, submissionId: submission.id, token: aiToken, path: result.path },
       preview,
       { form: 'document-request', action: `check:${key}`, ref: submission.id, file: { size: file.size, type: file.type } }
     );
@@ -704,12 +752,6 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     }
     if (cfg.side === 'front' && extractResult.success && extractResult.data) {
       extractedData = extractResult.data;
-    }
-
-    const result = await uploadDocument(submission.id, key, file);
-    if (isUploadFailure(result)) {
-      setSlot(key, { preview, validating: false, error: result.error, file });
-      return false;
     }
 
     setSlot(key, { preview, validating: false, error: null, file });

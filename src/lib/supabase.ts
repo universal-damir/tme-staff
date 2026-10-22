@@ -21,6 +21,21 @@ import { failureMessage, requestJson } from './request-outcome';
 import { cloudflareClientIp } from './cloudflare-ip';
 
 // ===================================================================
+// ACCESS TOKENS OF THE CURRENT PAGE
+// ===================================================================
+
+/**
+ * The tokens from the form's own link (`/onboard/<id>?token=...&e=...`).
+ * The storage routes check them like the form load does; reading them here
+ * spares threading them through every upload / preview call site.
+ */
+export function pageAccessTokens(): { token: string | null; employerToken: string | null } {
+  if (typeof window === 'undefined') return { token: null, employerToken: null };
+  const params = new URLSearchParams(window.location.search);
+  return { token: params.get('token'), employerToken: params.get('e') };
+}
+
+// ===================================================================
 // AUTO-SAVE EMPLOYEE DATA (partial save without signature/completion)
 // ===================================================================
 
@@ -138,9 +153,13 @@ async function uploadToStorage(
   } catch {
     toSend = file;
   }
+  const { token, employerToken } = pageAccessTokens();
+  const access: Record<string, string> = {};
+  if (token) access.token = token;
+  if (employerToken) access.employerToken = employerToken;
   const outcome = await uploadFileToRoute<{ path: string; filename: string }>(
     '/api/storage/upload',
-    { submissionId, ...fields },
+    { submissionId, ...access, ...fields },
     toSend,
     { form: 'staff-onboarding', action, ref: submissionId }
   );
@@ -185,8 +204,22 @@ export async function updateDocumentReferences(
   token?: string | null,
   employerToken?: string | null,
 ): Promise<boolean> {
+  return (await saveDocumentReferences(id, documents, token, employerToken)) !== null;
+}
+
+/**
+ * Same save, answering with the map the server stored (null = not saved).
+ * The server sets `validated` / `needsReview` of the checked slots itself
+ * (STAFF-001), so after a hand check the form reads the slot back from here.
+ */
+export async function saveDocumentReferences(
+  id: string,
+  documents: StaffDocumentReferences,
+  token?: string | null,
+  employerToken?: string | null,
+): Promise<StaffDocumentReferences | null> {
   const send = () =>
-    requestJson(
+    requestJson<{ success?: boolean; documents?: StaffDocumentReferences }>(
       `/api/onboarding/${encodeURIComponent(id)}/documents`,
       {
         method: 'POST',
@@ -205,9 +238,9 @@ export async function updateDocumentReferences(
   }
   if (!outcome.ok) {
     console.error('[updateDocumentReferences] save failed:', outcome.kind, outcome.status, outcome.code);
-    return false;
+    return null;
   }
-  return true;
+  return outcome.data?.documents ?? documents;
 }
 
 // ===================================================================
@@ -215,8 +248,13 @@ export async function updateDocumentReferences(
 // short-lived signed URL. Bucket is private; never call getPublicUrl here.
 // ===================================================================
 
-export function getDocumentUrl(path: string): string {
-  return `/api/storage/file?path=${encodeURIComponent(path)}`;
+export function getDocumentUrl(path: string, submissionId: string): string {
+  // The route checks the same link + tokens as the form load.
+  const qs = new URLSearchParams({ path, id: submissionId });
+  const { token, employerToken } = pageAccessTokens();
+  if (token) qs.set('token', token);
+  if (employerToken) qs.set('e', employerToken);
+  return `/api/storage/file?${qs.toString()}`;
 }
 
 // ===================================================================

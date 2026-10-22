@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest';
+import { deflateRawSync, inflateRawSync } from 'zlib';
 import {
   VAT_FILES_MAX_PER_ROUND,
   VAT_FILES_MAX_TOTAL,
+  VAT_ZIP_PART_MAX_BYTES,
   buildFinalizeEntries,
   buildStoragePath,
   clientPeriodLabel,
   cleanComment,
+  checkVatFile,
+  isRiskyAttachmentName,
+  xlsHasMacroSheet,
   decideVatFilesAccess,
   detectVatFile,
   displayFileName,
@@ -26,6 +31,86 @@ const UUID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
 const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(16).fill(0x20)]);
 const text = (s: string) => new TextEncoder().encode(s);
+const inflateRaw = (d: Uint8Array) => new Uint8Array(inflateRawSync(d));
+
+// --- A tiny zip writer (CRC left 0: the check never reads it) ---------
+function zip(files: Record<string, string>, deflate = true): Uint8Array {
+  const enc = new TextEncoder();
+  const locals: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const nameBytes = Buffer.from(enc.encode(name));
+    const raw = Buffer.from(enc.encode(content));
+    const data = deflate ? deflateRawSync(raw) : raw;
+    const method = deflate ? 8 : 0;
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(method, 8);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(raw.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    locals.push(local, nameBytes, data);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(20, 4);
+    cd.writeUInt16LE(20, 6);
+    cd.writeUInt16LE(method, 10);
+    cd.writeUInt32LE(data.length, 20);
+    cd.writeUInt32LE(raw.length, 24);
+    cd.writeUInt16LE(nameBytes.length, 28);
+    cd.writeUInt32LE(offset, 42);
+    central.push(cd, nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+  const cdBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(Object.keys(files).length, 8);
+  eocd.writeUInt16LE(Object.keys(files).length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return new Uint8Array(Buffer.concat([...locals, cdBuf, eocd]));
+}
+
+const XLSX_MAIN = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
+const XLSM_MAIN = 'application/vnd.ms-excel.sheet.macroEnabled.main+xml';
+const DOCX_MAIN = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml';
+const contentTypes = (main: string, part: string, extra = '') =>
+  `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+  `<Override PartName="/${part}" ContentType="${main}"/>${extra}</Types>`;
+const xlsx = (extra: Record<string, string> = {}, main = XLSX_MAIN, deflate = true) =>
+  zip(
+    {
+      '[Content_Types].xml': contentTypes(main, 'xl/workbook.xml'),
+      'xl/workbook.xml': '<workbook/>',
+      'xl/worksheets/sheet1.xml': '<worksheet/>',
+      ...extra,
+    },
+    deflate
+  );
+const docx = () => zip({ '[Content_Types].xml': contentTypes(DOCX_MAIN, 'word/document.xml'), 'word/document.xml': '<document/>' });
+
+// --- A tiny OLE file: header + one directory sector of 4 entries ------
+function ole(names: string[], tail: Uint8Array = new Uint8Array(0)): Uint8Array {
+  const buf = Buffer.alloc(512 + 512);
+  Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).copy(buf, 0);
+  ['Root Entry', ...names].slice(0, 4).forEach((name, i) => {
+    const o = 512 + i * 128;
+    buf.write(name, o, 'utf16le');
+    buf.writeUInt16LE((name.length + 1) * 2, o + 64);
+    buf[o + 66] = i === 0 ? 5 : 1;
+    buf[o + 67] = 1;
+  });
+  return new Uint8Array(Buffer.concat([buf, Buffer.from(tail)]));
+}
+/** A 64-byte mini-stream slot holding one UTF-16LE string. */
+function slot(s: string): Uint8Array {
+  const b = Buffer.alloc(Math.ceil(((s.length + 1) * 2) / 64) * 64);
+  b.write(s, 0, 'utf16le');
+  return new Uint8Array(b);
+}
 
 function row(over: Partial<VatFileRequestRow> = {}): VatFileRequestRow {
   return {
@@ -65,8 +150,8 @@ describe('token', () => {
 describe('detectVatFile', () => {
   it('accepts the types we ask for', () => {
     expect(detectVatFile(bytes(0x25, 0x50, 0x44, 0x46, 0x2d), 'a.PDF')?.ext).toBe('.pdf');
-    expect(detectVatFile(bytes(0x50, 0x4b, 0x03, 0x04), 'list.xlsx')?.ext).toBe('.xlsx');
-    expect(detectVatFile(bytes(0x50, 0x4b, 0x03, 0x04), 'letter.docx')?.ext).toBe('.docx');
+    expect(detectVatFile(xlsx(), 'list.xlsx', { inflateRaw })?.ext).toBe('.xlsx');
+    expect(detectVatFile(docx(), 'letter.docx', { inflateRaw })?.ext).toBe('.docx');
     const ole = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
     expect(detectVatFile(bytes(...ole), 'old.doc')).toBeNull(); // the portal does not store .doc
     expect(detectVatFile(bytes(...ole), 'old.xls')?.ext).toBe('.xls');
@@ -81,10 +166,147 @@ describe('detectVatFile', () => {
   it('refuses a name that lies about the content and unknown types', () => {
     expect(detectVatFile(bytes(0x4d, 0x5a, 0x90, 0x00), 'virus.pdf')).toBeNull();
     expect(detectVatFile(bytes(0x4d, 0x5a, 0x90, 0x00), 'tool.exe')).toBeNull();
-    expect(detectVatFile(bytes(0x50, 0x4b, 0x03, 0x04), 'archive.zip')).toBeNull();
+    expect(detectVatFile(xlsx(), 'archive.zip')).toBeNull();
     expect(detectVatFile(bytes(0x25, 0x50, 0x44, 0x46, 0x2d), 'noext')).toBeNull();
     expect(detectVatFile(new Uint8Array([0x41, 0x00, 0x42, 0x43, 0x44]), 'bin.csv')).toBeNull();
     expect(detectVatFile(text('<html>'), 'page.html')).toBeNull();
+  });
+});
+
+describe('file content check (STAFF-004)', () => {
+  it('xlsx: a real package passes, stored or deflated', () => {
+    expect(checkVatFile(xlsx(), 'list.xlsx', { inflateRaw }).ok).toBe(true);
+    expect(checkVatFile(xlsx({}, XLSX_MAIN, false), 'list.xlsx').ok).toBe(true);
+    // Without an inflater the part names still decide.
+    expect(checkVatFile(xlsx(), 'list.xlsx').ok).toBe(true);
+  });
+
+  it('xlsx with macros is refused with a plain message', () => {
+    const vba = checkVatFile(xlsx({ 'xl/vbaProject.bin': 'x' }), 'renamed.xlsx', { inflateRaw });
+    expect(vba).toEqual({
+      ok: false,
+      reason: 'macros',
+      message: "This file contains macros and can't be uploaded. Please save it as a normal .xlsx or PDF.",
+    });
+    // .xlsm renamed to .xlsx: the content type says macroEnabled.
+    const xlsm = checkVatFile(xlsx({}, XLSM_MAIN), 'renamed.xlsx', { inflateRaw });
+    expect(xlsm.ok === false && xlsm.reason).toBe('macros');
+    // Excel 4.0 macro sheet.
+    const xlm = checkVatFile(xlsx({ 'xl/macrosheets/sheet1.xml': '<x/>' }), 'a.xlsx', { inflateRaw });
+    expect(xlm.ok === false && xlm.reason).toBe('macros');
+    // docx with a VBA project.
+    const docm = checkVatFile(
+      zip({ '[Content_Types].xml': contentTypes(DOCX_MAIN, 'word/document.xml'), 'word/document.xml': '<d/>', 'word/vbaProject.bin': 'x' }),
+      'a.docx',
+      { inflateRaw }
+    );
+    expect(docm.ok === false && docm.reason).toBe('macros');
+  });
+
+  it('a fake zip or a zip that is not Office is refused', () => {
+    expect(checkVatFile(bytes(0x50, 0x4b, 0x03, 0x04), 'list.xlsx', { inflateRaw })).toMatchObject({ ok: false, reason: 'wrong_type' });
+    expect(checkVatFile(zip({ 'readme.txt': 'hi' }), 'list.xlsx', { inflateRaw })).toMatchObject({ ok: false, reason: 'wrong_type' });
+    // A docx renamed .xlsx is not a workbook.
+    expect(checkVatFile(docx(), 'list.xlsx', { inflateRaw })).toMatchObject({ ok: false, reason: 'wrong_type' });
+    // Content types present but no workbook part.
+    expect(
+      checkVatFile(zip({ '[Content_Types].xml': contentTypes(XLSX_MAIN, 'xl/workbook.xml') }), 'list.xlsx', { inflateRaw })
+    ).toMatchObject({ ok: false, reason: 'wrong_type' });
+  });
+
+  it('xls with a VBA project is refused; a plain xls and msg pass', () => {
+    expect(checkVatFile(ole(['Workbook', 'SummaryInformation']), 'old.xls').ok).toBe(true);
+    expect(checkVatFile(ole(['Workbook', '_VBA_PROJECT_CUR', 'VBA']), 'old.xls')).toMatchObject({ ok: false, reason: 'macros' });
+    expect(checkVatFile(ole(['Workbook', '_VBA_PROJECT']), 'old.xls')).toMatchObject({ ok: false, reason: 'macros' });
+    expect(checkVatFile(ole(['WordDocument', 'Macros']), 'old.xls')).toMatchObject({ ok: false, reason: 'macros' });
+    // The words in cell text are not a directory entry.
+    const cellText = new Uint8Array(Buffer.from('VBA _VBA_PROJECT Macros', 'utf16le'));
+    expect(checkVatFile(ole(['Workbook'], cellText), 'old.xls').ok).toBe(true);
+    // A normal Outlook mail: property streams, a PDF attachment.
+    const mail = ole(['__substg1.0_0037001F', '__attach_version1.0_#00000000', '__substg1.0_3707001F'], slot('Invoice July.pdf'));
+    expect(checkVatFile(mail, 'mail.msg').ok).toBe(true);
+  });
+
+  it('a zip bomb in [Content_Types].xml is refused, not inflated (sizes in the zip lie)', () => {
+    const bomb = Buffer.from(zip({ '[Content_Types].xml': ' '.repeat(VAT_ZIP_PART_MAX_BYTES + 1024), 'xl/workbook.xml': '<w/>' }));
+    // Claim a tiny uncompressed size in the local and central headers.
+    for (let o = 0; o + 4 <= bomb.length; o++) {
+      const sig = bomb.readUInt32LE(o);
+      if (sig === 0x04034b50 && bomb.readUInt32LE(o + 22) > 1000) bomb.writeUInt32LE(100, o + 22);
+      if (sig === 0x02014b50 && bomb.readUInt32LE(o + 24) > 1000) bomb.writeUInt32LE(100, o + 24);
+    }
+    const capped = (d: Uint8Array) => new Uint8Array(inflateRawSync(d, { maxOutputLength: VAT_ZIP_PART_MAX_BYTES }));
+    expect(checkVatFile(new Uint8Array(bomb), 'list.xlsx', { inflateRaw: capped })).toMatchObject({ ok: false, reason: 'wrong_type' });
+  });
+
+  it('xls with an Excel 4.0 macro sheet (XLM) is refused; a normal sheet list passes', () => {
+    // BOUNDSHEET: 0x0085, len, lbPlyPos(4), visibility, sheet type, cch, flags, name.
+    const boundsheet = (name: string, type: number, hidden = 0) => {
+      const body = Buffer.concat([Buffer.from([0, 0, 0, 0, hidden, type, name.length, 0]), Buffer.from(name, 'latin1')]);
+      const head = Buffer.alloc(4);
+      head.writeUInt16LE(0x0085, 0);
+      head.writeUInt16LE(body.length, 2);
+      return Buffer.concat([head, body]);
+    };
+    const plain = new Uint8Array(Buffer.concat([boundsheet('Sheet1', 0x00), boundsheet('Chart1', 0x02)]));
+    expect(checkVatFile(ole(['Workbook'], plain), 'old.xls').ok).toBe(true);
+    const xlm = new Uint8Array(Buffer.concat([boundsheet('Sheet1', 0x00), boundsheet('Macro1', 0x01, 2)]));
+    expect(xlsHasMacroSheet(ole(['Workbook'], xlm))).toBe(true);
+    expect(checkVatFile(ole(['Workbook'], xlm), 'old.xls')).toMatchObject({ ok: false, reason: 'macros' });
+  });
+
+  it('an archive attachment is allowed unless a program name sits before .zip / .7z / .rar', () => {
+    expect(isRiskyAttachmentName('Bank statements July.zip')).toBe(false);
+    expect(isRiskyAttachmentName('invoices.pdf.zip')).toBe(false);
+    expect(isRiskyAttachmentName('invoice.pdf.exe.zip')).toBe(true);
+    expect(isRiskyAttachmentName('setup.JS.7z')).toBe(true);
+    expect(isRiskyAttachmentName('tool.scr.rar')).toBe(true);
+    const zipped = EML_HEAD + part('Content-Type: application/zip; name="payment.exe.zip"');
+    expect(checkVatFile(text(zipped), 'mail.eml')).toMatchObject({ ok: false, reason: 'risky_attachment' });
+    const statements = EML_HEAD + part('Content-Type: application/zip; name="statements.zip"');
+    expect(checkVatFile(text(statements), 'mail.eml').ok).toBe(true);
+  });
+
+  it('msg with a program attached is refused (best effort)', () => {
+    const exe = ole(['__substg1.0_3707001F'], slot('invoice.pdf.exe'));
+    expect(checkVatFile(exe, 'mail.msg')).toMatchObject({ ok: false, reason: 'risky_attachment' });
+    const ext = ole(['__substg1.0_3703001F'], slot('.JS'));
+    expect(checkVatFile(ext, 'mail.msg')).toMatchObject({ ok: false, reason: 'risky_attachment' });
+    // A sender called "Amazon.com" or an address is not an attachment.
+    expect(checkVatFile(ole(['__substg1.0_0C1A001F'], slot('Amazon.com')), 'mail.msg').ok).toBe(true);
+    expect(checkVatFile(ole(['__substg1.0_0C1F001F'], slot('billing@shop.com')), 'mail.msg').ok).toBe(true);
+  });
+
+  const EML_HEAD = 'From: a@b.ae\r\nSubject: Invoices\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="b1"\r\n\r\n';
+  const part = (headers: string, body = 'QUJD') => `--b1\r\n${headers}\r\n\r\n${body}\r\n`;
+
+  it('eml: a normal mail with a PDF passes', () => {
+    const mail =
+      EML_HEAD +
+      part('Content-Type: text/plain; charset=utf-8', 'Please run the numbers on www.example.com, name=report.exe is only text.') +
+      part('Content-Type: application/pdf; name="Invoice.pdf"\r\nContent-Disposition: attachment; filename="Invoice.pdf"') +
+      '--b1--\r\n';
+    expect(checkVatFile(text(mail), 'mail.eml').ok).toBe(true);
+  });
+
+  it('eml with a program attached is refused', () => {
+    const plain =
+      EML_HEAD + part('Content-Type: application/octet-stream; name="setup.exe"\r\nContent-Disposition: attachment; filename="setup.exe"');
+    expect(checkVatFile(text(plain), 'mail.eml')).toMatchObject({ ok: false, reason: 'risky_attachment' });
+    // Unquoted, upper case, folded header.
+    const folded = EML_HEAD + part('Content-Disposition: attachment;\r\n\tFILENAME=Report.XLSM');
+    expect(checkVatFile(text(folded), 'mail.eml')).toMatchObject({ ok: false, reason: 'risky_attachment' });
+    // RFC 2231 split name: "invoice." + "js"
+    const split = EML_HEAD + part("Content-Disposition: attachment; filename*0*=utf-8''invoice.; filename*1*=js");
+    expect(checkVatFile(text(split), 'mail.eml')).toMatchObject({ ok: false, reason: 'risky_attachment' });
+    // RFC 2047 encoded name.
+    const b64 = Buffer.from('payment.vbs').toString('base64');
+    const encoded = EML_HEAD + part(`Content-Type: application/octet-stream; name="=?utf-8?B?${b64}?="`);
+    expect(checkVatFile(text(encoded), 'mail.eml')).toMatchObject({ ok: false, reason: 'risky_attachment' });
+  });
+
+  it('csv stays allowed (also with formula-looking cells)', () => {
+    expect(checkVatFile(text('=1+1,@SUM(A1)\n'), 'sales.csv').ok).toBe(true);
   });
 });
 

@@ -142,7 +142,11 @@ export async function validatePhoto(imageBase64: string): Promise<PhotoValidatio
       suggestions?: string[];
       confidence?: number;
     };
-    console.log('[Photo Validation] Result:', parsed);
+    // STAFF-008: verdict only, never the model's free text.
+    console.log('[Photo Validation] Result:', {
+      valid: !!parsed.valid,
+      errorCount: Array.isArray(parsed.errors) ? parsed.errors.length : 0,
+    });
 
     return {
       valid: !!parsed.valid,

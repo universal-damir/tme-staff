@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { signWebhookBody } from '@/lib/webhook-signature';
 import {
+  FORM_CHANGED_MESSAGE,
   RECALLED_MESSAGE,
   assertSubmittable,
   getSignerIp,
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
     // The extra columns feed the required-documents gate below.
     const { data: existing, error: lookupError } = await supabase
       .from('staff_onboarding_submissions')
-      .select('status, current_step, is_same_person, employee_access_token, employer_recall_count, onboarding_type, sponsorship_type, employer_data, employee_data, documents, existing_documents, sponsor_noc_signature_data')
+      .select('status, current_step, is_same_person, employee_access_token, employer_recall_count, onboarding_type, sponsorship_type, employer_data, employee_data, documents, existing_documents, sponsor_noc_signature_data, updated_at')
       .eq('id', id)
       .maybeSingle();
 
@@ -93,6 +94,7 @@ export async function POST(req: NextRequest) {
       is_same_person: boolean | null;
       employee_access_token: string | null;
       employer_recall_count: number | null;
+      updated_at: string | null;
     };
     const wasRecalled = (gate.employer_recall_count ?? 0) > 0;
     if (gate.current_step !== 'employee') {
@@ -258,6 +260,12 @@ export async function POST(req: NextRequest) {
     if (checkToken) {
       updateQuery = updateQuery.eq('employee_access_token', gate.employee_access_token as string);
     }
+    // ...and only on the row version the required-documents gate read: a
+    // documents save landing in between must not slip past the gate.
+    updateQuery =
+      gate.updated_at === null || gate.updated_at === undefined
+        ? updateQuery.is('updated_at', null)
+        : updateQuery.eq('updated_at', gate.updated_at);
     const { data: updatedRows, error } = await updateQuery.select('id');
 
     if (error) {
@@ -268,15 +276,18 @@ export async function POST(req: NextRequest) {
     if (!updatedRows || updatedRows.length === 0) {
       const { data: fresh } = await supabase
         .from('staff_onboarding_submissions')
-        .select('status, current_step')
+        .select('status, current_step, updated_at')
         .eq('id', id)
         .maybeSingle();
-      const f = fresh as { status?: string; current_step?: string } | null;
+      const f = fresh as { status?: string; current_step?: string; updated_at?: string | null } | null;
       if (f?.current_step === 'employer') {
         return NextResponse.json({ error: RECALLED_MESSAGE, code: 'recalled' }, { status: 409 });
       }
       if (f && (f.status === 'complete' || f.current_step === 'complete')) {
         return NextResponse.json({ error: 'Onboarding already complete' }, { status: 410 });
+      }
+      if (f && (f.updated_at ?? null) !== (gate.updated_at ?? null)) {
+        return NextResponse.json({ error: FORM_CHANGED_MESSAGE, code: 'changed' }, { status: 409 });
       }
       return NextResponse.json({ error: 'Please reload the page and try again.' }, { status: 409 });
     }
@@ -301,8 +312,13 @@ export async function POST(req: NextRequest) {
         }
       );
 
-      const notifyResult = await notifyResponse.json();
-      console.log('[submit-employee] Portal sync result:', notifyResult);
+      // Only the outcome: the portal's answer may carry personal data.
+      const notifyResult = (await notifyResponse.json().catch(() => null)) as
+        | { success?: boolean; staffId?: unknown }
+        | null;
+      console.log(
+        `[submit-employee] Portal sync result: ok=${notifyResponse.ok} status=${notifyResponse.status} staffId=${notifyResult?.staffId ?? '-'}`
+      );
     } catch (notifyError) {
       console.error('[submit-employee] Portal notification failed:', notifyError);
       // Don't fail — cron will pick it up as fallback

@@ -227,6 +227,26 @@ export function buildManualReviewPageRef(
   };
 }
 
+/**
+ * After a save, take `validated` / `needsReview` of a checked slot from the
+ * map the server stored (it decides them, STAFF-001), so a hand check shows
+ * what was really saved. Only for the same file; returns `current` itself
+ * when nothing changes (or there is nothing to read back).
+ */
+export function readBackCheckedRef<T extends { path: string; validated?: boolean; needsReview?: boolean }>(
+  current: T | undefined,
+  saved: { path?: string; validated?: boolean; needsReview?: boolean } | undefined | null,
+): T | undefined {
+  if (!current || !saved || saved.path !== current.path) return current;
+  const validated = saved.validated === true;
+  const needsReview = saved.needsReview === true;
+  if (validated === (current.validated === true) && needsReview === (current.needsReview === true)) return current;
+  const next: T = { ...current, validated };
+  if (needsReview) next.needsReview = true;
+  else delete next.needsReview;
+  return next;
+}
+
 export type ProvidedFlag = 'yes' | 'no' | 'allowance';
 
 /**

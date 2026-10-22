@@ -542,6 +542,13 @@ export interface StaffDocumentReferences {
   // always carry needsReview: true — the portal flags them for human review
   // on sync. Mirrors the portal's StaffDocumentReferences in supabase-client.ts.
   extra_documents?: Record<string, { path: string; filename: string; needsReview?: boolean }>;
+  // Server-written AI verdicts keyed by storage path (lib/document-checks.ts,
+  // ServerCheckRecord). Never written by the browser: the documents route
+  // drops it from the request and keeps the stored copy.
+  server_checks?: Record<
+    string,
+    { kind: string; verdict?: 'pass' | 'fail'; bound: boolean; sha256: string; samePhoto?: boolean; at: string }
+  >;
 }
 
 // ===================================================================

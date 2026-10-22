@@ -159,71 +159,58 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
     }
     setPreview(previewDataUrl);
 
-    // Run upload + AI validation in PARALLEL — they don't depend on each
-    // other and used to be serial, doubling the perceived wait. Both also
-    // share the same already-decoded base64.
+    // Upload FIRST, then check the stored file: the AI routes read the
+    // upload from storage (`path`) and record their verdict on the server,
+    // so a photo counts as validated only if the file TME receives passed
+    // (STAFF-001). The browser's smaller copy still goes along, for the rare
+    // stored file the AI cannot take as it is.
     setIsUploading(true);
-    setIsValidating(true);
 
     // onUpload never throws for upload failures (it returns `{ error }`);
     // a throw here is a bug in the caller, shown as our own error.
-    const uploadPromise: Promise<UploadResult | null> = (async () => {
-      try {
-        return await onUpload(file);
-      } catch {
-        return { error: FAILURE_MESSAGES.server_error };
-      }
-    })();
+    let uploadResult: UploadResult | null;
+    try {
+      uploadResult = await onUpload(file);
+    } catch {
+      uploadResult = { error: FAILURE_MESSAGES.server_error };
+    }
+    setIsUploading(false);
+
+    if (!uploadResult || isUploadFailure(uploadResult)) {
+      setUploadError(uploadResult?.error ?? FAILURE_MESSAGES.server_error);
+      return;
+    }
+    const storedPath = uploadResult.path;
+
+    setIsValidating(true);
 
     // callAiCheck shrinks the image for the AI and names every failure.
+    // On a renewal / photo re-request the same route also compares the
+    // stored upload with the photo on file (fetched server-side) and judges
+    // whether it's the same capture — catches re-exports, screenshots, crops
+    // and scans that defeat the SHA-256 fast path. It answers `samePhoto`
+    // only when that comparison gave a verdict.
     const fileInfo = { size: file.size, type: file.type };
-    const validatePromise = callAiCheck<{
+    const validationOutcome = await callAiCheck<{
       valid?: boolean;
       errors?: string[];
       suggestions?: string[];
+      samePhoto?: boolean;
     }>(
       '/api/validate-photo',
-      { submissionId, token: aiToken },
+      { submissionId, token: aiToken, path: storedPath },
       previewDataUrl,
       { form, action: 'check:photo', ref: submissionId, file: fileInfo }
     );
 
-    // Renewal photo-reuse guard, vision path: the server compares the upload
-    // against the photo on file (fetched server-side from storage) and judges
-    // whether it's the same capture — catches re-exports, screenshots, crops,
-    // and scans that defeat the SHA-256 fast path. Skipped when there's no
-    // photo on file; failures degrade to "no verdict" (never a strike).
-    const comparePromise = (async () => {
-      if (!existingPhoto) return null;
-      const outcome = await callAiCheck<{ samePhoto?: boolean }>(
-        '/api/compare-photo',
-        { submissionId, token: aiToken },
-        previewDataUrl,
-        { form, action: 'check:photo-compare', ref: submissionId, file: fileInfo }
-      );
-      return outcome.ok ? outcome.data : null;
-    })();
-
-    const [uploadResult, validationOutcome, comparison] = await Promise.all([
-      uploadPromise,
-      validatePromise,
-      comparePromise,
-    ]);
-
-    setIsUploading(false);
     setIsValidating(false);
-
-    if (isUploadFailure(uploadResult)) {
-      setUploadError(uploadResult?.error ?? FAILURE_MESSAGES.server_error);
-      return;
-    }
 
     // Same-photo verdict wins over everything else: even a technically
     // compliant photo is useless if it's the one the authority already has.
-    // A failed compare is NOT a verdict (comparison is null): fall through
-    // to normal validation; the SHA-256 fast path and the portal's sync-time
-    // backstop still stand.
-    const samePhoto = !!comparison?.samePhoto;
+    // No verdict (no photo on file, or the comparison could not run) falls
+    // through to normal validation; the SHA-256 fast path and the portal's
+    // sync-time backstop still stand.
+    const samePhoto = validationOutcome.ok && validationOutcome.data.samePhoto === true;
     if (samePhoto) {
       const messages = [
         'This appears to be the same photo we already have on file from your previous application. UAE authorities require a newly taken photo (within the last 6 months) — please upload a new one.',
@@ -302,7 +289,7 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
   // Build the image source: prefer local preview, fall back to Supabase storage
   // URL. A stored PDF can't render in <img>, so render its first page to a thumb
   // (mirrors the fresh-upload PDF path above).
-  const storedUrl = value?.path ? getDocumentUrl(value.path) : null;
+  const storedUrl = value?.path ? getDocumentUrl(value.path, submissionId) : null;
   const storedIsPdf = !!value?.filename && value.filename.toLowerCase().endsWith('.pdf');
   const [storedPdfThumb, setStoredPdfThumb] = useState<string | null>(null);
   useEffect(() => {

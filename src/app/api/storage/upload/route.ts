@@ -9,13 +9,19 @@ import {
   isAllowedType,
   isAllowedPassportPage,
 } from '@/lib/file-validation';
-import { resolveSubmissionIdByLinkToken } from '@/lib/onboarding-token';
+import {
+  verifyOnboardingAccess,
+  isTwoPersonEmployerStep,
+  EMPLOYER_DOCUMENT_KEYS,
+} from '@/lib/onboarding-token';
 import {
   isDirectUploadRequest,
   readDirectUploadRequest,
   startDirectUpload,
   readDirectUpload,
   removeDirectUpload,
+  countStoredObjects,
+  countPendingUploads,
 } from '@/lib/direct-upload';
 
 export const runtime = 'nodejs';
@@ -26,11 +32,23 @@ function fail(error: string, status: number): Fail {
   return { ok: false, response: NextResponse.json({ error }, { status }) };
 }
 
-/** Field checks + the submission must exist and still be open. Returns the row id. */
+// Files one onboarding row may hold (all slots, passport pages and every
+// re-upload after an AI rejection: a full two-person onboarding stores about
+// 20 slots, a few tries each). Stops an open link from filling the bucket.
+const MAX_FILES_PER_ROW = 80;
+
+/**
+ * Field checks + the same access gate as the documents route: the link token
+ * (`submissionId`), the employee token on the employee step, the employer
+ * token after a recall; complete / cancelled / expired rows are closed.
+ * Returns the row id.
+ */
 async function authorize(
   submissionId: string,
   type: string,
-  passportPage: string | null
+  passportPage: string | null,
+  token: string | null,
+  employerToken: string | null
 ): Promise<{ ok: true; rowId: string } | Fail> {
   if (!isValidSubmissionId(submissionId)) return fail('invalid_submission_id', 400);
   if (!isAllowedType(type)) return fail('invalid_type', 400);
@@ -38,29 +56,41 @@ async function authorize(
     return fail('invalid_passport_page', 400);
   }
 
-  // The form's submissionId is the URL link_token (rotatable). Resolve to
-  // the Supabase row id so storage paths stay stable across reissues —
-  // otherwise rotated rows would orphan their earlier uploads under the
-  // old folder.
-  const rowId = await resolveSubmissionIdByLinkToken(submissionId);
-  if (!rowId) return fail('submission_not_found', 404);
-
-  // Verify status (use resolved id from here on).
-  const { data: row, error: rowErr } = await getSupabaseAdmin()
-    .from('staff_onboarding_submissions')
-    .select('id,status')
-    .eq('id', rowId)
-    .maybeSingle();
-
-  if (rowErr) {
-    console.error('storage/upload: row lookup failed');
-    return fail('lookup_failed', 500);
+  // The form's submissionId is the URL link_token (rotatable). The verifier
+  // resolves it to the Supabase row id so storage paths stay stable across
+  // reissues — otherwise rotated rows would orphan their earlier uploads
+  // under the old folder.
+  const access = await verifyOnboardingAccess(submissionId, token, {
+    expectedStep: 'auto',
+    blockIfComplete: true,
+    employerToken,
+  });
+  if (!access.ok || !access.row) {
+    if (access.reason === 'token_required' || access.reason === 'token_invalid' || access.reason === 'recalled') {
+      return fail('unauthorized', 403);
+    }
+    if (access.reason === 'cancelled' || access.reason === 'expired' || access.reason === 'already_complete') {
+      return fail('submission_closed', 409);
+    }
+    return fail('submission_not_found', 404);
   }
-  if (!row) return fail('submission_not_found', 404);
-  if (row.status === 'complete' || row.status === 'cancelled') {
-    return fail('submission_closed', 409);
+  const row = access.row;
+  // Employer step of a two-person form: the employer uploads the job offer
+  // letter only (the documents route keeps the other keys anyway).
+  if (isTwoPersonEmployerStep(row) && !(EMPLOYER_DOCUMENT_KEYS as readonly string[]).includes(type)) {
+    return fail('unauthorized', 403);
   }
-  return { ok: true, rowId };
+
+  // Stored files plus incoming copies not yet finished (lib/direct-upload.ts).
+  const stored = await countStoredObjects(STORAGE_BUCKET, row.id, MAX_FILES_PER_ROW);
+  // In-progress direct uploads (minted slots); stale leftovers do not count.
+  const incoming = stored === null ? null : await countPendingUploads(STORAGE_BUCKET, row.id);
+  if (stored === null || incoming === null) {
+    console.error('storage/upload: could not count the stored files');
+    return fail('upload_failed', 503);
+  }
+  if (stored + incoming >= MAX_FILES_PER_ROW) return fail('too_many_files', 409);
+  return { ok: true, rowId: row.id };
 }
 
 /** Magic-byte check, then store under an opaque name. Same for both upload paths. */
@@ -114,8 +144,10 @@ async function handleDirect(req: NextRequest): Promise<NextResponse> {
   const submissionId = String(body.submissionId ?? '');
   const type = String(body.type ?? '');
   const passportPage = body.passportPage ? String(body.passportPage) : null;
+  const token = typeof body.token === 'string' ? body.token : null;
+  const employerToken = typeof body.employerToken === 'string' ? body.employerToken : null;
 
-  const auth = await authorize(submissionId, type, passportPage);
+  const auth = await authorize(submissionId, type, passportPage, token, employerToken);
   if (!auth.ok) return auth.response;
 
   if (body.step === 'start') {
@@ -144,8 +176,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const type = String(form.get('type') ?? '');
     const passportPage = form.get('passportPage') ? String(form.get('passportPage')) : null;
     const file = form.get('file');
+    const token = form.get('token') ? String(form.get('token')) : null;
+    const employerToken = form.get('employerToken') ? String(form.get('employerToken')) : null;
 
-    const auth = await authorize(submissionId, type, passportPage);
+    const auth = await authorize(submissionId, type, passportPage, token, employerToken);
     if (!auth.ok) return auth.response;
 
     if (!(file instanceof File)) {

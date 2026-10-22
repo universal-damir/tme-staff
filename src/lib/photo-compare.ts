@@ -148,7 +148,8 @@ export async function comparePhotos(
       evidence?: string[];
       confidence?: number;
     };
-    console.log('[Photo Compare] Result:', parsed);
+    // STAFF-008: verdict only, never the model's free text.
+    console.log('[Photo Compare] Result:', { same_photo: !!parsed.same_photo });
 
     return {
       samePhoto: !!parsed.same_photo,

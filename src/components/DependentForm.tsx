@@ -30,6 +30,7 @@ import {
   mergeStaffDocRefs,
   shouldOfferManualReview,
   buildManualReviewPageRef,
+  readBackCheckedRef,
   passportAdditionalPageVariant,
   passportDataPageCarriesIssueDetails,
   isPakistaniNationality,
@@ -40,9 +41,13 @@ import {
   uploadDocument,
   uploadPassportPage,
   updateDocumentReferences,
+  saveDocumentReferences,
   autoSaveEmployeeData,
   getDocumentUrl,
   isUploadFailure,
+  type PassportPageKey,
+  type UploadResult,
+  type UploadedRef,
 } from '@/lib/supabase';
 import { calculateFullName, normalizePersonName } from '@/lib/utils';
 import { callAiCheck } from '@/lib/ai-check-client';
@@ -565,6 +570,27 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
   const photoDocRef = useRef(photoDoc);
   const passportPagesRef = useRef(passportPages);
+
+  // After a hand check: show what the server stored for the slot (it decides
+  // validated / needsReview, STAFF-001), so "sent for review" is real.
+  const saveHandCheck = async (docs: StaffDocumentReferences, slot: 'photo' | PassportPageKey) => {
+    const saved = await saveDocumentReferences(submissionId, docs, aiToken);
+    if (!saved) return;
+    if (slot === 'photo') {
+      const back = readBackCheckedRef(photoDocRef.current, saved.photo);
+      if (back !== photoDocRef.current) {
+        photoDocRef.current = back;
+        setPhotoDoc(back);
+      }
+      return;
+    }
+    const cur = passportPagesRef.current[slot];
+    const back = readBackCheckedRef(cur, saved.passportPages?.[slot]);
+    if (back === cur) return;
+    const pages = { ...passportPagesRef.current, [slot]: back };
+    passportPagesRef.current = pages;
+    setPassportPages(pages);
+  };
   const certificateDocRef = useRef(certificateDoc);
   const marriageCertDocRef = useRef(marriageCertDoc);
   const divorceCertDocRef = useRef(divorceCertDoc);
@@ -588,13 +614,13 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   const [pakistanIdFrontDoc, setPakistanIdFrontDoc] = useState(submission.documents?.pakistan_id_front);
   const [pakistanIdBackDoc, setPakistanIdBackDoc] = useState(submission.documents?.pakistan_id_back);
   const [pakistanIdFrontUI, setPakistanIdFrontUI] = useState({
-    preview: submission.documents?.pakistan_id_front?.path ? getDocumentUrl(submission.documents.pakistan_id_front.path) : (null as string | null),
+    preview: submission.documents?.pakistan_id_front?.path ? getDocumentUrl(submission.documents.pakistan_id_front.path, submission.id) : (null as string | null),
     validating: false,
     error: null as string | null,
     file: null as File | null,
   });
   const [pakistanIdBackUI, setPakistanIdBackUI] = useState({
-    preview: submission.documents?.pakistan_id_back?.path ? getDocumentUrl(submission.documents.pakistan_id_back.path) : (null as string | null),
+    preview: submission.documents?.pakistan_id_back?.path ? getDocumentUrl(submission.documents.pakistan_id_back.path, submission.id) : (null as string | null),
     validating: false,
     error: null as string | null,
     file: null as File | null,
@@ -648,19 +674,19 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   const initInside = submission.documents?.passportPages?.insidePages;
   const initAdditional = submission.documents?.passportPages?.additionalPage;
   const [coverUI, setCoverUI] = useState({
-    preview: initCover?.path ? getDocumentUrl(initCover.path) : (null as string | null),
+    preview: initCover?.path ? getDocumentUrl(initCover.path, submission.id) : (null as string | null),
     validating: false,
     error: null as string | null,
     file: null as File | null,
   });
   const [insideUI, setInsideUI] = useState({
-    preview: initInside?.path ? getDocumentUrl(initInside.path) : (null as string | null),
+    preview: initInside?.path ? getDocumentUrl(initInside.path, submission.id) : (null as string | null),
     validating: false,
     error: null as string | null,
     file: null as File | null,
   });
   const [additionalPageUI, setAdditionalPageUI] = useState({
-    preview: initAdditional?.path ? getDocumentUrl(initAdditional.path) : (null as string | null),
+    preview: initAdditional?.path ? getDocumentUrl(initAdditional.path, submission.id) : (null as string | null),
     validating: false,
     error: null as string | null,
     file: null as File | null,
@@ -1105,7 +1131,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setPhotoDoc(updatedDoc);
     photoDocRef.current = updatedDoc;
     setPhotoError(null);
-    await saveDocRefs(buildDocRefs({ photo: updatedDoc }));
+    await saveHandCheck(buildDocRefs({ photo: updatedDoc }), 'photo');
     setPhotoRejectionCount(0);
     setPhotoManualReviewConfirmed(false);
     setPhotoManualReviewSubmitting(false);
@@ -1127,8 +1153,15 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     imageBase64: string,
     expectedType: 'COVER' | 'INSIDE_PAGES' | 'ADDITIONAL_PAGE',
     file: File,
-  ): Promise<{ valid: boolean; error?: string; failed?: boolean; countsAsStrike?: boolean }> => {
+  ): Promise<{ valid: boolean; error?: string; failed?: boolean; countsAsStrike?: boolean; upload?: UploadedRef }> => {
     const slot = expectedType === 'COVER' ? 'cover' : expectedType === 'INSIDE_PAGES' ? 'inside' : 'additional';
+    // Upload FIRST: the route checks the stored file (`path`) and records
+    // the verdict server-side (STAFF-001). `upload` is saved when it passed.
+    const pageKey: PassportPageKey = expectedType === 'COVER' ? 'cover' : expectedType === 'INSIDE_PAGES' ? 'insidePages' : 'additionalPage';
+    const upload = await uploadPassportPage(submission.id, pageKey, file);
+    if (isUploadFailure(upload)) {
+      return { valid: false, error: upload.error, failed: true, countsAsStrike: false };
+    }
     const outcome = await callAiCheck<{ matches?: boolean; errorMessage?: string }>(
       '/api/validate-passport-page',
       {
@@ -1138,6 +1171,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         nationality,
         submissionId: submission.id,
         token: aiToken,
+        path: upload.path,
       },
       imageBase64,
       fileContext(`check:passport-${slot}`, file)
@@ -1150,6 +1184,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     return {
       valid: outcome.data.matches === true,
       error: outcome.data.errorMessage,
+      upload,
     };
   };
 
@@ -1215,8 +1250,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
     setCoverUI({ preview, validating: true, error: null, file });
 
+    let checkedUpload: UploadResult | null = null;
     try {
       const validation = await validatePassportPageType(preview, 'COVER', file);
+      checkedUpload = validation.upload ?? null;
       if (!validation.valid) {
         // The check itself failed: show why, and count it toward the
         // manual-review option so the sponsor is never stuck retrying.
@@ -1241,7 +1278,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, 'cover', file);
+    // Uploaded (and checked from storage) by validatePassportPageType.
+    const result: UploadResult = checkedUpload ?? { error: "We couldn't upload this file. Please try again." };
     if (isUploadFailure(result)) {
       setCoverUI({ preview, validating: false, error: result.error, file });
       return false;
@@ -1277,8 +1315,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
     setInsideUI({ preview, validating: true, error: null, file });
 
+    let checkedUpload: UploadResult | null = null;
     try {
       const validation = await validatePassportPageType(preview, 'INSIDE_PAGES', file);
+      checkedUpload = validation.upload ?? null;
       if (!validation.valid) {
         if (validation.failed) {
           if (validation.countsAsStrike) setInsideRejectionCount((c) => c + 1);
@@ -1300,7 +1340,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, 'insidePages', file);
+    // Uploaded (and checked from storage) by validatePassportPageType.
+    const result: UploadResult = checkedUpload ?? { error: "We couldn't upload this file. Please try again." };
     if (isUploadFailure(result)) {
       setInsideUI({ preview, validating: false, error: result.error, file });
       return false;
@@ -1393,7 +1434,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setPassportError(null);
     setCoverRejectionCount(0);
     setCoverManualReviewConfirmed(false);
-    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+    await saveHandCheck(buildDocRefs({ passportPages: updatedPages }), 'cover');
   };
 
   const handleInsideManualReview = async () => {
@@ -1434,7 +1475,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     setInsideRejectionCount(0);
     setInsideManualReviewConfirmed(false);
     setPassportDataReady(true);
-    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+    await saveHandCheck(buildDocRefs({ passportPages: updatedPages }), 'insidePages');
   };
 
   // Returns null on any failure: the sponsor then types the data by hand
@@ -1485,8 +1526,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
     setAdditionalPageUI({ preview, validating: true, error: null, file });
 
+    let checkedUpload: UploadResult | null = null;
     try {
       const validation = await validatePassportPageType(preview, 'ADDITIONAL_PAGE', file);
+      checkedUpload = validation.upload ?? null;
       if (!validation.valid) {
         if (validation.failed) {
           if (validation.countsAsStrike) setAdditionalRejectionCount((c) => c + 1);
@@ -1502,7 +1545,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       return false;
     }
 
-    const result = await uploadPassportPage(submission.id, 'additionalPage', file);
+    // Uploaded (and checked from storage) by validatePassportPageType.
+    const result: UploadResult = checkedUpload ?? { error: "We couldn't upload this file. Please try again." };
     if (isUploadFailure(result)) {
       setAdditionalPageUI({ preview, validating: false, error: result.error, file });
       return false;
@@ -1555,7 +1599,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
     passportPagesRef.current = updatedPages;
     setAdditionalRejectionCount(0);
     setAdditionalManualReviewConfirmed(false);
-    await saveDocRefs(buildDocRefs({ passportPages: updatedPages }));
+    await saveHandCheck(buildDocRefs({ passportPages: updatedPages }), 'additionalPage');
   };
 
   const handleAdditionalPageRemove = async () => {
