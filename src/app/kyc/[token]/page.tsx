@@ -3,10 +3,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { AlertTriangle, Loader2, XCircle } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
+import { Card, ClientPageHeader, PageBody } from '@/components/ui';
 import type { EkycText } from '@/types/ekyc';
 import type { EkycClientPayload } from '@/lib/ekyc-token';
-import { Bi, EkycBilingualContext } from '@/components/ekyc/Bi';
+import { Bi, BiTitle, EkycBilingualContext } from '@/components/ekyc/Bi';
 import { EkycForm, type EkycClosedReason } from '@/components/ekyc/EkycForm';
 import { EKYC_UI } from '@/components/ekyc/texts';
 import { reportClientFailure } from '@/lib/client-error-log';
@@ -24,34 +24,28 @@ type PageState =
  * root EnglishOnlyBoundary folds typed text to English letters for the
  * authority forms; this attribute opts the eKYC page out of it.
  */
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ title, eyebrow = true, children }: { title: EkycText; eyebrow?: boolean; children: React.ReactNode }) {
   return (
-    <div
-      data-allow-non-english="true"
-      className="min-h-screen px-4 py-6 sm:py-8"
-      style={{ backgroundColor: TME_COLORS.background }}
-    >
-      <div className="mx-auto max-w-3xl">
-        <div className="mb-4 text-xs font-semibold uppercase tracking-wide" style={{ color: TME_COLORS.secondary }}>
-          {EKYC_UI.brand.en}
-        </div>
-        {children}
-      </div>
+    <div data-allow-non-english="true" className="min-h-screen bg-tme-page">
+      <ClientPageHeader
+        eyebrow={eyebrow ? EKYC_UI.area.en : undefined}
+        title={<BiTitle text={title} />}
+        maxWidth="max-w-3xl"
+      />
+      <PageBody maxWidth="max-w-3xl">{children}</PageBody>
     </div>
   );
 }
 
-function MessageCard({ icon, title, body }: { icon: React.ReactNode; title: EkycText; body: EkycText }) {
+/** Unknown link, load error, closed form: the title is in the page band, the card says what to do. */
+function MessageCard({ icon, body }: { icon: React.ReactNode; body: EkycText }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
-      <div className="flex flex-col items-center py-6 text-center">
+    <Card>
+      <div className="flex flex-col items-center py-4 text-center sm:py-6">
         {icon}
-        <h1 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-          <Bi text={title} />
-        </h1>
-        <Bi text={body} paragraphs className="max-w-md text-gray-600" />
+        <Bi text={body} paragraphs className="max-w-md text-base text-gray-700 sm:text-[15px]" />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -92,11 +86,13 @@ export default function EkycPage() {
   if (state.kind === 'loading') {
     return (
       <EkycBilingualContext.Provider value={true}>
-        <Shell>
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-10 flex flex-col items-center text-center">
-            <Loader2 className="w-8 h-8 animate-spin mb-3" style={{ color: TME_COLORS.primary }} />
-            <Bi text={EKYC_UI.loading} className="text-gray-500" />
-          </div>
+        <Shell title={EKYC_UI.area} eyebrow={false}>
+          <Card>
+            <div className="flex flex-col items-center py-6 text-center" role="status">
+              <Loader2 className="mb-3 h-8 w-8 animate-spin text-tme-blue" aria-hidden="true" />
+              <Bi text={EKYC_UI.loading} className="text-base text-gray-600 sm:text-sm" />
+            </div>
+          </Card>
         </Shell>
       </EkycBilingualContext.Provider>
     );
@@ -106,10 +102,9 @@ export default function EkycPage() {
     const notFound = state.kind === 'not_found';
     return (
       <EkycBilingualContext.Provider value={true}>
-        <Shell>
+        <Shell title={notFound ? EKYC_UI.invalidTitle : EKYC_UI.errorTitle}>
           <MessageCard
-            icon={<XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />}
-            title={notFound ? EKYC_UI.invalidTitle : EKYC_UI.errorTitle}
+            icon={<XCircle className="mb-4 h-12 w-12 text-tme-red" aria-hidden="true" />}
             body={
               notFound
                 ? EKYC_UI.invalidBody
@@ -126,10 +121,9 @@ export default function EkycPage() {
   if (state.kind === 'closed') {
     return (
       <EkycBilingualContext.Provider value={state.bilingual}>
-        <Shell>
+        <Shell title={EKYC_UI.closedTitle}>
           <MessageCard
-            icon={<AlertTriangle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.secondary }} />}
-            title={EKYC_UI.closedTitle}
+            icon={<AlertTriangle className="mb-4 h-12 w-12 text-amber-600" aria-hidden="true" />}
             body={EKYC_UI.closedBody}
           />
         </Shell>
@@ -153,7 +147,7 @@ export default function EkycPage() {
   // The form draws its own full-width page (sticky header, step list).
   return (
     <EkycBilingualContext.Provider value={payload.bilingual}>
-      <div data-allow-non-english="true" className="min-h-screen" style={{ backgroundColor: TME_COLORS.background }}>
+      <div data-allow-non-english="true" className="min-h-screen bg-tme-page">
         <EkycForm
           // Remount when the form locks, so it re-renders read-only from the submitted answers.
           key={readOnly ? 'locked' : 'open'}

@@ -28,9 +28,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
-      <body className={`${inter.className} antialiased bg-gray-50`}>
+      <body className={`${inter.className} antialiased bg-tme-page`}>
         {/* Everything typed in this app lands on an ICP, MoHRE or DET form,
             and those take English letters only. Folds anything else as it is
             typed or pasted, in every form, including ones added later. */}

@@ -45,7 +45,7 @@ interface Props {
   /** Keep room on the right for the pencil button the caller lays over the cell. */
   reserveRight?: boolean;
   placeholder?: string;
-  /** A small amber dot: this answer is still needed (row started, not complete). */
+  /** An amber border: this answer is required and still empty. */
   needed?: boolean;
   /** table = quiet cell; card = phone field; inline = a picker inside a sentence. */
   size: 'table' | 'card' | 'inline';
@@ -100,7 +100,7 @@ export default function ChoiceSelect({
     const vh = window.innerHeight;
     const width = Math.min(Math.max(r.width, PANEL_MIN_W), vw - 16);
     const left = Math.max(8, Math.min(r.left, vw - width - 8));
-    const contentH = panel.current?.scrollHeight ?? options.length * 40 + 8;
+    const contentH = panel.current?.scrollHeight ?? options.length * 44 + 8;
     const want = Math.min(contentH, PANEL_MAX_H);
     const below = vh - r.bottom - 12;
     const above = r.top - 12;
@@ -284,11 +284,25 @@ export default function ChoiceSelect({
 
   const table = size === 'table';
   const chosen = !!value;
+  // Card / inline: the bordered box; amber = required and still empty.
+  const border = needed && !chosen ? 'border-amber-400 bg-white hover:border-amber-500' : 'border-gray-200 bg-white hover:border-gray-300';
+  // Laptop table (quiet, 22.10 round 2): a filled answer reads as plain text with a small chevron;
+  // a light border shows on hover / focus. Required and empty = a small amber "Choose" box.
+  const tableTone =
+    needed && !chosen
+      ? 'border-amber-300 bg-amber-50 text-amber-800 font-medium hover:border-amber-400'
+      : 'border-transparent bg-transparent hover:border-gray-300 hover:bg-white';
   const btnCls = table
-    ? `h-9 px-2.5 text-[13px] ${chosen ? 'border-transparent hover:border-gray-200 hover:bg-white' : 'border-gray-200 bg-white hover:border-gray-300'}`
+    ? `inline-flex max-w-full h-8 px-2 gap-1.5 rounded-lg border text-sm focus-visible:border-tme-blue focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-tme-blue/25 ${tableTone}`
     : size === 'inline'
-      ? 'h-8 px-2.5 text-[13px] border-gray-200 bg-white hover:border-gray-300'
-      : 'h-11 px-3 text-sm border-gray-200 bg-white hover:border-gray-300';
+      ? `flex w-full min-h-11 py-1.5 px-3 gap-2 rounded-[10px] border-2 text-[15px] focus:border-tme-blue focus:bg-white ${border}`
+      : `flex w-full min-h-[46px] py-2 px-3.5 gap-2 rounded-[10px] border-2 text-base focus:border-tme-blue focus:bg-white ${border}`;
+  const textCls = table
+    ? `min-w-0 truncate whitespace-nowrap ${chosen ? 'text-gray-900' : needed ? '' : 'text-gray-500'}`
+    : `flex-1 min-w-0 break-words ${chosen ? 'text-gray-900' : 'text-gray-500'}`;
+  const chevronCls = table
+    ? `w-3.5 h-3.5 shrink-0 ${needed && !chosen ? 'text-amber-700' : 'text-gray-400'}`
+    : 'w-[18px] h-[18px] shrink-0 text-tme-blue';
 
   const listItems = options.map((o, i) => {
     const selected = !!value && o.value === value;
@@ -304,27 +318,27 @@ export default function ChoiceSelect({
         onPointerMove={() => setActive(i)}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => pick(i)}
-        className={`flex items-start gap-2.5 rounded-md cursor-pointer select-none ${sheet ? 'px-3 py-3 min-h-12' : 'px-2.5 py-[7px]'} ${
+        className={`flex items-start gap-2.5 rounded-md cursor-pointer select-none ${sheet ? 'px-3 py-3 min-h-12' : 'px-3 py-2 min-h-10'} ${
           isActive ? 'bg-gray-100' : ''
-        } ${clear ? 'text-gray-500' : 'text-gray-900'}`}
+        } ${clear ? 'text-gray-600' : 'text-gray-900'}`}
       >
         {o.strong ? (
           // Incoterms: the code bold, its meaning muted on the same line.
-          <span className={`flex-1 min-w-0 flex items-baseline gap-2 leading-5 ${sheet ? 'text-[15px]' : 'text-[13px]'}`}>
-            <span className="w-9 shrink-0 font-semibold tabular-nums">{o.label}</span>
-            {o.sub && <span className={`min-w-0 text-gray-500 ${sheet ? 'text-sm' : 'text-[12.5px]'}`}>{o.sub}</span>}
+          <span className={`flex-1 min-w-0 flex items-baseline gap-2 leading-5 ${table ? 'text-sm' : 'text-[15px]'}`}>
+            <span className="w-10 shrink-0 font-semibold tabular-nums">{o.label}</span>
+            {o.sub && <span className={`min-w-0 text-gray-600 ${table ? 'text-[13px]' : 'text-sm'}`}>{o.sub}</span>}
           </span>
         ) : (
           <span className="flex-1 min-w-0">
-            <span className={`flex items-center gap-1.5 leading-5 ${sheet ? 'text-[15px]' : 'text-[13px]'}`}>
+            <span className={`flex items-center gap-1.5 leading-5 ${table ? 'text-sm' : 'text-[15px]'}`}>
               {o.label}
-              {o.pencil && <Pencil className="w-3 h-3 text-gray-400 shrink-0" aria-hidden />}
+              {o.pencil && <Pencil className="w-3.5 h-3.5 text-gray-500 shrink-0" aria-hidden />}
             </span>
-            {o.sub && <span className={`block leading-snug text-gray-500 ${sheet ? 'text-[13px]' : 'text-xs'}`}>{o.sub}</span>}
+            {o.sub && <span className={`block mt-0.5 leading-snug text-gray-600 ${table ? 'text-[13px]' : 'text-sm'}`}>{o.sub}</span>}
           </span>
         )}
         <Check
-          className={`shrink-0 mt-0.5 w-4 h-4 ${selected ? 'text-[#243F7B]' : 'invisible'}`}
+          className={`shrink-0 mt-0.5 w-4 h-4 ${selected ? 'text-tme-blue' : 'invisible'}`}
           strokeWidth={2.5}
           aria-hidden
         />
@@ -363,17 +377,14 @@ export default function ChoiceSelect({
         title={displayTitle || undefined}
         onClick={() => (open ? close() : openList())}
         onKeyDown={onKeyDown}
-        className={`group/sel flex w-full min-w-0 items-center gap-1.5 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:border-[#243F7B] focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-[#243F7B]/20 disabled:cursor-not-allowed disabled:opacity-60 ${btnCls} ${
-          open ? '!border-[#243F7B] !bg-white ring-2 ring-[#243F7B]/20' : ''
-        }`}
+        className={`min-w-0 items-center text-left leading-snug transition-colors focus:outline-none disabled:cursor-not-allowed disabled:text-gray-600 ${
+          table ? 'disabled:hover:border-transparent disabled:hover:bg-transparent' : 'disabled:bg-gray-50'
+        } ${btnCls} ${open ? '!border-tme-blue !bg-white' : ''}`}
       >
-        <span className={`flex-1 min-w-0 truncate ${chosen ? 'text-gray-900' : 'text-gray-400'}`}>{chosen ? display : placeholder}</span>
-        {reserveRight && <span className="w-5 shrink-0" aria-hidden />}
-        {needed && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />}
+        <span className={textCls}>{chosen ? display : placeholder}</span>
+        {reserveRight && <span className={`${table ? 'w-7' : 'w-11'} shrink-0`} aria-hidden />}
         <ChevronDown
-          className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''} ${
-            table && chosen && !open ? 'text-gray-300 group-hover/sel:text-gray-500' : 'text-gray-400'
-          }`}
+          className={`${chevronCls} transition-transform ${open ? 'rotate-180' : ''}`}
           aria-hidden
         />
       </button>
@@ -401,8 +412,8 @@ export default function ChoiceSelect({
                     <span className="h-1 w-9 rounded-full bg-gray-200" />
                   </div>
                   <div className="px-5 pt-1 pb-2">
-                    <p className="text-[15px] font-semibold text-gray-900">{sheetTitle}</p>
-                    {sheetSubtitle && <p className="text-xs text-gray-500 mt-0.5">{sheetSubtitle}</p>}
+                    <p className="text-[17px] font-semibold text-tme-blue">{sheetTitle}</p>
+                    {sheetSubtitle && <p className="text-sm text-gray-600 mt-0.5">{sheetSubtitle}</p>}
                   </div>
                   {listbox}
                 </motion.div>
@@ -411,7 +422,7 @@ export default function ChoiceSelect({
               <motion.div
                 key="panel"
                 ref={floating}
-                className="fixed z-[60] rounded-lg border border-gray-200 bg-white shadow-[0_10px_30px_-8px_rgba(16,24,40,0.18),0_2px_6px_rgba(16,24,40,0.06)]"
+                className="fixed z-[60] rounded-[10px] border border-gray-200 bg-white shadow-[0_10px_30px_-8px_rgba(16,24,40,0.18),0_2px_6px_rgba(16,24,40,0.06)]"
                 style={{ left: place.left, width: place.width, top: place.top, bottom: place.bottom }}
                 initial={{ opacity: 0, y: place.top !== undefined ? -4 : 4 }}
                 animate={{ opacity: 1, y: 0 }}

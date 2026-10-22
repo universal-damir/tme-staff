@@ -6,7 +6,6 @@ import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  TME_COLORS,
   TITLES,
   NATIONALITIES,
   RELIGIONS,
@@ -28,7 +27,7 @@ import {
   ibanBankCode,
   INTERNATIONAL_BANK_LABEL,
 } from '@/lib/uae-bank-directory';
-import { Input, Button, MultiSelectDropdown, CustomDropdown, CustomDatePicker, PhoneInput } from '@/components/ui';
+import { Input, Button, MultiSelectDropdown, CustomDropdown, CustomDatePicker, PhoneInput, Card, FormFooter, FieldError, GrainGradient } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
@@ -85,7 +84,6 @@ import {
   FileSignature,
   Camera,
   CheckCircle,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Info,
@@ -170,25 +168,23 @@ interface FormSectionProps {
   stepNumber?: number;
 }
 
-function FormSection({ title, icon, children, stepNumber }: FormSectionProps) {
+function FormSection({ title, icon, children }: FormSectionProps) {
   return (
-    <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm">
-      <div className="flex items-center gap-3 mb-6">
-        {stepNumber !== undefined && (
-          <span
-            className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-            style={{ backgroundColor: TME_COLORS.primary }}
-          >
-            {stepNumber}
-          </span>
-        )}
-        {icon}
-        <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
-          {title}
-        </h2>
-      </div>
+    <Card
+      seed={title}
+      title={
+        <span className="inline-flex items-center gap-2">
+          {icon && (
+            <span aria-hidden className="inline-flex shrink-0 text-tme-blue [&>svg]:!w-[18px] [&>svg]:!h-[18px]">
+              {icon}
+            </span>
+          )}
+          <span>{title}</span>
+        </span>
+      }
+    >
       {children}
-    </div>
+    </Card>
   );
 }
 
@@ -207,31 +203,18 @@ function StepNavButtons({
   label?: string;
 }) {
   return (
-    <div className={`flex ${showBack && onBack ? 'justify-between' : 'justify-end'} mt-4`}>
+    <FormFooter className="mt-6">
       {showBack && onBack && (
-        <button
-          type="button"
-          onClick={onBack}
-          className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border-2 hover:bg-gray-50"
-          style={{ color: TME_COLORS.primary, borderColor: TME_COLORS.primary }}
-        >
-          <ChevronLeft className="w-4 h-4" />
+        <Button tone="plain" onClick={onBack}>
+          <ChevronLeft className="w-[18px] h-[18px]" aria-hidden />
           Back
-        </button>
+        </Button>
       )}
-      <button
-        type="button"
-        onClick={onContinue}
-        disabled={!enabled}
-        className={`px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-all duration-200 flex items-center gap-2 ${
-          enabled ? 'hover:opacity-90 cursor-pointer' : 'opacity-40 cursor-not-allowed'
-        }`}
-        style={{ backgroundColor: TME_COLORS.primary }}
-      >
+      <Button tone="primary" onClick={onContinue} disabled={!enabled}>
         {label || 'Continue'}
-        <ChevronRight className="w-4 h-4" />
-      </button>
-    </div>
+        <ChevronRight className="w-[18px] h-[18px]" aria-hidden />
+      </Button>
+    </FormFooter>
   );
 }
 
@@ -268,42 +251,47 @@ function StepProgress({
   })();
   const isAtFirstVisible = visibleStepIndices.indexOf(viewingStep) <= 0;
   const isAtLastVisibleReached = visiblePos(viewingStep) >= visiblePos(currentStep);
+  const arrowClass =
+    'size-11 sm:size-9 shrink-0 inline-flex items-center justify-center rounded-[10px] sm:rounded-lg text-tme-blue hover:bg-white/70 transition-colors disabled:opacity-30 disabled:cursor-not-allowed tme-btn-focus';
   return (
-    <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-sm mb-2">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onStepClick(prevVisible)}
-            disabled={isAtFirstVisible}
-            className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronLeft className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
-          </button>
-          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: TME_COLORS.primary }}>
-            Step {visiblePos(viewingStep) || 1} of {totalSteps}
-          </span>
-          <button
-            type="button"
-            onClick={() => onStepClick(nextVisible)}
-            disabled={isAtLastVisibleReached}
-            className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronRight className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
-          </button>
-        </div>
-        <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: `${TME_COLORS.primary}15`, color: TME_COLORS.primary }}>
-          {STEP_LABELS[viewingStep - 1] || ''}
+    <GrainGradient
+      color="#3B82F6"
+      seed="tme-staff-employee-form-steps"
+      grainOpacity={0.5}
+      className="sticky top-0 z-40 rounded-[14px] border border-gray-200 px-1.5 sm:px-2 pt-1 pb-0.5 sm:py-1 mb-2"
+    >
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onStepClick(prevVisible)}
+          disabled={isAtFirstVisible}
+          aria-label="Previous step"
+          className={arrowClass}
+        >
+          <ChevronLeft className="w-5 h-5 sm:w-[18px] sm:h-[18px]" aria-hidden />
+        </button>
+        <span className="flex-1 min-w-0 text-center text-[15px] sm:text-sm font-semibold leading-snug text-tme-blue">
+          Step {visiblePos(viewingStep) || 1} of {totalSteps}: {STEP_LABELS[viewingStep - 1] || ''}
         </span>
+        <button
+          type="button"
+          onClick={() => onStepClick(nextVisible)}
+          disabled={isAtLastVisibleReached}
+          aria-label="Next step"
+          className={arrowClass}
+        >
+          <ChevronRight className="w-5 h-5 sm:w-[18px] sm:h-[18px]" aria-hidden />
+        </button>
       </div>
-      {/* Clickable step dots — only visible steps get a dot, so the user
-          never sees a placeholder for an empty step. */}
-      <div className="flex items-center gap-1.5 mb-2">
+      {/* Clickable step segments — only visible steps get one, so the user
+          never sees a placeholder for an empty step. Each segment sits in a
+          44px tall hit area. */}
+      <div className="flex items-center gap-1.5 px-1 sm:pb-1">
         {visibleStepIndices.map((step) => {
           // Compare by DISPLAY position, not raw internal index. The sponsor
           // step is internal index 9 appended LAST for family-sponsored
           // applicants (order [1,2,3,4,5,6,7,8,9]); comparing by display
-          // position keeps the dot colouring/gating robust regardless of how
+          // position keeps the segment colouring/gating robust regardless of how
           // the internal indices map onto display order.
           const pos = visibleStepIndices.indexOf(step);
           const currentPos = visibleStepIndices.indexOf(currentStep);
@@ -311,34 +299,33 @@ function StepProgress({
           const isCurrent = step === currentStep;
           const isViewing = step === viewingStep;
           const isClickable = currentPos >= 0 ? pos <= currentPos : step <= currentStep;
+          const segClass = isViewing
+            ? 'bg-tme-blue'
+            : isCompleted
+            ? 'bg-tme-blue'
+            : isCurrent
+            ? 'bg-tme-blue/40'
+            : 'bg-tme-line';
           return (
             <button
               key={step}
               type="button"
               onClick={() => isClickable && onStepClick(step)}
               disabled={!isClickable}
-              className={`h-2 flex-1 rounded-full transition-all duration-200 ${
-                isViewing
-                  ? ''
-                  : isCompleted
-                  ? 'bg-green-400'
-                  : isCurrent
-                  ? ''
-                  : 'bg-gray-200'
-              } ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
-              style={
-                isViewing
-                  ? { backgroundColor: TME_COLORS.primary }
-                  : isCurrent && !isViewing
-                  ? { backgroundColor: `${TME_COLORS.primary}60` }
-                  : undefined
-              }
-              title={STEP_LABELS[step - 1]}
-            />
+              aria-label={`Go to step ${pos + 1}: ${STEP_LABELS[step - 1]}`}
+              aria-current={isViewing ? 'step' : undefined}
+              className={`group flex-1 min-h-11 sm:min-h-6 flex items-center ${isClickable ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+            >
+              <span
+                className={`block w-full rounded-[3px] transition-all duration-200 ${segClass} ${isViewing ? 'h-2' : 'h-1.5'} ${
+                  isClickable ? 'group-hover:opacity-80' : ''
+                }`}
+              />
+            </button>
           );
         })}
       </div>
-    </div>
+    </GrainGradient>
   );
 }
 
@@ -2874,18 +2861,17 @@ export function EmployeeForm({
       {isSubmitting && (
         <div className="fixed inset-0 z-50 bg-white/70 backdrop-blur-sm flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-10 h-10 border-4 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: TME_COLORS.primary }} />
-            <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Submitting your form...</p>
+            <div className="w-10 h-10 sm:w-8 sm:h-8 border-4 sm:border-[3px] border-gray-200 border-t-tme-blue rounded-full animate-spin" aria-hidden />
+            <p className="text-base sm:text-[15px] font-semibold text-tme-blue" role="status">Submitting your form...</p>
           </div>
         </div>
       )}
       {isCancelCopy && (
         <div
-          className="p-4 rounded-lg flex items-start gap-3 border-2"
-          style={{ backgroundColor: '#F3F5FA', borderColor: TME_COLORS.primary }}
+          className="p-4 rounded-lg flex items-start gap-3 border-2 bg-[#F3F5FA] border-tme-blue"
         >
-          <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-          <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+          <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+          <p className="text-[15px] sm:text-sm leading-normal text-tme-blue">
             {CANCEL_COPY_INTRO}
           </p>
         </div>
@@ -2914,12 +2900,12 @@ export function EmployeeForm({
       <RevealSection show={viewingStep === 1 || viewingStep === 8}>
         <FormSection
           title="ID Photo"
-          icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          icon={<Camera className="w-5 h-5 text-tme-blue" />}
           stepNumber={displayedStepNumber(1)}
         >
           {canKeepPhoto && !photoOnFileChanged && !photoDoc && existingDocs?.photo && (
             <div className="space-y-3">
-              <p className="text-sm text-gray-600">
+              <p className="text-sm sm:text-[13px] text-gray-600">
                 This is the photo we have on file. You can keep it, or upload a new one.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2940,38 +2926,37 @@ export function EmployeeForm({
                   />
                   <div>
                     <span className="text-sm font-medium text-gray-800">Keep this photo</span>
-                    <p className="text-xs text-gray-500 mt-0.5">It still looks like me and was taken in the last 6 months.</p>
+                    <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">It still looks like me and was taken in the last 6 months.</p>
                   </div>
                 </label>
               </div>
-              {photoError && <p className="text-sm text-red-600">{photoError}</p>}
-              <button
-                type="button"
+              <FieldError>{photoError}</FieldError>
+              <Button
+                tone="plain"
                 onClick={() => {
                   setPhotoOnFileChanged(true);
                   setPhotoOnFileConfirmed(false);
                   photoUnchangedRef.current = false;
                   void saveDocRefs(buildDocRefs());
                 }}
-                className="text-sm text-red-600 hover:text-red-700 font-medium underline"
+                className="self-start"
               >
                 I want to upload a new photo
-              </button>
+              </Button>
             </div>
           )}
           {canKeepPhoto && photoOnFileChanged && !photoDoc && (
-            <button
-              type="button"
+            <Button
+              tone="ghost"
               onClick={() => {
                 setPhotoOnFileChanged(false);
                 photoUnchangedRef.current = undefined;
                 void saveDocRefs(buildDocRefs());
               }}
-              className="mb-3 text-sm font-medium underline"
-              style={{ color: TME_COLORS.primary }}
+              className="mb-3 -ml-3"
             >
               Use the photo on file instead
-            </button>
+            </Button>
           )}
           {!(canKeepPhoto && !photoOnFileChanged && !photoDoc) && (
           <PhotoUpload
@@ -3018,8 +3003,8 @@ export function EmployeeForm({
           )}
 
           {shouldOfferManualReview(photoRejectionCount) && photoDoc && !photoDoc.validated && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-              <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-3.5 mt-3 space-y-3">
+              <p className="text-sm text-tme-blue">
                 <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this photo meets the requirements, you can submit it for manual review.
               </p>
               <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
@@ -3032,15 +3017,14 @@ export function EmployeeForm({
                 <span>I confirm this is a recent passport-style photo of myself (plain light background, head and shoulders visible, no glasses). I understand a TME team member will verify it manually.</span>
               </label>
               <div className="flex justify-end">
-                <button
-                  type="button"
+                <Button
+                  tone="secondary"
                   onClick={handlePhotoManualReview}
                   disabled={!photoManualReviewConfirmed || photoManualReviewSubmitting}
-                  className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: TME_COLORS.primary }}
+                  busy={photoManualReviewSubmitting}
                 >
                   {photoManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -3059,14 +3043,9 @@ export function EmployeeForm({
 
       {/* Renewal: Existing Passport Confirmation (shown before passport upload steps) */}
       {docsOnFileFlow && hasExistingPassport && (viewingStep === 2 || viewingStep === 8) && !passportChanged && (
-        <div className="bg-white rounded-xl p-6 shadow-sm mb-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />
-            <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
-              Your Current Passport
-            </h2>
-          </div>
-          <p className="text-sm text-gray-600 mb-4">
+        <div className="mb-6">
+        <FormSection title="Your Current Passport" icon={<Camera className="w-5 h-5 text-tme-blue" />}>
+          <p className="text-sm sm:text-[13px] text-gray-600 mb-4">
             Below are your passport documents on file. Please review and confirm they are still valid.
           </p>
 
@@ -3094,15 +3073,15 @@ export function EmployeeForm({
               />
               <div>
                 <span className="text-sm font-medium text-gray-800">I confirm my passport is the same as shown above</span>
-                <p className="text-xs text-gray-500 mt-0.5">My passport has not been renewed, replaced, or lost since the last submission.</p>
+                <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">My passport has not been renewed, replaced, or lost since the last submission.</p>
               </div>
             </label>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-between mt-5">
-            <button
-              type="button"
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between mt-5">
+            <Button
+              tone="plain"
               onClick={() => {
                 setPassportChanged(true);
                 // Withdraw any previously-saved attestation — the server-side
@@ -3112,13 +3091,13 @@ export function EmployeeForm({
                   void saveDocRefs(buildDocRefs());
                 }
               }}
-              className="text-sm text-red-600 hover:text-red-700 font-medium underline"
+              className="self-start"
             >
-              My passport has changed — I need to upload new pages
-            </button>
+              My passport has changed: I need to upload new pages
+            </Button>
             {passportConfirmed && (
-              <button
-                type="button"
+              <Button
+                tone="primary"
                 onClick={() => {
                   // Persist the attestation so the server-side submit gate can
                   // verify the skip (defense-in-depth; it also checks both
@@ -3129,14 +3108,13 @@ export function EmployeeForm({
                   // on a standard renewal, so jump straight to step 5 then.
                   setViewingStep(isStep4Empty ? 5 : 4);
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white text-sm"
-                style={{ backgroundColor: TME_COLORS.primary }}
               >
                 Continue
-                <ChevronRight className="w-4 h-4" />
-              </button>
+                <ChevronRight className="w-[18px] h-[18px]" aria-hidden />
+              </Button>
             )}
           </div>
+        </FormSection>
         </div>
       )}
 
@@ -3148,22 +3126,21 @@ export function EmployeeForm({
         <div ref={passportCoverRef}>
           <FormSection
             title="Passport Cover (OUTSIDE)"
-            icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Camera className="w-5 h-5 text-tme-blue" />}
             stepNumber={displayedStepNumber(2)}
           >
             <div className="space-y-4">
               {!isReview && (
                 <div
-                  className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ backgroundColor: '#EBF4FF' }}
+                  className="flex items-start gap-3 p-4 rounded-lg bg-[#EBF4FF]"
                 >
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                  <div className="text-sm text-tme-blue">
                     <p className="font-medium">Upload your passport cover (open/spread showing front + back cover)</p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       Single page photos are not accepted. Passport must be spread open.
                     </p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
                       {isMobile
                         ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
@@ -3211,8 +3188,8 @@ export function EmployeeForm({
               )}
 
               {shouldOfferManualReview(coverRejectionCount) && coverUI.file && !passportPages.cover?.validated && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-                  <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-3.5 mt-3 space-y-3">
+                  <p className="text-sm text-tme-blue">
                     <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this photo is your passport cover spread, you can submit it for manual review.
                   </p>
                   <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
@@ -3225,22 +3202,19 @@ export function EmployeeForm({
                     <span>I confirm this is my passport cover (front + back) photographed spread open. I understand a TME team member will verify it manually.</span>
                   </label>
                   <div className="flex justify-end">
-                    <button
-                      type="button"
+                    <Button
+                      tone="secondary"
                       onClick={handleCoverManualReview}
                       disabled={!coverManualReviewConfirmed || coverManualReviewSubmitting}
-                      className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{ backgroundColor: TME_COLORS.primary }}
+                      busy={coverManualReviewSubmitting}
                     >
                       {coverManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
             </div>
-            {passportError && (
-              <p className="mt-2 text-sm text-red-500">{passportError}</p>
-            )}
+            <FieldError className="mt-2">{passportError}</FieldError>
             {viewingStep === 2 && (
               <StepNavButtons enabled={isCoverUploaded} onContinue={() => setViewingStep(3)} onBack={() => setViewingStep(1)} />
             )}
@@ -3256,22 +3230,21 @@ export function EmployeeForm({
         <div ref={passportInsideRef} className="space-y-6">
           <FormSection
             title="Passport Data (INSIDE)"
-            icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Camera className="w-5 h-5 text-tme-blue" />}
             stepNumber={displayedStepNumber(3)}
           >
             <div className="space-y-4">
               {!isReview && (
                 <div
-                  className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ backgroundColor: '#EBF4FF' }}
+                  className="flex items-start gap-3 p-4 rounded-lg bg-[#EBF4FF]"
                 >
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                  <div className="text-sm text-tme-blue">
                     <p className="font-medium">Upload your passport inside pages (open/spread showing data page + opposite page)</p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       Your details will be automatically extracted from this page.
                     </p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
                       {isMobile
                         ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
@@ -3317,8 +3290,8 @@ export function EmployeeForm({
               )}
 
               {shouldOfferManualReview(insideRejectionCount) && insideUI.file && !passportPages.insidePages?.validated && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-                  <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-3.5 mt-3 space-y-3">
+                  <p className="text-sm text-tme-blue">
                     <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this photo is your passport inside-pages spread, you can submit it for manual review.
                   </p>
                   <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
@@ -3331,15 +3304,14 @@ export function EmployeeForm({
                     <span>I confirm this is my passport inside pages (data page + opposite page) photographed spread open.</span>
                   </label>
                   <div className="flex justify-end">
-                    <button
-                      type="button"
+                    <Button
+                      tone="secondary"
                       onClick={handleInsideManualReview}
                       disabled={!insideManualReviewConfirmed || insideManualReviewSubmitting}
-                      className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{ backgroundColor: TME_COLORS.primary }}
+                      busy={insideManualReviewSubmitting}
                     >
                       {insideManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -3352,8 +3324,8 @@ export function EmployeeForm({
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent" />
                 <div>
-                  <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Reading passport data...</p>
-                  <p className="text-xs text-gray-500 mt-0.5">Extracting your details from the passport. This may take a few seconds.</p>
+                  <p className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">Reading passport data...</p>
+                  <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">Extracting your details from the passport. This may take a few seconds.</p>
                 </div>
               </div>
             </div>
@@ -3363,9 +3335,9 @@ export function EmployeeForm({
           {passportDataReady && !extractingPassport && (
           <FormSection
             title="Personal Details"
-            icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<User className="w-5 h-5 text-tme-blue" />}
           >
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm sm:text-[13px] text-gray-600 mb-4">
               These details were auto-filled from your passport. Please review and correct if needed.
             </p>
             <div className="space-y-4">
@@ -3481,7 +3453,7 @@ export function EmployeeForm({
                     }}
                     className="w-4 h-4 rounded border-gray-300"
                   />
-                  <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                  <span className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">
                     I have another nationality
                   </span>
                 </label>
@@ -3513,7 +3485,7 @@ export function EmployeeForm({
                     }}
                     className="w-4 h-4 rounded border-gray-300"
                   />
-                  <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                  <span className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">
                     I had a previous nationality
                   </span>
                 </label>
@@ -3537,18 +3509,17 @@ export function EmployeeForm({
           {requiresAdditionalPage && (
             <FormSection
               title={additionalPageCopy.title}
-              icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+              icon={<Camera className="w-5 h-5 text-tme-blue" />}
             >
               <div className="space-y-4">
                 {!isReview && (
                   <div
-                    className="flex items-start gap-3 p-4 rounded-lg"
-                    style={{ backgroundColor: '#EBF4FF' }}
+                    className="flex items-start gap-3 p-4 rounded-lg bg-[#EBF4FF]"
                   >
-                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                    <div className="text-sm text-tme-blue">
                       <p className="font-medium">{additionalPageCopy.heading}</p>
-                      <p className="mt-1 text-xs text-gray-600">
+                      <p className="mt-1 text-sm sm:text-[13px] text-gray-600">
                         {additionalPageCopy.sub}
                       </p>
                       <SampleImageToggle imageSrc={additionalPageCopy.sampleSrc} altText={additionalPageCopy.sampleAlt} label="See example photo" />
@@ -3615,8 +3586,8 @@ export function EmployeeForm({
                     user with an unusual layout (handwritten, photocopy,
                     addendum sheet) isn't permanently blocked. */}
                 {!additionalPageNotApplicable && shouldOfferManualReview(additionalRejectionCount) && additionalPageUI.file && !passportPages.additionalPage?.validated && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-                    <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-3.5 mt-3 space-y-3">
+                    <p className="text-sm text-tme-blue">
                       <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your passport&apos;s additional page, you can submit it for manual review.
                     </p>
                     <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
@@ -3629,15 +3600,14 @@ export function EmployeeForm({
                       <span>I confirm this is my {additionalPageCopy.manualNoun}. I understand a TME team member will verify it manually.</span>
                     </label>
                     <div className="flex justify-end">
-                      <button
-                        type="button"
+                      <Button
+                        tone="secondary"
                         onClick={handleAdditionalManualReview}
                         disabled={!additionalManualReviewConfirmed || additionalManualReviewSubmitting}
-                        className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ backgroundColor: TME_COLORS.primary }}
+                        busy={additionalManualReviewSubmitting}
                       >
                         {additionalManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -3648,18 +3618,17 @@ export function EmployeeForm({
           {isPakistaniNationality && isInsidePagesUploaded && passportDataReady && (
             <FormSection
               title="Pakistani National ID (CNIC/NICOP)"
-              icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+              icon={<CreditCard className="w-5 h-5 text-tme-blue" />}
             >
               <div className="space-y-4">
                 {!isReview && (
                   <div
-                    className="flex items-start gap-3 p-4 rounded-lg"
-                    style={{ backgroundColor: '#EBF4FF' }}
+                    className="flex items-start gap-3 p-4 rounded-lg bg-[#EBF4FF]"
                   >
-                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                    <div className="text-sm text-tme-blue">
                       <p className="font-medium">Pakistani nationals are required to provide a copy of their National ID Card (CNIC/NICOP) with chip</p>
-                      <p className="mt-1 text-xs text-gray-600">
+                      <p className="mt-1 text-sm sm:text-[13px] text-gray-600">
                         Please upload the front and back of your Pakistan National Identity Card. Your details will be automatically extracted.
                       </p>
                     </div>
@@ -3670,17 +3639,17 @@ export function EmployeeForm({
                 {!isReview && (
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <div className="text-center">
-                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                      <p className="text-sm font-medium mb-1 text-tme-blue">Front example</p>
                       <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 object-contain" />
+                        <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 max-w-full object-contain" />
                       </div>
                     </div>
                     <div className="text-center">
-                      <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                      <p className="text-sm font-medium mb-1 text-tme-blue">Back example</p>
                       <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 object-contain" />
+                        <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 max-w-full object-contain" />
                       </div>
                     </div>
                   </div>
@@ -3689,7 +3658,7 @@ export function EmployeeForm({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
                   {/* Front */}
                   <div className="flex flex-col">
-                    <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                    <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Front</p>
                       <UploadSlot
                         label=""
                         description="Front of Pakistan ID"
@@ -3714,7 +3683,7 @@ export function EmployeeForm({
 
                   {/* Back */}
                   <div className="flex flex-col">
-                    <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                    <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Back</p>
                       <UploadSlot
                         label=""
                         description="Back of Pakistan ID"
@@ -3772,14 +3741,14 @@ export function EmployeeForm({
           {showVisaCategoryPicker && (
             <FormSection
               title="UAE Visa Status"
-              icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+              icon={<FileText className="w-5 h-5 text-tme-blue" />}
               /* Family-sponsored hides the previous-docs section below (which
                  normally carries the step-4 badge), so surface the badge here
                  instead so the indicator numbering stays consistent. */
               stepNumber={isFamilySponsored ? displayedStepNumber(4) : undefined}
             >
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">
+                <p className="text-sm sm:text-[13px] text-gray-600">
                   {isFamilySponsored
                     ? existingVisaOnFile && !visaOnFileChanged
                       ? 'Please confirm the visa you currently hold (sponsored by your family member).'
@@ -3818,7 +3787,7 @@ export function EmployeeForm({
                       onChange={(val) => setValue('visa_arrival_date', val)}
                       required
                     />
-                    <p className="text-xs text-gray-500">
+                    <p className="text-sm sm:text-[13px] text-gray-600">
                       This is the date you entered the UAE on your arrival visa. It will be included in the confirmation document.
                     </p>
                   </div>
@@ -3826,7 +3795,7 @@ export function EmployeeForm({
 
                 {showVisaDocumentUpload && existingVisaOnFile && !visaOnFileChanged && existingDocs?.visa && (
                   <div className="space-y-3">
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm sm:text-[13px] text-gray-600">
                       This is the visa we have on file. Please check that it is still your current visa.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3846,32 +3815,31 @@ export function EmployeeForm({
                         />
                         <div>
                           <span className="text-sm font-medium text-gray-800">This is still my current visa</span>
-                          <p className="text-xs text-gray-500 mt-0.5">My visa has not been renewed, replaced, or cancelled since this copy.</p>
+                          <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">My visa has not been renewed, replaced, or cancelled since this copy.</p>
                         </div>
                       </label>
                     </div>
-                    <button
-                      type="button"
+                    <Button
+                      tone="plain"
                       onClick={() => {
                         setVisaOnFileChanged(true);
                         setVisaOnFileConfirmed(false);
                         visaUnchangedRef.current = false;
                         void saveDocRefs(buildDocRefs());
                       }}
-                      className="text-sm text-red-600 hover:text-red-700 font-medium underline"
+                      className="self-start"
                     >
                       My visa has changed. I need to upload a new copy
-                    </button>
+                    </Button>
                   </div>
                 )}
 
                 {showVisaDocumentUpload && !(existingVisaOnFile && !visaOnFileChanged) && (
                   <div className="space-y-3">
                     <div
-                      className="flex items-start gap-3 p-4 rounded-lg"
-                      style={{ backgroundColor: visaUploadRule === 'mandatory' ? '#FEF3C7' : '#F3F4F6' }}
+                      className={`flex items-start gap-3 p-4 rounded-lg ${visaUploadRule === 'mandatory' ? 'bg-[#FEF3C7]' : 'bg-[#F3F4F6]'}`}
                     >
-                      <Info className={`w-5 h-5 flex-shrink-0 mt-0.5 ${visaUploadRule === 'mandatory' ? 'text-amber-600' : 'text-gray-500'}`} />
+                      <Info className={`w-5 h-5 flex-shrink-0 mt-0.5 ${visaUploadRule === 'mandatory' ? 'text-amber-600' : 'text-gray-600'}`} />
                       <div className={`text-sm ${visaUploadRule === 'mandatory' ? 'text-amber-800' : 'text-gray-700'}`}>
                         <p className="font-medium">
                           {visaUploadRule === 'mandatory'
@@ -3937,12 +3905,12 @@ export function EmployeeForm({
           {!docsOnFileFlow && !isFamilySponsored && (
           <FormSection
             title="UAE Visa and Emirates ID"
-            icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<CreditCard className="w-5 h-5 text-tme-blue" />}
             stepNumber={displayedStepNumber(4)}
           >
             <div className="space-y-4">
-              <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-                Did you previously hold a UAE visa and Emirates ID? <span className="text-red-500">*</span>
+              <p className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">
+                Did you previously hold a UAE visa and Emirates ID? <span className="text-tme-red">*</span>
               </p>
               <div className="flex items-center gap-6">
                 {([
@@ -3965,18 +3933,17 @@ export function EmployeeForm({
                           setValue('eid_expiry_date', undefined);
                         }
                       }}
-                      className="w-4 h-4"
-                      style={{ accentColor: TME_COLORS.primary }}
+                      className="w-4 h-4 accent-[#243F7B]"
                     />
-                    <span className="text-sm" style={{ color: TME_COLORS.primary }}>{opt.label}</span>
+                    <span className="text-sm text-tme-blue">{opt.label}</span>
                   </label>
                 ))}
               </div>
 
               {employerSaysInUae && hasPreviousUaeDocs === false && !submission.is_same_person && (
-                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ backgroundColor: '#FEF3C7', border: '1px solid #F59E0B' }}>
-                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#92400E' }} />
-                  <p className="text-xs" style={{ color: '#92400E' }}>
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-[#FEF3C7] border border-[#F59E0B]">
+                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-[#92400E]" />
+                  <p className="text-sm text-[#92400E]">
                     Your employer indicated that you are currently in the UAE.
                   </p>
                 </div>
@@ -3987,14 +3954,13 @@ export function EmployeeForm({
                   {/* Combined guidance — applies to both the visa and the EID uploads below */}
                   {!isReview && (
                     <div
-                      className="flex items-start gap-3 p-4 rounded-lg"
-                      style={{ backgroundColor: '#EBF4FF' }}
+                      className="flex items-start gap-3 p-4 rounded-lg bg-[#EBF4FF]"
                     >
-                      <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                      <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                      <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                      <div className="text-sm text-tme-blue">
                         <p className="font-medium">If you have a copy, please upload your previous UAE visa and the front and back of your Emirates ID.</p>
 
-                        <p className="mt-1 text-xs text-gray-600">
+                        <p className="mt-1 text-sm sm:text-[13px] text-gray-600">
                           UAE authorities may request these during visa processing. Expired documents are accepted.
                         </p>
                       </div>
@@ -4004,10 +3970,10 @@ export function EmployeeForm({
                   {/* Previous UAE visa upload — accepts PDF/image, AI-validated loosely.
                       Uses UploadSlot for visual consistency with the EID drop-zones below. */}
                   <div className="space-y-3">
-                    <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Previous UAE visa</p>
+                    <p className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">Previous UAE visa</p>
                     {!isReview && (
                       <div className="text-center mb-2">
-                        <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Example</p>
+                        <p className="text-sm font-medium mb-1 text-tme-blue">Example</p>
                         <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src="/samples/visa-example.png" alt="Example UAE visa" className="h-32 sm:h-40 object-contain" />
@@ -4043,14 +4009,14 @@ export function EmployeeForm({
                   {!isReview && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                       <div className="text-center">
-                        <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                        <p className="text-sm font-medium mb-1 text-tme-blue">Front example</p>
                         <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src="/samples/eid-front-example.png" alt="Example Emirates ID front" className="h-32 sm:h-40 object-contain" />
                         </div>
                       </div>
                       <div className="text-center">
-                        <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                        <p className="text-sm font-medium mb-1 text-tme-blue">Back example</p>
                         <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src="/samples/eid-back-example.png" alt="Example Emirates ID back" className="h-32 sm:h-40 object-contain" />
@@ -4062,7 +4028,7 @@ export function EmployeeForm({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
                     {/* EID Front */}
                     <div className="flex flex-col">
-                      <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                      <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Front</p>
                         <UploadSlot
                           label=""
                           description="Front of Emirates ID"
@@ -4090,7 +4056,7 @@ export function EmployeeForm({
 
                     {/* EID Back */}
                     <div className="flex flex-col">
-                      <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                      <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Back</p>
                         <UploadSlot
                           label=""
                           description="Back of Emirates ID"
@@ -4124,7 +4090,7 @@ export function EmployeeForm({
                   {/* Show extracted EID data */}
                   {watch('eid_number') && (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-emerald-900">
+                      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-sm text-emerald-900">
                         <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
                           <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
                           EID extracted
@@ -4150,11 +4116,11 @@ export function EmployeeForm({
           {isFamilySponsored && (
             <FormSection
               title="Your Emirates ID"
-              icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+              icon={<CreditCard className="w-5 h-5 text-tme-blue" />}
             >
               {existingEidOnFile && !eidOnFileChanged && existingDocs?.eid_front ? (
               <div className="space-y-3">
-                <p className="text-sm text-gray-600">
+                <p className="text-sm sm:text-[13px] text-gray-600">
                   This is the Emirates ID we have on file. Please check that it is still your current Emirates ID.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4181,26 +4147,26 @@ export function EmployeeForm({
                     />
                     <div>
                       <span className="text-sm font-medium text-gray-800">This is still my current Emirates ID</span>
-                      <p className="text-xs text-gray-500 mt-0.5">My Emirates ID has not been renewed, replaced, or lost since this copy.</p>
+                      <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">My Emirates ID has not been renewed, replaced, or lost since this copy.</p>
                     </div>
                   </label>
                 </div>
-                <button
-                  type="button"
+                <Button
+                  tone="plain"
                   onClick={() => {
                     setEidOnFileChanged(true);
                     setEidOnFileConfirmed(false);
                     eidUnchangedRef.current = false;
                     void saveDocRefs(buildDocRefs());
                   }}
-                  className="text-sm text-red-600 hover:text-red-700 font-medium underline"
+                  className="self-start"
                 >
                   My Emirates ID has changed. I need to upload a new copy
-                </button>
+                </Button>
               </div>
               ) : (
               <div className="space-y-4">
-                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#FEF3C7' }}>
+                <div className="flex items-start gap-3 p-4 rounded-lg bg-[#FEF3C7]">
                   <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
                   <p className="text-sm text-amber-800 font-medium">
                     Please upload the front and back of your own Emirates ID. This is required for your
@@ -4211,7 +4177,7 @@ export function EmployeeForm({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
                   {/* Applicant EID Front */}
                   <div className="flex flex-col">
-                    <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                    <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Front</p>
                     <UploadSlot
                       label=""
                       description="Front of your Emirates ID"
@@ -4239,7 +4205,7 @@ export function EmployeeForm({
 
                   {/* Applicant EID Back */}
                   <div className="flex flex-col">
-                    <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                    <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Back</p>
                     <UploadSlot
                       label=""
                       description="Back of your Emirates ID"
@@ -4275,9 +4241,9 @@ export function EmployeeForm({
           )}
 
           {!employerVisaInUAE && !isFamilySponsored && hasPreviousUaeDocs === false && (
-            <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-600">
+            <div className="bg-gray-50 rounded-xl p-4 text-sm sm:text-[13px] text-gray-600">
               <div className="flex items-center gap-2">
-                <Info className="w-4 h-4 text-gray-400" />
+                <Info className="w-4 h-4 text-gray-600 shrink-0" aria-hidden />
                 No additional identity or visa documents are required. You can continue to the next step.
               </div>
             </div>
@@ -4301,7 +4267,7 @@ export function EmployeeForm({
         <div ref={familyRef}>
           <FormSection
             title="Family Details"
-            icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Users className="w-5 h-5 text-tme-blue" />}
             stepNumber={displayedStepNumber(5)}
           >
             <div className="space-y-4">
@@ -4378,7 +4344,7 @@ export function EmployeeForm({
           {/* Home Country Address */}
           <FormSection
             title="Home Country Address"
-            icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<MapPin className="w-5 h-5 text-tme-blue" />}
             stepNumber={displayedStepNumber(6)}
           >
             <div className="space-y-4">
@@ -4428,7 +4394,7 @@ export function EmployeeForm({
           {/* UAE Address */}
           <FormSection
             title="UAE Address"
-            icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<MapPin className="w-5 h-5 text-tme-blue" />}
           >
             <div className="space-y-4">
               {/* On a locked renewal the employee MUST be in the UAE — no
@@ -4437,7 +4403,7 @@ export function EmployeeForm({
                   the checkbox stays so applicants abroad can skip the UAE
                   address fields. */}
               {uaePresenceNotRequired ? (
-                <p className="text-xs text-gray-600">Please provide your UAE home address.</p>
+                <p className="text-sm sm:text-[13px] text-gray-600">Please provide your UAE home address.</p>
               ) : !uaePresenceLocked ? (
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -4458,14 +4424,14 @@ export function EmployeeForm({
                     }}
                     className="w-4 h-4 rounded border-gray-300"
                   />
-                  <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                  <span className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">
                     Applicant is currently in the UAE
                   </span>
                 </label>
               ) : (
-                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <p className="text-xs" style={{ color: TME_COLORS.primary }}>
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-[#EBF4FF]">
+                  <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-tme-blue" />
+                  <p className="text-sm text-tme-blue">
                     {lockedUaePresenceNote(submission.prefill_employer_data)}
                   </p>
                 </div>
@@ -4514,7 +4480,7 @@ export function EmployeeForm({
               fields. Still only required when the applicant is in the UAE. */}
           <FormSection
             title="UAE Mobile"
-            icon={<Phone className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Phone className="w-5 h-5 text-tme-blue" />}
           >
             <PhoneInput
               label="UAE Mobile"
@@ -4546,7 +4512,7 @@ export function EmployeeForm({
           {/* Email */}
           <FormSection
             title="Email"
-            icon={<Mail className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Mail className="w-5 h-5 text-tme-blue" />}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
@@ -4569,7 +4535,7 @@ export function EmployeeForm({
                   disabled={sameEmails}
                   {...register('company_email')}
                 />
-                <label className="flex items-center gap-2 mt-2 text-sm text-gray-600">
+                <label className="flex items-center gap-2 mt-2 text-sm sm:text-[13px] text-gray-600">
                   <input
                     type="checkbox"
                     {...register('same_emails')}
@@ -4602,7 +4568,7 @@ export function EmployeeForm({
           {/* Education & Languages */}
           <FormSection
             title="Education & Languages"
-            icon={<GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<GraduationCap className="w-5 h-5 text-tme-blue" />}
             stepNumber={displayedStepNumber(7)}
           >
             <div className="space-y-4">
@@ -4633,7 +4599,7 @@ export function EmployeeForm({
 
               {showDetExtendedBlock && (
                 <>
-                  <p className="text-xs -mt-2" style={{ color: TME_COLORS.primary }}>
+                  <p className="text-sm -mt-2 text-tme-blue">
                     Additional details required for DET work permits.
                   </p>
 
@@ -4795,14 +4761,13 @@ export function EmployeeForm({
                       }}
                     />
                   ) : (
-                    <button
-                      type="button"
+                    <Button
+                      tone="ghost"
                       onClick={() => setShowAdditionalEducation(true)}
-                      className="flex items-center gap-1.5 text-sm font-medium transition-colors hover:underline"
-                      style={{ color: TME_COLORS.primary }}
+                      className="-ml-3"
                     >
                       + Add additional education document
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}
@@ -4814,16 +4779,14 @@ export function EmployeeForm({
           {!bankLocked && (
           <FormSection
             title="Bank Details"
-            icon={<Building2 className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Building2 className="w-5 h-5 text-tme-blue" />}
           >
             <div className="space-y-4">
               <div className="space-y-2">
                 <label
-                  className="flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all duration-200"
-                  style={{
-                    borderColor: hasUAEBank === true ? TME_COLORS.primary : '#e5e7eb',
-                    backgroundColor: hasUAEBank === true ? '#f0f4ff' : 'transparent',
-                  }}
+                  className={`flex items-center gap-3 p-3 min-h-11 sm:min-h-0 rounded-lg border-2 cursor-pointer transition-all duration-200 ${
+                    hasUAEBank === true ? 'border-tme-blue bg-[#f0f4ff]' : 'border-gray-200 bg-transparent'
+                  }`}
                 >
                   <input
                     type="radio"
@@ -4832,14 +4795,12 @@ export function EmployeeForm({
                     onChange={() => setValue('has_uae_bank', true)}
                     className="accent-[#243F7B]"
                   />
-                  <span className="text-sm text-gray-700">I have a UAE bank account</span>
+                  <span className="text-[15px] sm:text-sm text-gray-800">I have a UAE bank account</span>
                 </label>
                 <label
-                  className="flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all duration-200"
-                  style={{
-                    borderColor: hasUAEBank === false ? TME_COLORS.primary : '#e5e7eb',
-                    backgroundColor: hasUAEBank === false ? '#f0f4ff' : 'transparent',
-                  }}
+                  className={`flex items-center gap-3 p-3 min-h-11 sm:min-h-0 rounded-lg border-2 cursor-pointer transition-all duration-200 ${
+                    hasUAEBank === false ? 'border-tme-blue bg-[#f0f4ff]' : 'border-gray-200 bg-transparent'
+                  }`}
                 >
                   <input
                     type="radio"
@@ -4859,7 +4820,7 @@ export function EmployeeForm({
                     }}
                     className="accent-[#243F7B]"
                   />
-                  <span className="text-sm text-gray-700">I do not have a UAE bank account</span>
+                  <span className="text-[15px] sm:text-sm text-gray-800">I do not have a UAE bank account</span>
                 </label>
               </div>
 
@@ -4944,7 +4905,7 @@ export function EmployeeForm({
                         />
                       </div>
                       {routingIbanBankMismatch(bankRoutingCode, bankIban) && (
-                        <p className="text-sm text-red-600">
+                        <p role="alert" className="text-sm sm:text-[13px] font-medium text-tme-red">
                           The selected bank&apos;s routing code (bank {bankCodeFromRouting(bankRoutingCode)})
                           doesn&apos;t match your IBAN (bank {ibanBankCode(bankIban)}). Re-check your IBAN or
                           your bank selection — payroll will reject a mismatch.
@@ -4994,10 +4955,10 @@ export function EmployeeForm({
           {/* Other Information */}
           <FormSection
             title="Other Information"
-            icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<FileText className="w-5 h-5 text-tme-blue" />}
           >
             <textarea
-              className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 min-h-[100px]"
+              className="w-full px-3.5 py-2.5 sm:px-3 sm:py-2 text-base sm:text-sm text-gray-900 rounded-[10px] sm:rounded-lg border-2 sm:border border-gray-200 sm:border-gray-300 focus:border-tme-blue focus:outline-none sm:focus:ring-2 sm:focus:ring-tme-blue/15 transition-colors duration-200 min-h-[100px] placeholder:text-gray-500"
               placeholder="Any additional information you would like to provide..."
               {...register('other_information')}
             />
@@ -5021,13 +4982,13 @@ export function EmployeeForm({
           {/* Sponsor identity documents */}
           <FormSection
             title="Sponsor Documents"
-            icon={<ShieldCheck className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<ShieldCheck className="w-5 h-5 text-tme-blue" />}
             stepNumber={displayedStepNumber(9)}
           >
             <div className="space-y-4">
-              <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+              <div className="flex items-start gap-3 p-4 rounded-lg bg-[#EBF4FF]">
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                <p className="text-sm text-tme-blue">
                   {existingSponsorDocsOnFile && !sponsorDocsOnFileChanged
                     ? 'Your residence visa is sponsored by a family member. These are your sponsor\u2019s documents we have on file. Please check that they are still current.'
                     : <>Your residence visa is sponsored by a family member — please upload your sponsor&apos;s documents below.</>}
@@ -5056,37 +5017,36 @@ export function EmployeeForm({
                       />
                       <div>
                         <span className="text-sm font-medium text-gray-800">These are still my sponsor&apos;s current documents</span>
-                        <p className="text-xs text-gray-500 mt-0.5">My sponsor&apos;s passport, visa and Emirates ID have not been renewed, replaced, or lost since these copies.</p>
+                        <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">My sponsor&apos;s passport, visa and Emirates ID have not been renewed, replaced, or lost since these copies.</p>
                       </div>
                     </label>
                   </div>
-                  <button
-                    type="button"
+                  <Button
+                    tone="plain"
                     onClick={() => {
                       setSponsorDocsOnFileChanged(true);
                       setSponsorDocsOnFileConfirmed(false);
                       sponsorDocsUnchangedRef.current = false;
                       void saveDocRefs(buildDocRefs());
                     }}
-                    className="text-sm text-red-600 hover:text-red-700 font-medium underline"
+                    className="self-start"
                   >
                     My sponsor&apos;s documents have changed. I need to upload new copies
-                  </button>
+                  </Button>
                 </div>
               )}
 
               {!(existingSponsorDocsOnFile && !sponsorDocsOnFileChanged) && (<>
               {/* Sponsor passport */}
               <div className="space-y-2">
-                <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Sponsor&apos;s Passport <span className="text-red-500">*</span></p>
+                <p className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">Sponsor&apos;s Passport <span className="text-tme-red">*</span></p>
                 <div
-                  className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ backgroundColor: '#EBF4FF' }}
+                  className="flex items-start gap-3 p-4 rounded-lg bg-[#EBF4FF]"
                 >
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                  <div className="text-sm text-tme-blue">
                     <p className="font-medium">Upload your sponsor&apos;s passport — the data page with their photo.</p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       PDF or a clear photo. A crop of just the photo may be rejected.
                     </p>
                     <SampleImageToggle imageSrc="/samples/passport-inside-example.png" altText="Example sponsor passport data page with photo" label="See example photo" imageClassName="w-64 h-auto" />
@@ -5117,8 +5077,8 @@ export function EmployeeForm({
                 />
                 {sponsorPassportScan.scannerModal}
                 {shouldOfferManualReview(sponsorPassportRejectionCount) && sponsorPassportUI.file && !sponsorPassportDoc?.validated && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-                    <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-3.5 mt-3 space-y-3">
+                    <p className="text-sm text-tme-blue">
                       <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your sponsor&apos;s passport, you can submit it for manual review.
                     </p>
                     <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
@@ -5131,15 +5091,14 @@ export function EmployeeForm({
                       <span>I confirm this is my sponsor&apos;s passport. I understand a TME team member will verify it manually.</span>
                     </label>
                     <div className="flex justify-end">
-                      <button
-                        type="button"
+                      <Button
+                        tone="secondary"
                         onClick={handleSponsorPassportManualReview}
                         disabled={!sponsorPassportManualReviewConfirmed || sponsorPassportManualReviewSubmitting}
-                        className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ backgroundColor: TME_COLORS.primary }}
+                        busy={sponsorPassportManualReviewSubmitting}
                       >
                         {sponsorPassportManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -5147,15 +5106,14 @@ export function EmployeeForm({
 
               {/* Sponsor visa */}
               <div className="space-y-2">
-                <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Sponsor&apos;s Residence Visa <span className="text-red-500">*</span></p>
+                <p className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">Sponsor&apos;s Residence Visa <span className="text-tme-red">*</span></p>
                 <div
-                  className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ backgroundColor: '#EBF4FF' }}
+                  className="flex items-start gap-3 p-4 rounded-lg bg-[#EBF4FF]"
                 >
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                  <div className="text-sm text-tme-blue">
                     <p className="font-medium">Upload your sponsor&apos;s UAE residence visa.</p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       The visa showing their name and visa details.
                     </p>
                     <SampleImageToggle imageSrc="/samples/visa-example.png" altText="Example sponsor UAE residence visa" label="See example photo" imageClassName="w-64 h-auto" />
@@ -5183,8 +5141,8 @@ export function EmployeeForm({
                 />
                 {sponsorVisaScan.scannerModal}
                 {shouldOfferManualReview(sponsorVisaRejectionCount) && sponsorVisaUI.file && !sponsorVisaDoc?.validated && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-                    <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-3.5 mt-3 space-y-3">
+                    <p className="text-sm text-tme-blue">
                       <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is your sponsor&apos;s residence visa, you can submit it for manual review.
                     </p>
                     <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
@@ -5197,31 +5155,29 @@ export function EmployeeForm({
                       <span>I confirm this is my sponsor&apos;s UAE residence visa. I understand a TME team member will verify it manually.</span>
                     </label>
                     <div className="flex justify-end">
-                      <button
-                        type="button"
+                      <Button
+                        tone="secondary"
                         onClick={handleSponsorVisaManualReview}
                         disabled={!sponsorVisaManualReviewConfirmed || sponsorVisaManualReviewSubmitting}
-                        className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ backgroundColor: TME_COLORS.primary }}
+                        busy={sponsorVisaManualReviewSubmitting}
                       >
                         {sponsorVisaManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
               </div>
 
               {/* Sponsor EID front + back */}
-              <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Sponsor&apos;s Emirates ID <span className="text-red-500">*</span></p>
+              <p className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">Sponsor&apos;s Emirates ID <span className="text-tme-red">*</span></p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
                 <div className="flex flex-col">
-                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                  <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Front</p>
                   <div
-                    className="flex items-start gap-3 p-4 rounded-lg mb-2"
-                    style={{ backgroundColor: '#EBF4FF' }}
+                    className="flex items-start gap-3 p-4 rounded-lg mb-2 bg-[#EBF4FF]"
                   >
-                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                    <div className="text-sm text-tme-blue">
                       <p className="font-medium">Front of your sponsor&apos;s Emirates ID.</p>
                       <SampleImageToggle imageSrc="/samples/eid-front-example.png" altText="Example front of sponsor's Emirates ID" label="See example photo" imageClassName="max-w-full h-auto" />
                     </div>
@@ -5248,8 +5204,8 @@ export function EmployeeForm({
                   />
                   {sponsorEidFrontScan.scannerModal}
                   {shouldOfferManualReview(sponsorEidFrontRejectionCount) && sponsorEidFrontUI.file && !sponsorEidFrontDoc?.validated && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-                      <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-3.5 mt-3 space-y-3">
+                      <p className="text-sm text-tme-blue">
                         <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is the front of your sponsor&apos;s Emirates ID, you can submit it for manual review.
                       </p>
                       <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
@@ -5262,27 +5218,25 @@ export function EmployeeForm({
                         <span>I confirm this is the front of my sponsor&apos;s Emirates ID. I understand a TME team member will verify it manually.</span>
                       </label>
                       <div className="flex justify-end">
-                        <button
-                          type="button"
+                        <Button
+                          tone="secondary"
                           onClick={handleSponsorEidFrontManualReview}
                           disabled={!sponsorEidFrontManualReviewConfirmed || sponsorEidFrontManualReviewSubmitting}
-                          className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                          style={{ backgroundColor: TME_COLORS.primary }}
+                          busy={sponsorEidFrontManualReviewSubmitting}
                         >
                           {sponsorEidFrontManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
                 </div>
                 <div className="flex flex-col">
-                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                  <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Back</p>
                   <div
-                    className="flex items-start gap-3 p-4 rounded-lg mb-2"
-                    style={{ backgroundColor: '#EBF4FF' }}
+                    className="flex items-start gap-3 p-4 rounded-lg mb-2 bg-[#EBF4FF]"
                   >
-                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" />
+                    <div className="text-sm text-tme-blue">
                       <p className="font-medium">Back of your sponsor&apos;s Emirates ID.</p>
                       <SampleImageToggle imageSrc="/samples/eid-back-example.png" altText="Example back of sponsor's Emirates ID" label="See example photo" imageClassName="max-w-full h-auto" />
                     </div>
@@ -5309,8 +5263,8 @@ export function EmployeeForm({
                   />
                   {sponsorEidBackScan.scannerModal}
                   {shouldOfferManualReview(sponsorEidBackRejectionCount) && sponsorEidBackUI.file && !sponsorEidBackDoc?.validated && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-                      <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-3.5 mt-3 space-y-3">
+                      <p className="text-sm text-tme-blue">
                         <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this is the back of your sponsor&apos;s Emirates ID, you can submit it for manual review.
                       </p>
                       <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
@@ -5323,15 +5277,14 @@ export function EmployeeForm({
                         <span>I confirm this is the back of my sponsor&apos;s Emirates ID. I understand a TME team member will verify it manually.</span>
                       </label>
                       <div className="flex justify-end">
-                        <button
-                          type="button"
+                        <Button
+                          tone="secondary"
                           onClick={handleSponsorEidBackManualReview}
                           disabled={!sponsorEidBackManualReviewConfirmed || sponsorEidBackManualReviewSubmitting}
-                          className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                          style={{ backgroundColor: TME_COLORS.primary }}
+                          busy={sponsorEidBackManualReviewSubmitting}
                         >
                           {sponsorEidBackManualReviewSubmitting ? 'Submitting...' : 'Submit for manual review'}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -5344,7 +5297,7 @@ export function EmployeeForm({
           {/* Sponsor metadata — NOC merge fields */}
           <FormSection
             title="Sponsor Details"
-            icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<User className="w-5 h-5 text-tme-blue" />}
           >
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -5393,10 +5346,10 @@ export function EmployeeForm({
           {/* Inline NOC letter review + sponsor signature */}
           <FormSection
             title="No Objection Certificate (NOC)"
-            icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<FileSignature className="w-5 h-5 text-tme-blue" />}
           >
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">
+              <p className="text-sm sm:text-[13px] text-gray-600">
                 Please review the No Objection Certificate below. The sponsor must read and sign it to
                 confirm they have no objection to you working at the company.
               </p>
@@ -5426,9 +5379,7 @@ export function EmployeeForm({
                 label="Sponsor Signature (NOC)"
                 initialValue={sponsorSignature}
               />
-              {sponsorError && (
-                <p className="text-sm text-red-500">{sponsorError}</p>
-              )}
+              <FieldError>{sponsorError}</FieldError>
             </div>
           </FormSection>
 
@@ -5436,19 +5387,15 @@ export function EmployeeForm({
               Back returns to Review & Sign (8); the form is submitted via the
               Submit button below (the form's only submit). */}
           {viewingStep === 9 && (
-            <div className="flex justify-between items-center mt-6">
-              <button
-                type="button"
-                onClick={() => setViewingStep(8)}
-                className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border-2 hover:bg-gray-50"
-                style={{ color: TME_COLORS.primary, borderColor: TME_COLORS.primary }}
-              >
-                <ChevronLeft className="w-4 h-4" />
+            <FormFooter className="mt-6">
+              <Button tone="plain" onClick={() => setViewingStep(8)}>
+                <ChevronLeft className="w-[18px] h-[18px]" aria-hidden />
                 Back
-              </button>
+              </Button>
               <Button
                 type="submit"
-                loading={isSubmitting}
+                tone="primary"
+                busy={isSubmitting}
                 size="lg"
               >
                 {submission.onboarding_type === 'renewal'
@@ -5459,7 +5406,7 @@ export function EmployeeForm({
                   ? 'Submit Application Form'
                   : 'Submit Onboarding Form'}
               </Button>
-            </div>
+            </FormFooter>
           )}
         </div>
       </RevealSection>
@@ -5474,11 +5421,11 @@ export function EmployeeForm({
           {!reuseEmployerSignature && (
             <FormSection
               title="Review & Sign"
-              icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+              icon={<FileSignature className="w-5 h-5 text-tme-blue" />}
               stepNumber={displayedStepNumber(8)}
             >
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">
+                <p className="text-sm sm:text-[13px] text-gray-600">
                   By signing below, I confirm that the information provided above is accurate and complete.
                 </p>
                 <SignaturePad
@@ -5487,38 +5434,26 @@ export function EmployeeForm({
                   label={isPartnerInvestorTrack ? 'Applicant Signature' : 'Employee Signature'}
                   initialValue={signature}
                 />
-                {signatureError && (
-                  <p className="text-sm text-red-500">{signatureError}</p>
-                )}
+                <FieldError>{signatureError}</FieldError>
               </div>
             </FormSection>
           )}
 
           {reuseEmployerSignature && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-              <div className="flex items-center gap-2 mb-2">
-                <span
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                  style={{ backgroundColor: TME_COLORS.primary }}
-                >
-                  7
-                </span>
-                <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
-                  Signature
-                </h2>
-              </div>
-              <p className="text-sm text-blue-700">
+            <Card title="Signature">
+              <p className="text-[15px] sm:text-sm leading-normal text-gray-700">
                 Your signature from the employer section will be used for both sections.
               </p>
-            </div>
+            </Card>
           )}
 
           {/* Non-family: Review & Sign is the FINAL step — submit here. */}
           {!isFamilySponsored && (
-            <div className="flex justify-end mt-6">
+            <FormFooter className="mt-6">
               <Button
                 type="submit"
-                loading={isSubmitting}
+                tone="primary"
+                busy={isSubmitting}
                 size="lg"
               >
                 {submission.onboarding_type === 'renewal'
@@ -5529,7 +5464,7 @@ export function EmployeeForm({
                   ? 'Submit Application Form'
                   : 'Submit Onboarding Form'}
               </Button>
-            </div>
+            </FormFooter>
           )}
 
           {/* Family-sponsored: the sponsor signs the NOC AFTER review, so this

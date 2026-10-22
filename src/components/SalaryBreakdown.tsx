@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useId } from 'react';
 import {
-  TME_COLORS,
   SALARY_BREAKDOWN_EXPLANATION,
   PAYROLL_OTHER_TYPE_OPTIONS,
   type PayrollOtherType,
   type PayrollOtherBreakdownEntry,
 } from '@/lib/constants';
 import { CustomDropdown } from '@/components/ui';
+import { Button } from '@/components/ui/Button';
+import { FieldError } from '@/components/ui/FormBits';
 import { Info, Plus, X, AlertTriangle } from 'lucide-react';
 
 type ProvidedFlag = 'yes' | 'no' | 'allowance';
@@ -86,10 +87,13 @@ interface SalaryInputProps {
   placeholder?: string;
   required?: boolean;
   disabled?: boolean;
+  /** Screen-reader name when there is no visible label. */
+  ariaLabel?: string;
 }
 
-function SalaryInput({ label, value, onChange, error, placeholder, required, disabled }: SalaryInputProps) {
+function SalaryInput({ label, value, onChange, error, placeholder, required, disabled, ariaLabel }: SalaryInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputId = useId();
   const [displayValue, setDisplayValue] = useState(formatNumber(value));
 
   // Re-sync from the external value only while the field is unfocused. While
@@ -114,28 +118,27 @@ function SalaryInput({ label, value, onChange, error, placeholder, required, dis
   return (
     <div className="w-full">
       {label && (
-        <label
-          className="block text-sm font-medium mb-1 whitespace-nowrap"
-          style={{ color: TME_COLORS.primary }}
-        >
+        <label htmlFor={inputId} className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {required && <span className="text-tme-red ml-1" aria-hidden>*</span>}
         </label>
       )}
       <input
         ref={inputRef}
+        id={inputId}
         type="text"
         inputMode="decimal"
         value={displayValue}
         onChange={handleChange}
         placeholder={placeholder}
         disabled={disabled}
-        className={`w-full px-3 py-2 rounded-lg border-2 transition-all duration-200 h-[42px] ${
-          error ? 'border-red-500' : 'border-gray-200'
-        } focus:outline-none focus:border-[#243F7B] ${disabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`}
-        style={{ fontFamily: 'Inter, sans-serif' }}
+        aria-label={label ? undefined : ariaLabel}
+        aria-invalid={error ? true : undefined}
+        className={`w-full px-3.5 rounded-[10px] border-2 bg-white text-base text-gray-900 transition-[color,border-color,box-shadow] duration-200 h-[46px] sm:h-10 sm:px-3 sm:rounded-lg sm:border md:text-sm sm:focus:ring-[3px] ${
+          error ? 'border-tme-red focus:border-tme-red sm:focus:ring-tme-red/15' : 'border-gray-200 sm:border-gray-300 focus:border-tme-blue sm:focus:border-tme-blue sm:focus:ring-tme-blue/15'
+        } focus:outline-none ${disabled ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''}`}
       />
-      {error && <p className="mt-1 text-sm text-red-500">{error}</p>}
+      <FieldError>{error}</FieldError>
     </div>
   );
 }
@@ -357,24 +360,21 @@ export function SalaryBreakdown({
             selector, expanded by default and collapsible to a compact link. The
             invisible label spacer top-aligns it with the dropdown. */}
         <div>
-          <span className="block text-sm font-medium mb-1 invisible select-none" aria-hidden="true">
+          <span className="hidden md:block text-[15px] font-semibold leading-snug mb-1.5 sm:text-sm sm:font-medium sm:mb-1 invisible select-none" aria-hidden="true">
             .
           </span>
           {showInfo ? (
-            <div
-              className="relative rounded-lg text-sm p-3 pr-9"
-              style={{ backgroundColor: '#EBF4FF', color: TME_COLORS.primary }}
-            >
+            <div className="relative rounded-[10px] text-sm leading-snug p-3 pr-12 sm:text-[13px] sm:pr-10 bg-blue-50 border border-blue-100 text-tme-blue">
               <button
                 type="button"
                 onClick={() => setShowInfo(false)}
-                className="absolute top-2.5 right-2.5 hover:opacity-70 transition-opacity"
+                className="absolute top-0.5 right-0.5 size-11 sm:size-9 inline-flex items-center justify-center rounded-full hover:bg-blue-100 transition-colors tme-btn-focus"
                 aria-label="Hide salary breakdown info"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden />
               </button>
               <div className="flex items-start gap-2">
-                <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <Info className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
                 <span>{SALARY_BREAKDOWN_EXPLANATION}</span>
               </div>
             </div>
@@ -382,10 +382,9 @@ export function SalaryBreakdown({
             <button
               type="button"
               onClick={() => setShowInfo(true)}
-              className="flex items-center gap-2 text-sm hover:underline h-[42px]"
-              style={{ color: TME_COLORS.primary }}
+              className="flex items-center gap-2 text-sm font-semibold sm:font-medium text-tme-blue hover:underline min-h-[46px] sm:min-h-10 tme-btn-focus rounded-[10px]"
             >
-              <Info className="w-4 h-4" />
+              <Info className="w-4 h-4" aria-hidden />
               About salary breakdown
             </button>
           )}
@@ -433,14 +432,11 @@ export function SalaryBreakdown({
               the sum so it still slots into the breakdown grid above. */}
           <div className="pt-3 border-t border-gray-100 space-y-3">
             <div className="flex items-center justify-between">
-              <span
-                className="text-sm font-medium"
-                style={{ color: TME_COLORS.primary }}
-              >
+              <span className="text-[15px] font-semibold text-tme-blue sm:text-sm sm:font-medium">
                 Other ({getPercentage(other)})
               </span>
               {(other ?? 0) > 0 && (
-                <span className="text-xs text-gray-500">
+                <span className="text-sm sm:text-[13px] text-gray-600">
                   {currency} {formatNumber(other)}
                 </span>
               )}
@@ -450,8 +446,8 @@ export function SalaryBreakdown({
                 row above: the allowance type spans the first 3 columns and the
                 amount occupies the 4th, so it lines up exactly under Food. */}
             {visibleBreakdownRows.map((entry, index) => (
-              <div key={index} className="grid grid-cols-4 gap-4 items-center">
-                <div className="col-span-3">
+              <div key={index} className="grid grid-cols-1 sm:grid-cols-4 gap-2 sm:gap-4 items-center">
+                <div className="sm:col-span-3">
                   <CustomDropdown
                     value={entry.type}
                     onChange={(v) => handleBreakdownRowTypeChange(index, v as PayrollOtherType)}
@@ -465,32 +461,27 @@ export function SalaryBreakdown({
                       // other breakdown inputs whose value is undefined.
                       value={entry.amount || undefined}
                       onChange={(val) => handleBreakdownRowAmountChange(index, val)}
+                      ariaLabel={`Allowance ${index + 1} amount`}
                     />
                   </div>
                   {visibleBreakdownRows.length > 1 && (
                     <button
                       type="button"
                       onClick={() => handleRemoveBreakdownRow(index)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0"
-                      title="Remove allowance"
+                      className="size-11 sm:size-9 inline-flex items-center justify-center rounded-full text-gray-600 hover:text-tme-red hover:bg-red-50 transition-colors flex-shrink-0 tme-btn-focus"
                       aria-label="Remove allowance"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-5 h-5" aria-hidden />
                     </button>
                   )}
                 </div>
               </div>
             ))}
 
-            <button
-              type="button"
-              onClick={handleAddBreakdownRow}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{ backgroundColor: `${TME_COLORS.primary}10`, color: TME_COLORS.primary }}
-            >
-              <Plus className="w-3.5 h-3.5" />
+            <Button tone="secondary" fullWidthOnMobile onClick={handleAddBreakdownRow}>
+              <Plus className="w-4 h-4" aria-hidden />
               Add allowance
-            </button>
+            </Button>
           </div>
 
           {/* Row 3: Provided flags — Accommodation | Transport | Food | (empty).
@@ -499,14 +490,13 @@ export function SalaryBreakdown({
               columns, instead of either bunching together (whitespace-nowrap)
               or wrapping unevenly (the longer labels wrap, "Food Provided"
               stays on one line). */}
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
             <div>
               <label
-                className="block text-sm font-medium mb-1 leading-tight"
-                style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+                className="block text-[15px] font-semibold mb-1.5 leading-tight text-tme-blue sm:text-sm sm:font-medium sm:mb-1"
               >
-                <span className="block">Accommodation</span>
-                <span className="block">Provided<span className="text-red-500 ml-1">*</span></span>
+                <span className="sm:block">Accommodation</span>
+                <span className="sm:block"> Provided<span className="text-tme-red ml-1" aria-hidden>*</span></span>
               </label>
               <CustomDropdown
                 value={accommodationProvided}
@@ -518,11 +508,10 @@ export function SalaryBreakdown({
             </div>
             <div>
               <label
-                className="block text-sm font-medium mb-1 leading-tight"
-                style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+                className="block text-[15px] font-semibold mb-1.5 leading-tight text-tme-blue sm:text-sm sm:font-medium sm:mb-1"
               >
-                <span className="block">Transportation</span>
-                <span className="block">Provided<span className="text-red-500 ml-1">*</span></span>
+                <span className="sm:block">Transportation</span>
+                <span className="sm:block"> Provided<span className="text-tme-red ml-1" aria-hidden>*</span></span>
               </label>
               <CustomDropdown
                 value={transportProvided}
@@ -534,11 +523,10 @@ export function SalaryBreakdown({
             </div>
             <div>
               <label
-                className="block text-sm font-medium mb-1 leading-tight"
-                style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+                className="block text-[15px] font-semibold mb-1.5 leading-tight text-tme-blue sm:text-sm sm:font-medium sm:mb-1"
               >
-                <span className="block">Food</span>
-                <span className="block">Provided<span className="text-red-500 ml-1">*</span></span>
+                <span className="sm:block">Food</span>
+                <span className="sm:block"> Provided<span className="text-tme-red ml-1" aria-hidden>*</span></span>
               </label>
               <CustomDropdown
                 value={foodProvided}
@@ -548,7 +536,7 @@ export function SalaryBreakdown({
                 error={errors?.foodProvided}
               />
             </div>
-            <div aria-hidden="true" />
+            <div aria-hidden="true" className="hidden sm:block" />
           </div>
 
           {/* Monthly Total — normally the sum of every component above. Styled
@@ -556,24 +544,12 @@ export function SalaryBreakdown({
               for flexibility. Doing so leaves the breakdown untouched and shows
               the mismatch warning below. */}
           <div>
-            <div
-              className="flex items-center justify-between px-4 py-2.5 rounded-lg border-2"
-              style={{
-                borderColor: TME_COLORS.primary,
-                backgroundColor: `${TME_COLORS.primary}0D`,
-              }}
-            >
-              <span
-                className="text-sm font-medium"
-                style={{ color: TME_COLORS.primary }}
-              >
-                Monthly Salary (Total)
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2.5 rounded-[10px] border-2 border-tme-blue bg-blue-50/60 focus-within:ring-2 focus-within:ring-tme-blue/30">
+              <span className="text-[15px] font-semibold text-tme-blue sm:text-sm">
+                Monthly salary (total)
               </span>
-              <div className="flex items-baseline gap-1.5">
-                <span
-                  className="text-lg font-semibold"
-                  style={{ color: TME_COLORS.primary }}
-                >
+              <div className="flex items-baseline gap-1.5 text-tme-blue">
+                <span className="text-lg font-semibold">
                   {currency}
                 </span>
                 <input
@@ -587,15 +563,14 @@ export function SalaryBreakdown({
                   }}
                   placeholder="0"
                   aria-label="Monthly salary total"
-                  className="w-32 bg-transparent text-right text-lg font-semibold focus:outline-none"
-                  style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+                  className="w-32 min-h-11 bg-transparent text-right text-lg font-semibold text-tme-blue focus:outline-none"
                 />
               </div>
             </div>
 
             {hasDiscrepancy && (
-              <div className="mt-2 flex items-start gap-2 px-1 text-sm text-amber-700">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div className="mt-2 flex items-start gap-2 px-1 text-sm text-amber-800 sm:text-[13px]">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
                 <span>
                   This total differs from the sum of the components ({currency}{' '}
                   {formatNumber(sum)}).

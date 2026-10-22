@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { TME_COLORS } from '@/lib/constants';
 import { CurrencyInput } from '@/components/ui';
 import { InfoNote } from './chrome';
 import { deriveNumberOfShares, shareCapitalErrors, type DraftCompany } from './draft';
@@ -75,12 +74,13 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
         />
         <div>
           <label
-            className="block text-sm font-medium mb-1"
-            style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
+            htmlFor="company-setup-number-of-shares"
+            className="block text-[15px] font-semibold mb-1.5 text-tme-blue sm:text-sm sm:font-medium"
           >
             Number of shares
           </label>
           <input
+            id="company-setup-number-of-shares"
             type="text"
             value={
               numberOfShares !== undefined
@@ -89,12 +89,11 @@ export function StepShareCapital({ company, onChange }: StepShareCapitalProps) {
             }
             readOnly
             tabIndex={-1}
-            placeholder="Auto-calculated"
-            className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 bg-gray-100 text-gray-600 cursor-not-allowed text-sm"
-            style={{ height: 42, fontFamily: 'Inter, sans-serif' }}
+            placeholder="Calculated for you"
+            className="w-full h-[46px] px-3.5 rounded-[10px] border-2 border-gray-200 bg-gray-100 text-gray-700 cursor-not-allowed text-base sm:h-10 sm:border sm:border-gray-300 sm:rounded-lg sm:text-sm"
           />
-          <p className="text-xs text-gray-500 mt-1">
-            Share capital / value per share are calculated automatically.
+          <p className="text-sm text-gray-600 mt-1.5 sm:text-[13px]">
+            Calculated for you: share capital divided by the value per share.
           </p>
         </div>
       </div>

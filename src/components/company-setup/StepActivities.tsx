@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import { TME_COLORS } from '@/lib/constants';
-import { InfoNote } from './chrome';
+import { AutoGrowText, Button, textFieldClasses } from '@/components/ui';
+import { InfoNote, WarningNote } from './chrome';
 import type { DraftCompany } from './draft';
 import {
   COMPANY_SETUP_INCLUDED_ACTIVITIES,
@@ -10,6 +10,9 @@ import {
   IFZA_BUSINESS_ACTIVITIES_URL,
 } from '@/types/company-setup';
 import { Plus, Trash2, ExternalLink } from 'lucide-react';
+
+// Text never cut (Damir 22.10): both boxes grow to more lines with a long entry.
+const FIELD_CLASS = textFieldClasses(false, 'min-w-0');
 
 interface StepActivitiesProps {
   company: DraftCompany;
@@ -42,6 +45,8 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
     onChange({ activities: activities.filter((_, i) => i !== index) });
   };
 
+  const extra = activities.length - COMPANY_SETUP_INCLUDED_ACTIVITIES;
+
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -57,95 +62,77 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
             </li>
           </ul>
         </InfoNote>
-        <p className="text-sm text-gray-600">
+        <p className="text-[15px] text-gray-700 leading-relaxed sm:text-sm">
           Please copy the exact wording of each activity from the official IFZA list:{' '}
           <a
             href={IFZA_BUSINESS_ACTIVITIES_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-medium underline"
-            style={{ color: TME_COLORS.primary }}
+            className="inline-flex items-center gap-1 font-semibold underline text-tme-blue"
           >
             Browse IFZA activities
-            <ExternalLink className="w-3.5 h-3.5" />
+            <ExternalLink className="w-4 h-4" aria-hidden />
           </a>
-          . The activity code is optional. Copy it from the IFZA list when known.
+          . The activity code is optional. Copy it from the IFZA list when you know it.
         </p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>
-          Business activities ({activities.length}/{COMPANY_SETUP_MAX_ACTIVITIES})
-          <span className="text-red-500 ml-1">*</span>
-        </label>
-        <div className="space-y-2">
+        <p className="block text-[15px] font-semibold mb-2 text-tme-blue sm:text-sm">
+          Business activities ({activities.length} of {COMPANY_SETUP_MAX_ACTIVITIES})
+          <span className="text-tme-red ml-1" aria-hidden>*</span>
+        </p>
+        <div className="space-y-3">
           {activities.map((activity, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <span
-                className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                style={{ backgroundColor: `${TME_COLORS.primary}12`, color: TME_COLORS.primary }}
-              >
+            <div
+              key={index}
+              className="grid grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[auto_8.5rem_minmax(0,1fr)_auto] items-start gap-2"
+            >
+              <span className="w-7 h-7 mt-[9px] rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 bg-blue-50 text-tme-blue sm:mt-1.5">
                 {index + 1}
               </span>
-              <input
-                type="text"
+              <AutoGrowText
                 value={activity.code ?? ''}
                 onChange={(e) => setActivity(index, { code: e.target.value })}
                 placeholder="Code (optional)"
+                aria-label={`Activity ${index + 1}: code (optional)`}
                 maxLength={20}
-                className="px-3 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 flex-shrink-0"
-                style={{ height: 42, width: '8.5rem' }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-                onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+                className={FIELD_CLASS}
               />
-              <input
-                type="text"
+              <AutoGrowText
                 value={activity.description}
                 onChange={(e) => setActivity(index, { description: e.target.value })}
                 placeholder={
                   index === 0 ? 'e.g. Management consultancy services' : 'Another activity'
                 }
+                aria-label={`Activity ${index + 1}: name`}
                 maxLength={300}
-                className="flex-1 px-3 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200"
-                style={{ height: 42 }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-                onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+                className={`${FIELD_CLASS} order-last col-span-3 sm:order-none sm:col-span-1`}
               />
-              <button
-                type="button"
+              <Button
+                tone="dangerGhost"
                 onClick={() => removeActivity(index)}
                 disabled={activities.length <= 1}
-                className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                title="Remove this activity"
+                aria-label={`Remove activity ${index + 1}`}
+                className="size-11 !px-0 mt-px sm:size-9 sm:mt-0.5"
               >
-                <Trash2 className="w-4 h-4" />
-              </button>
+                <Trash2 className="w-[18px] h-[18px]" aria-hidden />
+              </Button>
             </div>
           ))}
         </div>
         {activities.length < COMPANY_SETUP_MAX_ACTIVITIES && (
-          <button
-            type="button"
-            onClick={addActivity}
-            className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-sm"
-            style={{ backgroundColor: '#f0f4ff', color: TME_COLORS.primary }}
-          >
-            <Plus className="w-3.5 h-3.5" />
+          <Button tone="secondary" onClick={addActivity} className="mt-3">
+            <Plus className="w-4 h-4" aria-hidden />
             Add activity
-          </button>
+          </Button>
         )}
-        {activities.length > COMPANY_SETUP_INCLUDED_ACTIVITIES && (
-          <p className="text-xs text-amber-700 mt-2">
-            {activities.length - COMPANY_SETUP_INCLUDED_ACTIVITIES} additional{' '}
-            {activities.length - COMPANY_SETUP_INCLUDED_ACTIVITIES === 1
-              ? 'activity'
-              : 'activities'}{' '}
-            beyond the included {COMPANY_SETUP_INCLUDED_ACTIVITIES}: AED{' '}
-            {((activities.length - COMPANY_SETUP_INCLUDED_ACTIVITIES) * 2000).toLocaleString(
-              'en-US'
-            )}{' '}
-            per year extra.
-          </p>
+        {extra > 0 && (
+          <WarningNote className="mt-3">
+            {extra} additional {extra === 1 ? 'activity' : 'activities'} beyond the included{' '}
+            {COMPANY_SETUP_INCLUDED_ACTIVITIES}: AED {(extra * 2000).toLocaleString('en-US')} per
+            year extra.
+          </WarningNote>
         )}
       </div>
 
@@ -154,18 +141,20 @@ export function StepActivities({ company, onChange }: StepActivitiesProps) {
           the portal editor. */}
 
       <div>
-        <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
+        <label
+          htmlFor="company-setup-business-description"
+          className="block text-[15px] font-semibold mb-1.5 text-tme-blue sm:text-sm sm:font-medium"
+        >
           Brief description of your intended business
         </label>
         <textarea
+          id="company-setup-business-description"
           value={company.businessDescription ?? ''}
           onChange={(e) => onChange({ businessDescription: e.target.value })}
           rows={3}
           maxLength={1000}
           placeholder="In a few sentences: what will the company do, and for whom?"
-          className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
-          onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-          onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+          className="w-full px-3.5 py-2.5 rounded-[10px] border-2 border-gray-200 focus:outline-none focus:border-tme-blue transition-colors duration-200 text-base sm:py-2 sm:border sm:border-gray-300 sm:rounded-lg sm:text-sm sm:focus:ring-2 sm:focus:ring-tme-blue/15"
         />
       </div>
     </div>

@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useLayoutEffect, useRef } from 'react';
-import { Info } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
-import { CustomDatePicker, CustomDropdown, MultiSelectDropdown } from '@/components/ui';
+import { AlertCircle, Info } from 'lucide-react';
+import { AutoGrowText, CustomDatePicker, CustomDropdown, MultiSelectDropdown, textFieldClasses } from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import {
   EKYC_COUNTRY_OPTIONS,
@@ -27,20 +26,26 @@ const DROPDOWN_MIN_OPTIONS = 3;
 /** Hints longer than this fold away behind "More information". */
 const LONG_HINT_CHARS = 260;
 
-const inputClass =
-  'w-full px-3 py-2 rounded-lg border-2 bg-white text-gray-900 transition-colors duration-200 focus:outline-none focus:border-[#243F7B] disabled:bg-gray-50 disabled:text-gray-700';
+/** TME input look: 46px tall (set per control), 16px text, 2px gray-200 line, 10px corners, blue line on focus.
+ *  Desktop (sm:): 40px, 14px text, 1px gray-300 line, 8px corners, blue line + soft ring on focus. */
+const INPUT_BASE =
+  'w-full px-3.5 py-2 rounded-[10px] border-2 bg-white text-base text-gray-900 transition-colors duration-200 focus:outline-none disabled:bg-gray-50 disabled:text-gray-700 sm:px-3 sm:rounded-lg sm:border sm:text-sm sm:focus:ring-2 sm:focus:ring-tme-blue/15';
+const inputBorder = (error: boolean) =>
+  error ? 'border-tme-red focus:border-tme-red' : 'border-gray-200 sm:border-gray-300 focus:border-tme-blue';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any row shape
 type AnyFieldDef = EkycFieldDef<any, any>;
 
-/** Small tag under a pre-filled field's input (PrefilledSlot); the full sentence is the tooltip. */
+/**
+ * Small tag under a pre-filled field's input (PrefilledSlot). The full sentence
+ * is read out to screen readers; the step's notice says it on screen.
+ */
 export function PrefilledTag() {
   const bilingual = useEkycBilingual();
   const title = biInline(EKYC_PREFILLED_FIELD_MARK, bilingual);
   return (
     <span
-      className="inline-flex shrink-0 items-center rounded px-1.5 py-px text-[11px] font-medium leading-4"
-      style={{ backgroundColor: 'rgba(210,188,153,0.3)', color: '#6b5a3a' }}
+      className="inline-flex shrink-0 items-center rounded bg-amber-100 px-1.5 py-px text-xs font-semibold leading-4 text-amber-800"
       title={title}
     >
       {biInline(EKYC_UI.prefilledTag, bilingual)}
@@ -49,7 +54,7 @@ export function PrefilledTag() {
   );
 }
 
-/** Height of the tag slot under an input: the tag's own height (11px text, 16px line, 1px padding). */
+/** Height of the tag slot under an input: the tag's own height (12px text, 16px line, 1px padding). */
 export const PREFILLED_SLOT_CLASS = 'mt-1.5 flex h-[18px] items-center';
 
 /**
@@ -69,15 +74,16 @@ export function PrefilledSlot({ prefilled, reserve }: { prefilled?: boolean; res
 export function FieldError({ message, id }: { message: EkycText | undefined; id?: string }) {
   if (!message) return null;
   return (
-    <div id={id} className="mt-1.5 text-sm text-red-600">
-      <Bi text={message} deClassName="!text-red-500" />
+    <div id={id} className="mt-1.5 flex items-start gap-1.5 text-sm font-medium text-tme-red sm:text-[13px]">
+      <AlertCircle aria-hidden="true" className="mt-px h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />
+      <Bi text={message} className="min-w-0" deClassName="!text-tme-red" />
     </div>
   );
 }
 
 /**
  * A question: English (15px, semibold, navy) and in a bilingual form the
- * German under it (13px, slate). Styles live in Bi.tsx (EKYC_TYPE).
+ * German under it (14px, gray-600). Styles live in Bi.tsx (EKYC_TYPE).
  */
 /**
  * The label to show: questionnaire questions lead with their record number
@@ -98,8 +104,7 @@ export function FieldHintLink({ link }: { link: EkycHintLink | undefined }) {
       href={link.href}
       target="_blank"
       rel="noopener noreferrer"
-      className="mt-1 ml-5 inline-block text-[13px] font-medium underline underline-offset-2"
-      style={{ color: TME_COLORS.primary }}
+      className="mt-1 ml-5 inline-flex min-h-11 items-center text-sm font-medium text-tme-blue underline underline-offset-2 sm:min-h-0 sm:py-1 sm:text-[13px]"
     >
       {biInline(link.label, bilingual)}
     </a>
@@ -126,7 +131,7 @@ export function FieldLabel({
       <BiLabel text={ekycNumberedLabel(field)} />
       {!field.required && (
         <span className="mt-1 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-normal text-slate-500">({biInline(EKYC_UI.optional, bilingual)})</span>
+          <span className="text-sm font-normal text-gray-600 sm:text-[13px]">({biInline(EKYC_UI.optional, bilingual)})</span>
         </span>
       )}
     </label>
@@ -134,8 +139,8 @@ export function FieldLabel({
 }
 
 /**
- * A field's help under the label: an info icon, the English (13px slate-600)
- * and the German (12px italic slate-400) in one indent. A long one folds away.
+ * A field's help under the label: an info icon, the English and the German
+ * (14px gray-600) in one indent. A long one folds away.
  */
 export function FieldHint({ text, id }: { text: EkycText | undefined; id?: string }) {
   if (!text) return null;
@@ -143,10 +148,9 @@ export function FieldHint({ text, id }: { text: EkycText | undefined; id?: strin
     return (
       <details id={id} className="group mt-1.5">
         <summary
-          className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[13px] font-medium underline-offset-2 hover:underline"
-          style={{ color: TME_COLORS.primary }}
+          className="inline-flex min-h-11 cursor-pointer select-none items-center gap-1.5 text-sm font-medium text-tme-blue underline-offset-2 hover:underline sm:min-h-0 sm:py-1 sm:text-[13px]"
         >
-          <Info aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <Info aria-hidden="true" className="h-4 w-4 shrink-0 text-gray-500" />
           <Bi text={EKYC_UI.moreInfo} variant="inline" />
         </summary>
         <BiHelp text={text} icon={false} paragraphs className="mt-1.5 pl-5" />
@@ -176,13 +180,9 @@ function CheckboxList({
         return (
           <label
             key={option.value}
-            className={`flex min-h-[44px] items-start gap-3 rounded-lg border-2 px-3 py-2 transition-colors ${
-              disabled ? 'cursor-default' : 'cursor-pointer hover:border-[#243F7B]/50'
-            }`}
-            style={{
-              borderColor: checked ? TME_COLORS.primary : TME_COLORS.border,
-              backgroundColor: checked ? 'rgba(36,63,123,0.04)' : '#fff',
-            }}
+            className={`flex min-h-[46px] items-start gap-3 rounded-[10px] border-2 px-3 py-2.5 transition-colors sm:min-h-10 sm:gap-2.5 sm:rounded-lg sm:border sm:py-2 ${
+              checked ? 'border-tme-blue bg-tme-blue/[0.04]' : 'border-gray-200 bg-white sm:border-gray-300'
+            } ${disabled ? 'cursor-default' : `cursor-pointer ${checked ? '' : 'hover:border-tme-blue/50'}`}`}
           >
             <input
               type="checkbox"
@@ -191,7 +191,7 @@ function CheckboxList({
               disabled={disabled}
               onChange={() => onChange(checked ? value.filter((v) => v !== option.value) : [...value, option.value])}
             />
-            <Bi text={option} className="text-sm text-gray-800" />
+            <Bi text={option} className="text-[15px] text-gray-800 sm:text-sm" />
           </label>
         );
       })}
@@ -217,8 +217,7 @@ function Segmented({
 }) {
   return (
     <div
-      className="inline-flex shrink-0 rounded-lg border-2 bg-white p-0.5"
-      style={{ borderColor: TME_COLORS.border }}
+      className="inline-flex shrink-0 rounded-[10px] border-2 border-gray-200 bg-white p-0.5 sm:rounded-lg sm:border sm:border-gray-300"
       role="radiogroup"
       aria-labelledby={labelledBy}
       aria-describedby={describedBy}
@@ -233,13 +232,9 @@ function Segmented({
             aria-checked={checked}
             disabled={disabled}
             onClick={() => onChange(option.value)}
-            className={`min-h-[40px] min-w-[72px] rounded-md px-3 text-sm font-medium transition-colors disabled:cursor-default ${
-              checked ? '' : 'hover:bg-gray-50'
+            className={`min-h-[40px] min-w-[72px] rounded-lg px-3 text-[15px] font-medium transition-colors disabled:cursor-default sm:min-h-8 sm:min-w-16 sm:rounded-md sm:text-sm ${
+              checked ? 'bg-tme-blue text-white' : 'bg-transparent text-gray-700 hover:bg-gray-50'
             }`}
-            style={{
-              backgroundColor: checked ? TME_COLORS.primary : 'transparent',
-              color: checked ? '#fff' : '#374151',
-            }}
           >
             <Bi text={option} variant="inline" className="items-center" />
           </button>
@@ -258,7 +253,6 @@ function LatinNameInput({
   value,
   disabled,
   className,
-  style,
   invalid,
   describedBy,
   onChange,
@@ -267,12 +261,11 @@ function LatinNameInput({
   value: string;
   disabled: boolean;
   className: string;
-  style: React.CSSProperties;
   invalid: boolean;
   describedBy?: string;
   onChange: (value: string) => void;
 }) {
-  const ref = useRef<HTMLInputElement>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
   const caret = useRef<number | null>(null);
 
   // After the converted value is rendered, put the caret back where it belongs.
@@ -286,14 +279,12 @@ function LatinNameInput({
   }, [value]);
 
   return (
-    <input
+    <AutoGrowText
       ref={ref}
       id={id}
-      type="text"
       autoComplete="off"
       spellCheck={false}
       className={className}
-      style={style}
       value={value}
       disabled={disabled}
       aria-invalid={invalid}
@@ -390,7 +381,7 @@ export function EkycField({
   const errorId = `${inputId}-error`;
   const hintId = `${inputId}-hint`;
   const latinHintId = `${inputId}-latin`;
-  const borderStyle = { borderColor: error ? TME_COLORS.error : TME_COLORS.border };
+  const inputClass = `${INPUT_BASE} ${inputBorder(!!error)}`;
   const choiceOptions = options ?? field.options ?? [];
   const placeholder = biInline(EKYC_UI.select, bilingual);
   const searchPlaceholder = biInline(EKYC_UI.typeToSearch, bilingual);
@@ -408,7 +399,6 @@ export function EkycField({
           id={inputId}
           rows={3}
           className={inputClass}
-          style={borderStyle}
           value={String(value ?? '')}
           disabled={readOnly}
           aria-invalid={!!error}
@@ -507,7 +497,6 @@ export function EkycField({
               placeholder={placeholder}
               searchable={choiceOptions.length > 8}
               disabled={readOnly}
-              wrapLabel
               error={error ? ' ' : undefined}
               ariaLabelledBy={labelId}
               searchPlaceholder={searchPlaceholder}
@@ -549,8 +538,7 @@ export function EkycField({
             min={0}
             max={100}
             step="any"
-            className={`${inputClass} h-11 pr-8`}
-            style={borderStyle}
+            className={`${inputClass} h-[46px] pr-8 sm:h-10`}
             value={typeof value === 'number' ? String(value) : ''}
             disabled={readOnly}
             aria-invalid={!!error}
@@ -561,7 +549,7 @@ export function EkycField({
               onChange(n !== null && Number.isFinite(n) ? n : null);
             }}
           />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">%</span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-base text-gray-600 sm:text-sm">%</span>
         </div>
       );
       break;
@@ -604,8 +592,7 @@ export function EkycField({
             src={value}
             alt={field.label.en}
             aria-labelledby={labelId}
-            className="h-[150px] w-full max-w-md object-contain rounded-lg border-2 bg-white"
-            style={borderStyle}
+            className={`h-[150px] w-full max-w-md object-contain rounded-[10px] border-2 bg-white ${inputBorder(!!error)}`}
           />
         ) : null
       ) : (
@@ -632,8 +619,7 @@ export function EkycField({
             id={inputId}
             value={String(value ?? '')}
             disabled={readOnly}
-            className={`${inputClass} h-11`}
-            style={borderStyle}
+            className={textFieldClasses(!!error)}
             invalid={!!error}
             describedBy={describedBy}
             onChange={(v) => onChange(v)}
@@ -641,15 +627,14 @@ export function EkycField({
         );
         break;
       }
-      const type = field.kind === 'email' ? 'email' : field.kind === 'url' ? 'url' : 'text';
+      // Text never cut (Damir 22.10): the box grows to more lines with a long answer.
+      const kind = field.kind === 'email' ? 'email' : field.kind === 'url' ? 'url' : 'text';
       control = (
-        <input
+        <AutoGrowText
           id={inputId}
-          type={type}
-          inputMode={field.kind === 'email' ? 'email' : field.kind === 'url' ? 'url' : undefined}
+          kind={kind}
           autoComplete="off"
-          className={`${inputClass} h-11`}
-          style={borderStyle}
+          className={textFieldClasses(!!error)}
           value={String(value ?? '')}
           disabled={readOnly}
           aria-invalid={!!error}
@@ -666,7 +651,7 @@ export function EkycField({
   if (layout === 'row') {
     // One line of a question list: question (and hint) left, answer right.
     return (
-      <div id={`${inputId}-field`} className={`scroll-mt-28 py-3.5 ${className}`}>
+      <div id={`${inputId}-field`} className={`scroll-mt-40 lg:scroll-mt-28 py-3.5 ${className}`}>
         <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
           <div className="min-w-0 flex-1">
             <FieldLabel field={field} id={labelId} />
@@ -700,7 +685,7 @@ export function EkycField({
 
   if (layout === 'cell') {
     return (
-      <div id={`${inputId}-field`} className={`scroll-mt-28 row-span-2 grid grid-rows-subgrid gap-y-1.5 ${className}`}>
+      <div id={`${inputId}-field`} className={`scroll-mt-40 lg:scroll-mt-28 row-span-2 grid grid-rows-subgrid gap-y-1.5 ${className}`}>
         <div className="min-w-0">{head}</div>
         <div className="min-w-0">
           {control}
@@ -713,7 +698,7 @@ export function EkycField({
   }
 
   return (
-    <div id={`${inputId}-field`} className={`scroll-mt-28 ${className}`}>
+    <div id={`${inputId}-field`} className={`scroll-mt-40 lg:scroll-mt-28 ${className}`}>
       {head}
       <div className="mt-1.5">{control}</div>
       {tag}

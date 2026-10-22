@@ -1,10 +1,8 @@
 'use client';
 
 import React from 'react';
-import { TME_COLORS } from '@/lib/constants';
 import { Input, CustomDropdown, CurrencyInput } from '@/components/ui';
-import { AlertTriangle } from 'lucide-react';
-import { InfoNote } from './chrome';
+import { InfoNote, WarningNote } from './chrome';
 import { isUploadFailure, type UploadResult } from '@/lib/supabase';
 import { PlainDocSlot, type DocSlot } from './StepPeopleDocuments';
 import type { DraftCompany } from './draft';
@@ -83,9 +81,7 @@ export function StepVisaFacility({
       </InfoNote>
 
       <div className="space-y-3">
-        <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-          Who needs a residence visa?
-        </p>
+        <p className="text-[15px] font-semibold text-tme-blue sm:text-sm">Who needs a residence visa?</p>
         {persons.map((person, index) => {
           const certificate = documents[String(index)]?.education_certificate;
           const educationWarning = companySetupVisaEducationWarning(person, !!certificate?.path);
@@ -96,16 +92,15 @@ export function StepVisaFacility({
             (educationWarning?.kind === 'certificate' || !!certificate?.path) &&
             educationWarning?.kind !== 'no_degree';
           return (
-          <div key={index} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <label className="flex items-start gap-2.5 cursor-pointer">
+          <div key={index} className="bg-white rounded-[12px] border border-gray-200 p-4">
+            <label className="flex items-center gap-3 min-h-11 cursor-pointer sm:min-h-9">
               <input
                 type="checkbox"
                 checked={person.visa.visaRequired}
                 onChange={(e) => updateVisa(index, { visaRequired: e.target.checked })}
-                className="mt-0.5 w-4 h-4 shrink-0"
-                style={{ accentColor: TME_COLORS.primary }}
+                className="w-5 h-5 shrink-0 accent-tme-blue sm:w-4 sm:h-4"
               />
-              <span className="text-sm text-gray-700 font-medium">
+              <span className="text-base text-gray-900 font-medium sm:text-sm">
                 {person.fullName.trim() || `Person ${index + 1}`}
               </span>
             </label>
@@ -133,24 +128,20 @@ export function StepVisaFacility({
                   placeholder="e.g. 10,000"
                 />
                 <div className="sm:col-span-2">
-                  <label className="flex items-start gap-2.5 cursor-pointer">
+                  <label className="flex items-center gap-3 min-h-11 cursor-pointer sm:min-h-9">
                     <input
                       type="checkbox"
                       checked={person.visa.vipStamping === true}
                       onChange={(e) => updateVisa(index, { vipStamping: e.target.checked })}
-                      className="mt-0.5 w-4 h-4 shrink-0"
-                      style={{ accentColor: TME_COLORS.primary }}
+                      className="w-5 h-5 shrink-0 accent-tme-blue sm:w-4 sm:h-4"
                     />
-                    <span className="text-sm text-gray-700">
+                    <span className="text-[15px] text-gray-800 sm:text-sm">
                       VIP (express) visa stamping: AED 1,500 extra per visa
                     </span>
                   </label>
                 </div>
                 {educationWarning && (
-                  <div className="sm:col-span-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-800">{educationWarning.message}</p>
-                  </div>
+                  <WarningNote className="sm:col-span-2">{educationWarning.message}</WarningNote>
                 )}
                 {showCertificate && (
                   <div className="sm:col-span-2">
@@ -200,10 +191,8 @@ export function StepVisaFacility({
         />
       </div>
 
-      <div className="border-t border-gray-100 pt-5 space-y-4">
-        <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-          Facility
-        </p>
+      <div className="border-t border-gray-200 pt-5 space-y-4">
+        <p className="text-[15px] font-semibold text-tme-blue sm:text-sm">Office space (facility)</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
           <CustomDropdown
             label="Type of facility required"
@@ -229,7 +218,7 @@ export function StepVisaFacility({
           )}
         </div>
         {company.facilityType === 'virtual_office' && (
-          <p className="text-xs text-gray-500">
+          <p className="text-sm text-gray-600 sm:text-[13px]">
             A Virtual Office is included in the standard IFZA package, no physical space needed.
           </p>
         )}

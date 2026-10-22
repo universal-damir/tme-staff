@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle, Clock, Info, Loader2, Plus, Save, Trash2 } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
+import { AlertCircle, CheckCircle, Clock, Info, Plus, Save, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui';
 import {
   EKYC_PREFILL_NOTICE,
   EKYC_PRIVACY_PARAGRAPHS,
@@ -197,17 +197,14 @@ function scrollToAnchor(path: string) {
 
 function Notice({ text, tone, compact = false }: { text: EkycText; tone: 'warn' | 'info' | 'success'; compact?: boolean }) {
   const styles = {
-    warn: { bg: '#fffbeb', border: '#f59e0b', color: '#92400e', Icon: AlertCircle },
-    info: { bg: 'rgba(36,63,123,0.05)', border: TME_COLORS.primary, color: TME_COLORS.primary, Icon: Info },
-    success: { bg: '#f0fdf4', border: TME_COLORS.success, color: '#166534', Icon: CheckCircle },
+    warn: { box: 'border-amber-500 bg-amber-50 text-amber-900', Icon: AlertCircle },
+    info: { box: 'border-tme-blue bg-tme-blue/[0.05] text-tme-blue', Icon: Info },
+    success: { box: 'border-green-600 bg-green-50 text-green-800', Icon: CheckCircle },
   }[tone];
   const { Icon } = styles;
   return (
-    <div
-      className={`flex gap-3 rounded-xl border-l-4 text-sm ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}
-      style={{ backgroundColor: styles.bg, borderColor: styles.border, color: styles.color }}
-    >
-      <Icon className={`${compact ? 'h-4 w-4' : 'h-5 w-5'} shrink-0 mt-0.5`} />
+    <div className={`flex gap-3 rounded-[10px] border-l-4 ${styles.box} ${compact ? 'px-3 py-2.5 text-sm sm:text-[13px]' : 'px-4 py-3 text-[15px] sm:text-sm'}`}>
+      <Icon className={`${compact ? 'h-4 w-4' : 'h-5 w-5'} shrink-0 mt-0.5`} aria-hidden="true" />
       <BiNotice text={text} className="min-w-0" />
     </div>
   );
@@ -228,20 +225,30 @@ function ErrorSummary({
   const bilingual = useEkycBilingual();
   if (items.length === 0) return null;
   return (
-    <div ref={summaryRef} tabIndex={-1} className="rounded-xl border-2 border-red-200 bg-red-50 p-4 outline-none" role="alert">
-      <div className="mb-2 text-sm font-semibold text-red-700">
-        <Bi text={title} deClassName="!text-red-600" />
+    <div
+      ref={summaryRef}
+      tabIndex={-1}
+      className="scroll-mt-40 rounded-[10px] border-2 border-red-200 bg-red-50 p-4 outline-none lg:scroll-mt-28"
+      role="alert"
+    >
+      <div className="mb-2 flex items-start gap-1.5 text-[15px] font-semibold text-tme-red sm:text-sm">
+        <AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+        <Bi text={title} className="min-w-0" deClassName="!text-tme-red" />
       </div>
-      <ul className="space-y-1.5 text-sm text-red-700">
+      <ul className="space-y-1 text-sm text-tme-red sm:text-[13px]">
         {items.map((m) => {
           const en = `${m.label.en}: ${m.message.en}`;
           const de = `${m.label.de || m.label.en}: ${m.message.de || m.message.en}`;
           return (
             <li key={m.id}>
-              <button type="button" className="text-left underline underline-offset-2 hover:no-underline" onClick={() => onPick(m.id)}>
+              <button
+                type="button"
+                className="tme-btn-focus min-h-11 rounded py-1.5 text-left underline underline-offset-2 hover:no-underline sm:min-h-0 sm:py-0.5"
+                onClick={() => onPick(m.id)}
+              >
                 <span className="block">{en}</span>
                 {bilingual && hasGermanLine({ en, de }) && (
-                  <span lang="de" className="block text-xs text-red-500">
+                  <span lang="de" className="block text-sm text-red-800 sm:text-[13px]">
                     {de}
                   </span>
                 )}
@@ -286,7 +293,7 @@ function ConfirmDialog({
     const trapTab = (e: KeyboardEvent) => {
       const box = boxRef.current;
       const focusables = Array.from(
-        box?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, [tabindex]:not([tabindex="-1"])') ?? []
+        box?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, textarea, [tabindex]:not([tabindex="-1"])') ?? []
       );
       if (focusables.length === 0) {
         e.preventDefault();
@@ -323,34 +330,27 @@ function ConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+        className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-[14px] bg-white p-5 shadow-xl sm:p-6"
       >
-        <h3 id={titleId} className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
+        <h3 id={titleId} className="text-[19px] font-semibold text-tme-blue sm:text-base">
           <Bi text={EKYC_UI.confirmTitle} />
         </h3>
         <div className="mt-3">
           <Notice text={EKYC_SUBMIT_WARNING} tone="info" />
         </div>
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            ref={cancelRef}
-            type="button"
-            disabled={submitting}
-            onClick={onCancel}
-            className="min-h-[44px] rounded-lg border-2 border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-          >
+          <Button ref={cancelRef} tone="plain" disabled={submitting} onClick={onCancel} className="w-full sm:w-auto">
             <Bi text={EKYC_UI.cancel} variant="inline" className="items-center" />
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            tone="primary"
             disabled={submitting || uploading}
+            busy={submitting}
             onClick={onConfirm}
-            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            style={{ backgroundColor: TME_COLORS.primary }}
+            className="w-full sm:w-auto"
           >
-            {submitting && <Loader2 className="h-4 w-4 shrink-0 animate-spin" />}
             <Bi text={submitting ? EKYC_UI.submitting : EKYC_UI.confirmSubmit} variant="inline" className="items-center" />
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -358,7 +358,7 @@ function ConfirmDialog({
 }
 
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <div className={`rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-6 ${className}`}>{children}</div>;
+  return <div className={`rounded-[14px] border border-gray-200 bg-white p-5 sm:p-6 ${className}`}>{children}</div>;
 }
 
 export interface EkycFormProps {
@@ -880,7 +880,7 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
     const fieldById = new Map(group.fields.map((f) => [f.id, f]));
     const layoutRows = EKYC_GROUP_ROWS[group.id] ?? group.fields.map((f) => [f.id]);
     return (
-      <div key={group.id} id={anchorIdFor(group.id)} className="scroll-mt-32">
+      <div key={group.id} id={anchorIdFor(group.id)} className="scroll-mt-40 lg:scroll-mt-32">
         {group.hint && <FieldHint text={group.hint} />}
         <div className="mt-4 space-y-4">
           {rows.map((row, index) => (
@@ -890,14 +890,10 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
                   <BiLabel text={ekycRowHeading(group.rowLabel, index + 1)} />
                 </h3>
                 {canRemove && (
-                  <button
-                    type="button"
-                    onClick={() => removeRow(group, index)}
-                    className="inline-flex min-h-[36px] shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-medium text-red-600 hover:bg-red-50"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                  <Button tone="dangerGhost" onClick={() => removeRow(group, index)} className="-mr-2 shrink-0">
+                    <Trash2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                     <Bi text={EKYC_UI.remove} variant="inline" />
-                  </button>
+                  </Button>
                 )}
               </div>
               <div className="space-y-5">
@@ -941,20 +937,16 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
           ))}
         </div>
         {shownErrors[group.id] && (
-          <div className="mt-2 text-sm text-red-600">
-            <Bi text={shownErrors[group.id]} deClassName="!text-red-500" />
+          <div className="mt-2 flex items-start gap-1.5 text-sm font-medium text-tme-red sm:text-[13px]">
+            <AlertCircle className="mt-px h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+            <Bi text={shownErrors[group.id]} className="min-w-0" deClassName="!text-tme-red" />
           </div>
         )}
         {canAdd && (
-          <button
-            type="button"
-            onClick={() => addRow(group)}
-            className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-lg border-2 border-dashed px-4 text-sm font-medium transition-colors hover:bg-gray-50"
-            style={{ borderColor: TME_COLORS.primary, color: TME_COLORS.primary }}
-          >
-            <Plus className="h-4 w-4 shrink-0" />
+          <Button tone="secondary" onClick={() => addRow(group)} className="mt-4">
+            <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
             <Bi text={group.addLabel} variant="inline" />
-          </button>
+          </Button>
         )}
       </div>
     );
@@ -1079,15 +1071,15 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
         <main className="mx-auto max-w-[960px] px-4 py-6 sm:px-6 sm:py-10">
           <Card className="mb-6">
             <div className="flex flex-col items-center py-4 text-center">
-              <CheckCircle className="mb-3 h-12 w-12" style={{ color: TME_COLORS.success }} />
-              <h1 className="text-xl font-semibold sm:text-2xl" style={{ color: TME_COLORS.primary }}>
+              <CheckCircle className="mb-3 h-12 w-12 text-green-600" aria-hidden="true" />
+              <h1 className="text-[22px] font-bold text-tme-blue sm:text-2xl">
                 <BiTitle text={EKYC_UI.receivedTitle} />
               </h1>
-              <Bi text={EKYC_SUBMITTED_NOTICE} paragraphs className="mt-3 max-w-xl text-sm text-gray-600" />
-              <Bi text={EKYC_UI.receivedNext} paragraphs className="mt-2 max-w-xl text-sm text-gray-600" />
+              <Bi text={EKYC_SUBMITTED_NOTICE} paragraphs className="mt-3 max-w-xl text-base text-gray-600 sm:text-[15px]" />
+              <Bi text={EKYC_UI.receivedNext} paragraphs className="mt-2 max-w-xl text-base text-gray-600 sm:text-[15px]" />
             </div>
           </Card>
-          <h2 className="mb-3 text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
+          <h2 className="mb-3 text-lg font-semibold text-tme-blue sm:text-[15px]">
             <Bi text={EKYC_UI.yourAnswers} />
           </h2>
           {review(false)}
@@ -1107,33 +1099,33 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
         {header(false)}
         <main className="mx-auto max-w-[760px] px-4 py-6 sm:px-6 sm:py-10">
           <Card className="sm:p-8">
-            <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold outline-none sm:text-3xl" style={{ color: TME_COLORS.primary }}>
+            <h1 ref={headingRef} tabIndex={-1} className="text-[26px] font-bold leading-tight text-tme-blue outline-none sm:text-[28px]">
               <BiTitle text={schema.title} />
             </h1>
-            {payload.displayName && <p className="mt-2 text-base font-semibold text-gray-800">{payload.displayName}</p>}
+            {payload.displayName && <p className="mt-2 text-base text-gray-600 sm:text-[15px]">{payload.displayName}</p>}
             <BiIntro
               text={type === 'corporate' ? EKYC_UI.startIntroCorporate : EKYC_UI.startIntroIndividual}
               paragraphs
               className="mt-4"
             />
-            <h2 className="mt-6 text-base font-semibold" style={{ color: TME_COLORS.primary }}>
+            <h2 className="mt-6 text-[17px] font-semibold text-tme-blue sm:text-[15px]">
               <Bi text={EKYC_UI.startNeedTitle} />
             </h2>
             <ul className="mt-2 space-y-2">
               {needs.map((n, i) => (
-                <li key={i} className="flex gap-2.5 text-sm text-gray-700">
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: TME_COLORS.secondary }} />
+                <li key={i} className="flex gap-2.5 text-[15px] text-gray-800 sm:text-sm">
+                  <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-tme-blue" aria-hidden="true" />
                   <Bi text={n} />
                 </li>
               ))}
             </ul>
-            <div className="mt-6 space-y-2 text-sm text-gray-700">
+            <div className="mt-6 space-y-2 text-[15px] text-gray-800 sm:text-sm">
               <div className="flex gap-2.5">
-                <Clock className="mt-0.5 h-4 w-4 shrink-0" style={{ color: TME_COLORS.primary }} />
+                <Clock className="mt-0.5 h-[18px] w-[18px] shrink-0 text-tme-blue" aria-hidden="true" />
                 <Bi text={EKYC_UI.startTime} />
               </div>
               <div className="flex gap-2.5">
-                <Save className="mt-0.5 h-4 w-4 shrink-0" style={{ color: TME_COLORS.primary }} />
+                <Save className="mt-0.5 h-[18px] w-[18px] shrink-0 text-tme-blue" aria-hidden="true" />
                 <Bi text={EKYC_UI.startSaved} />
               </div>
             </div>
@@ -1142,14 +1134,11 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
                 <Notice text={EKYC_PREFILL_NOTICE} tone="warn" />
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => goTo(0)}
-              className="mt-8 inline-flex min-h-[48px] w-full items-center justify-center rounded-lg px-8 text-base font-semibold text-white transition-opacity hover:opacity-90 sm:w-auto"
-              style={{ backgroundColor: TME_COLORS.primary }}
-            >
-              <Bi text={EKYC_UI.startButton} variant="inline" className="items-center" />
-            </button>
+            <div className="mt-8 border-t border-gray-200 pt-6 sm:flex sm:justify-end">
+              <Button tone="primary" size="lg" fullWidthOnMobile onClick={() => goTo(0)} className="sm:px-8">
+                <Bi text={EKYC_UI.startButton} variant="inline" className="items-center" />
+              </Button>
+            </div>
           </Card>
         </main>
       </div>
@@ -1164,10 +1153,11 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
   return (
     <div>
       {header(true)}
-      <div className="mx-auto max-w-[1216px] px-4 pb-28 pt-5 sm:px-6 lg:flex lg:gap-6 lg:pb-12 lg:pt-8 xl:gap-8">
+      {/* Phone: room under the content for the fixed Back / Continue bar (and the home bar). */}
+      <div className="mx-auto max-w-[1216px] px-4 pb-[calc(8rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:flex lg:gap-6 lg:pb-12 lg:pt-8 xl:gap-8">
         <aside className="hidden w-52 shrink-0 lg:block xl:w-56">
           <div className="sticky top-24">
-            <div className="mb-2 px-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <div className="mb-2 px-2.5 text-sm font-semibold text-gray-600 sm:text-[13px] sm:font-medium">
               <Bi text={EKYC_UI.steps} variant="inline" />
             </div>
             <EkycStepList entries={entries} current={current} onSelect={(i) => goTo(i)} />
@@ -1177,16 +1167,16 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
         <main className="min-w-0 flex-1">
           {step ? (
             <Card className="lg:p-8">
-              <h1 ref={headingRef} tabIndex={-1} className="text-xl font-bold outline-none sm:text-2xl" style={{ color: TME_COLORS.primary }}>
+              <h1 ref={headingRef} tabIndex={-1} className="text-[22px] font-bold leading-tight text-tme-blue outline-none sm:text-2xl">
                 <BiTitle text={step.title} />
               </h1>
               {step.intro && <BiIntro text={step.intro} className="mt-2" />}
               {step.details && step.details.length > 0 && (
-                <details className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
-                  <summary className="cursor-pointer select-none font-medium" style={{ color: TME_COLORS.primary }}>
+                <details className="mt-3 rounded-[10px] bg-gray-50 px-3 py-1 text-sm text-gray-700 sm:rounded-lg sm:text-[13px]">
+                  <summary className="flex min-h-11 cursor-pointer select-none items-center font-medium text-tme-blue sm:min-h-9">
                     <Bi text={EKYC_UI.moreInfo} variant="inline" />
                   </summary>
-                  <div className="mt-2 space-y-2 text-xs leading-relaxed">
+                  <div className="mb-2 space-y-2 leading-relaxed">
                     {step.details.map((d, i) => (
                       <Bi key={i} text={d} paragraphs />
                     ))}
@@ -1206,11 +1196,11 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
 
               <div className="mt-6 space-y-6">
                 {step.privacy && (
-                  <section className="rounded-xl bg-gray-50 p-4 sm:p-5">
-                    <h2 className="mb-2 text-sm font-semibold" style={{ color: TME_COLORS.primary }}>
+                  <section className="rounded-[10px] bg-gray-50 p-4 sm:p-5">
+                    <h2 className="mb-2 text-[15px] font-semibold text-tme-blue">
                       <Bi text={EKYC_PRIVACY_TITLE} />
                     </h2>
-                    <div className="space-y-2 text-xs leading-relaxed text-gray-600 sm:text-sm">
+                    <div className="space-y-2 text-sm leading-relaxed text-gray-700">
                       {EKYC_PRIVACY_PARAGRAPHS.map((p, i) => (
                         <Bi key={i} text={p} paragraphs />
                       ))}
@@ -1218,7 +1208,7 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
                   </section>
                 )}
                 {step.lead && (
-                  <div className="rounded-xl border-l-4 px-4 py-3 text-sm text-gray-800" style={{ borderColor: TME_COLORS.primary, backgroundColor: 'rgba(36,63,123,0.04)' }}>
+                  <div className="rounded-[10px] border-l-4 border-tme-blue bg-tme-blue/[0.04] px-4 py-3 text-[15px] text-gray-800 sm:text-sm">
                     <Bi text={step.lead} paragraphs />
                   </div>
                 )}
@@ -1244,7 +1234,7 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
             </Card>
           ) : (
             <Card className="lg:p-8">
-              <h1 ref={headingRef} tabIndex={-1} className="text-xl font-bold outline-none sm:text-2xl" style={{ color: TME_COLORS.primary }}>
+              <h1 ref={headingRef} tabIndex={-1} className="text-[22px] font-bold leading-tight text-tme-blue outline-none sm:text-2xl">
                 <BiTitle text={EKYC_UI.checkTitle} />
               </h1>
               <BiIntro text={EKYC_UI.checkIntro} className="mt-2" />
@@ -1260,12 +1250,13 @@ export function EkycForm({ token, payload, readOnly, onSubmitted, onClosed }: Ek
               <div className="mt-6">{review(true)}</div>
 
               {submitError && (
-                <div className="mt-5 text-sm text-red-600" role="alert">
-                  <Bi text={submitError} />
+                <div className="mt-5 flex items-start gap-1.5 text-sm font-medium text-tme-red sm:text-[13px]" role="alert">
+                  <AlertCircle className="mt-px h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+                  <Bi text={submitError} className="min-w-0" deClassName="!text-tme-red" />
                 </div>
               )}
               {uploading && (
-                <div id="ekyc-submit-wait" className="mt-4 text-sm text-gray-500">
+                <div id="ekyc-submit-wait" className="mt-4 text-sm text-gray-600 sm:text-[13px]">
                   <Bi text={EKYC_UI.waitForUpload} />
                 </div>
               )}

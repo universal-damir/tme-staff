@@ -11,8 +11,7 @@ import type { Country } from 'react-phone-number-input';
 import enCountryNames from 'react-phone-number-input/locale/en';
 import { parsePhoneNumberFromString, type CountryCode } from 'libphonenumber-js';
 import { Plus, X } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
-import { CustomDropdown } from '@/components/ui';
+import { AutoGrowText, Button, CustomDropdown, textFieldClasses } from '@/components/ui';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import {
   EKYC_CURRENCY_OPTIONS,
@@ -117,7 +116,7 @@ export function EkycPhoneInput({
         noOptionsText={biInline(EKYC_UI.noCountries, bilingual)}
       />
       {unreadable && (
-        <p className="mt-1 text-[13px] text-amber-700">
+        <p className="mt-1.5 text-sm text-amber-800 sm:text-[13px]">
           {biInline(EKYC_UI.phoneSavedAs, bilingual).replace(/\{value\}/g, value.trim())}
         </p>
       )}
@@ -251,7 +250,7 @@ export function MoneyInput({
     [bilingual]
   );
   const currencyLabelId = `${inputId}-currency`;
-  const borderColor = invalid ? TME_COLORS.error : TME_COLORS.border;
+  const borderClass = invalid ? 'border-tme-red focus:border-tme-red' : 'border-gray-200 sm:border-gray-300 focus:border-tme-blue';
 
   return (
     <div className="flex items-start gap-2" role="group" aria-labelledby={labelledBy} aria-describedby={describedBy}>
@@ -284,8 +283,7 @@ export function MoneyInput({
         aria-label={biInline(EKYC_UI.amount, bilingual)}
         aria-describedby={describedBy}
         aria-invalid={invalid}
-        className="h-11 min-w-0 flex-1 rounded-lg border-2 bg-white px-3 py-2 text-gray-900 transition-colors duration-200 focus:outline-none focus:border-[#243F7B] disabled:bg-gray-50 disabled:text-gray-700"
-        style={{ borderColor }}
+        className={`h-[46px] min-w-0 flex-1 rounded-[10px] border-2 bg-white px-3.5 py-2 text-base text-gray-900 transition-colors duration-200 focus:outline-none disabled:bg-gray-50 disabled:text-gray-700 sm:h-10 sm:rounded-lg sm:border sm:px-3 sm:text-sm sm:focus:ring-2 sm:focus:ring-tme-blue/15 ${borderClass}`}
         value={amount}
         disabled={disabled}
         onFocus={() => {
@@ -376,7 +374,7 @@ export function LinesInput({
   const [rows, setRows] = useState<string[]>(() => ekycLinesFromValue(value));
   const [keys, setKeys] = useState<string[]>(() => ekycLinesFromValue(value).map(newLineKey));
   const lastWritten = useRef(value);
-  const boxRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const boxRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
   const focusAfter = useRef<{ index: number; caret?: number } | null>(null);
   const groupRef = useRef<HTMLDivElement>(null);
 
@@ -427,28 +425,25 @@ export function LinesInput({
   };
 
   const label = (template: EkycText, n: number) => biInline(template, bilingual).replace(/\{n\}/g, String(n));
-  const borderColor = invalid ? TME_COLORS.error : TME_COLORS.border;
 
   return (
     <div ref={groupRef} role="group" aria-labelledby={labelledBy} aria-describedby={describedBy}>
       <ol className="space-y-2">
         {rows.map((row, index) => (
-          <li key={keys[index]} className="flex items-center gap-2">
-            <span aria-hidden="true" className="w-5 shrink-0 text-right text-sm tabular-nums text-slate-400">
+          <li key={keys[index]} className="flex items-start gap-2">
+            <span aria-hidden="true" className="w-5 shrink-0 pt-[11px] text-right text-sm tabular-nums text-gray-600 sm:pt-[9px] sm:text-[13px]">
               {index + 1}.
             </span>
-            <input
+            <AutoGrowText
               ref={(el) => {
                 boxRefs.current[index] = el;
               }}
               id={index === 0 ? inputId : `${inputId}-${index}`}
-              type="text"
               autoComplete="off"
               aria-label={index === 0 ? undefined : label(EKYC_UI.lineLabel, index + 1)}
               aria-describedby={describedBy}
               aria-invalid={invalid}
-              className="h-11 min-w-0 flex-1 rounded-lg border-2 bg-white px-3 py-2 text-gray-900 transition-colors duration-200 focus:outline-none focus:border-[#243F7B] disabled:bg-gray-50 disabled:text-gray-700"
-              style={{ borderColor }}
+              className={textFieldClasses(invalid, 'min-w-0 flex-1')}
               value={row}
               disabled={disabled}
               onChange={(e) => {
@@ -486,25 +481,19 @@ export function LinesInput({
                 type="button"
                 onClick={() => remove(index)}
                 aria-label={label(EKYC_UI.removeLine, index + 1)}
-                title={label(EKYC_UI.removeLine, index + 1)}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                className="tme-btn-focus inline-flex size-11 shrink-0 mt-px sm:mt-0.5 items-center justify-center rounded-[10px] text-gray-600 transition-colors hover:bg-red-50 hover:text-tme-red sm:size-9 sm:rounded-lg"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5 sm:h-4 sm:w-4" aria-hidden="true" />
               </button>
             )}
           </li>
         ))}
       </ol>
       {!disabled && (
-        <button
-          type="button"
-          onClick={() => addAfter(rows.length - 1)}
-          className="mt-2 ml-7 inline-flex min-h-[40px] items-center gap-2 rounded-lg border-2 border-dashed px-3 text-sm font-medium transition-colors hover:bg-gray-50"
-          style={{ borderColor: TME_COLORS.primary, color: TME_COLORS.primary }}
-        >
-          <Plus className="h-4 w-4 shrink-0" />
+        <Button tone="secondary" onClick={() => addAfter(rows.length - 1)} className="mt-2 ml-7">
+          <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
           <Bi text={EKYC_UI.addLine} variant="inline" />
-        </button>
+        </Button>
       )}
     </div>
   );

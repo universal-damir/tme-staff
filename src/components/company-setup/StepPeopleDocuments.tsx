@@ -17,9 +17,8 @@
  * fields it auto-filled (never ones the client has since edited).
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
-  TME_COLORS,
   NATIONALITIES,
   LANGUAGES,
   RELIGIONS,
@@ -27,11 +26,15 @@ import {
   MARITAL_STATUS_OPTIONS,
 } from '@/lib/constants';
 import {
+  AutoGrowText,
   Input,
+  textFieldClasses,
   CustomDropdown,
   CustomDatePicker,
   MultiSelectDropdown,
   PhoneInput,
+  Button,
+  StatusChip,
 } from '@/components/ui';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
@@ -84,6 +87,7 @@ import {
   CheckCircle,
   ChevronDown,
   FileText,
+  Info,
   Plus,
   Sparkles,
   Trash2,
@@ -220,11 +224,15 @@ function readFileAsDataUrl(file: File): Promise<string> {
 function ConstraintPill({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${
-        ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+      className={`inline-flex items-center gap-1.5 text-sm font-medium px-2.5 py-1 rounded-full ${
+        ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-tme-red'
       }`}
     >
-      {ok ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+      {ok ? (
+        <CheckCircle className="w-4 h-4 shrink-0" aria-label="OK" />
+      ) : (
+        <XCircle className="w-4 h-4 shrink-0" aria-label="Not yet" />
+      )}
       {label}
     </span>
   );
@@ -756,7 +764,7 @@ export function StepPeopleDocuments({
   // ---------- Render ----------
   return (
     <div className="space-y-4">
-      <div className="text-sm text-gray-600 space-y-2">
+      <div className="text-[15px] text-gray-700 leading-relaxed space-y-2 sm:text-sm">
         <p>
           <span className="font-medium text-gray-700">Shareholder</span> = owner of the company
           <br />
@@ -778,7 +786,10 @@ export function StepPeopleDocuments({
       </div>
 
       {/* Live totals / constraints bar */}
-      <div className="sticky top-[76px] z-30 bg-white rounded-xl border border-gray-100 shadow-sm p-3 flex flex-wrap items-center gap-2">
+      <div
+        aria-live="polite"
+        className="rounded-[10px] border border-gray-200 bg-gray-50/60 p-3 flex flex-wrap items-center gap-2"
+      >
         <ConstraintPill
           ok={shareholdingOk}
           label={`Shareholding total: ${totals.shareholdingSum}%${shareholdingOk ? '' : ' (must be 100%)'}`}
@@ -825,28 +836,23 @@ export function StepPeopleDocuments({
         // UAE visa (ticked on the next step).
         const needsPhotoAndAddress = companySetupNeedsPhotoAndAddress(person);
         return (
-          <div key={index} className="bg-white rounded-xl border border-gray-100 shadow-sm">
+          <div key={index} className="bg-white rounded-[12px] border border-gray-200">
             {/* Card header */}
-            <div className="flex items-center gap-3 p-4">
+            <div className="flex items-center gap-2 p-2 sm:p-3">
               <button
                 type="button"
                 onClick={() => setOpenIndex(isOpen ? -1 : index)}
-                className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                aria-expanded={isOpen}
+                className="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 flex-1 min-w-0 min-h-11 p-2 rounded-[10px] text-left hover:bg-gray-50 tme-btn-focus sm:min-h-9"
               >
-                <span
-                  className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: `${TME_COLORS.primary}12` }}
-                >
-                  <User className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
+                <span className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-50">
+                  <User className="w-[18px] h-[18px] text-tme-blue" aria-hidden />
                 </span>
-                <span className="min-w-0">
-                  <span
-                    className="block text-sm font-semibold truncate"
-                    style={{ color: TME_COLORS.primary }}
-                  >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-base font-semibold break-words text-tme-blue sm:text-sm">
                     {person.fullName.trim() || `Person ${index + 1}`}
                   </span>
-                  <span className="block text-xs text-gray-500 truncate">
+                  <span className="block text-sm text-gray-600 break-words sm:text-[13px]">
                     {ROLE_DEFS.filter((r) => person.roles[r.key])
                       .map((r) => r.label)
                       .join(' · ') || 'No roles selected yet'}
@@ -855,43 +861,37 @@ export function StepPeopleDocuments({
                       : ''}
                   </span>
                 </span>
-                <span
-                  className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full flex-shrink-0 ${
-                    complete ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
-                  }`}
+                <StatusChip
+                  tone={complete ? 'green' : 'grey'}
+                  icon={complete ? <CheckCircle className="w-3.5 h-3.5" aria-hidden /> : undefined}
+                  className="flex-shrink-0 ml-12 sm:ml-0"
                 >
-                  {complete ? (
-                    <>
-                      <CheckCircle className="w-3.5 h-3.5" />
-                      Complete
-                    </>
-                  ) : (
-                    'Incomplete'
-                  )}
-                </span>
+                  {complete ? 'Complete' : 'Incomplete'}
+                </StatusChip>
                 <ChevronDown
-                  className={`w-4 h-4 text-gray-400 transition-transform flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`}
+                  className={`w-5 h-5 text-gray-600 transition-transform flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`}
+                  aria-hidden
                 />
               </button>
-              <button
-                type="button"
+              <Button
+                tone="dangerGhost"
                 onClick={() => removePerson(index)}
                 disabled={persons.length <= 1}
-                className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                title="Remove this person"
+                aria-label={`Remove ${person.fullName.trim() || `person ${index + 1}`}`}
+                className="size-11 !px-0 shrink-0 sm:size-9"
               >
-                <Trash2 className="w-4 h-4" />
-              </button>
+                <Trash2 className="w-[18px] h-[18px]" aria-hidden />
+              </Button>
             </div>
 
             {isOpen && (
-              <div className="px-4 pb-5 space-y-6 border-t border-gray-50 pt-4">
+              <div className="px-4 sm:px-5 pb-5 space-y-6 border-t border-gray-200 pt-4">
                 {/* 1 — Passport first: the scan fills the fields below. */}
                 <div>
-                  <p className="text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
+                  <p className="text-[15px] font-semibold text-tme-blue mb-1 sm:text-sm">
                     Passport: data page (we read your details from it)
                   </p>
-                  <p className="text-xs text-gray-500 mb-3">
+                  <p className="text-sm text-gray-600 mb-3 sm:text-[13px]">
                     The printed page with the photo and the two machine-readable lines.
                   </p>
                   <div className="space-y-4">
@@ -976,10 +976,10 @@ export function StepPeopleDocuments({
                         on their behalf. India is never offered it: the address
                         page always exists. */}
                     {offersNoAdditionalPage && (
-                      <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                      <label className="flex items-start gap-3 text-[15px] cursor-pointer text-gray-800 py-1 sm:text-sm">
                         <input
                           type="checkbox"
-                          className="mt-0.5 flex-shrink-0"
+                          className="mt-0.5 w-5 h-5 flex-shrink-0 accent-tme-blue sm:w-4 sm:h-4"
                           checked={declaredNoAdditionalPage}
                           onChange={(e) => {
                             const checked = e.target.checked;
@@ -1043,11 +1043,11 @@ export function StepPeopleDocuments({
                       <div className="flex items-center gap-3">
                         <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent" />
                         <div>
-                          <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-                            Reading passport data…
+                          <p className="text-[15px] font-semibold text-tme-blue sm:text-sm" role="status">
+                            Reading your passport…
                           </p>
-                          <p className="text-xs text-gray-500 mt-0.5">
-                            Extracting the details from the passport. This may take a few seconds.
+                          <p className="text-sm text-gray-600 mt-0.5 sm:text-[13px]">
+                            We are copying the details from the passport. This can take a few seconds.
                           </p>
                         </div>
                       </div>
@@ -1057,18 +1057,10 @@ export function StepPeopleDocuments({
 
                 {/* 2 — Personal details (auto-filled from the passport when possible) */}
                 <div>
-                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>
-                    Personal details
-                  </p>
+                  <p className="text-[15px] font-semibold text-tme-blue mb-2 sm:text-sm">Personal details</p>
                   {wasAutoFilled && !passportState.extracting && !additionalState.extracting && (
-                    <div
-                      className="mb-3 rounded-lg p-3 flex items-start gap-2"
-                      style={{ backgroundColor: 'rgba(36,63,123,0.06)' }}
-                    >
-                      <Sparkles
-                        className="w-4 h-4 mt-0.5 flex-shrink-0"
-                        style={{ color: TME_COLORS.primary }}
-                      />
+                    <div className="mb-3 rounded-[10px] border border-blue-100 bg-blue-50/70 p-3 flex items-start gap-2">
+                      <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0 text-tme-blue" aria-hidden />
                       <p className="text-sm text-gray-700">
                         These details were auto-filled from your passport. Please review and correct
                         if needed.
@@ -1189,13 +1181,10 @@ export function StepPeopleDocuments({
 
                 {/* 3 — Roles */}
                 <div>
-                  <label
-                    className="block text-sm font-medium mb-2"
-                    style={{ color: TME_COLORS.primary }}
-                  >
+                  <p className="text-[15px] font-semibold text-tme-blue mb-2 sm:text-sm">
                     Roles in the company
-                    <span className="text-red-500 ml-1">*</span>
-                  </label>
+                    <span className="text-tme-red ml-1" aria-hidden>*</span>
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {ROLE_DEFS.map((role) => {
                       const active = person.roles[role.key];
@@ -1211,24 +1200,14 @@ export function StepPeopleDocuments({
                           disabled={!!blockedReason}
                           title={blockedReason ?? undefined}
                           onClick={() => updateRoles(index, role.key, !active)}
-                          className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all duration-200 ${
+                          aria-pressed={active}
+                          className={`min-h-11 px-4 py-2 rounded-full text-[15px] font-medium border-2 transition-colors duration-200 tme-btn-focus sm:text-[13px] sm:min-h-8 sm:px-3 sm:py-1 ${
                             active
-                              ? 'text-white'
+                              ? 'bg-tme-blue border-tme-blue text-white'
                               : blockedReason
-                                ? 'opacity-40 cursor-not-allowed'
-                                : 'hover:bg-gray-50'
+                                ? 'border-tme-blue/25 text-tme-blue opacity-50 cursor-not-allowed'
+                                : 'border-tme-blue/25 text-tme-blue hover:bg-blue-50'
                           }`}
-                          style={
-                            active
-                              ? {
-                                  backgroundColor: TME_COLORS.primary,
-                                  borderColor: TME_COLORS.primary,
-                                }
-                              : {
-                                  color: TME_COLORS.primary,
-                                  borderColor: `${TME_COLORS.primary}40`,
-                                }
-                          }
                         >
                           {role.label}
                         </button>
@@ -1240,7 +1219,7 @@ export function StepPeopleDocuments({
                       companySetupRoleBlockedReason(persons, index, role.key)
                     ).filter((r): r is string => !!r);
                     return reasons.length > 0 ? (
-                      <p className="text-xs text-gray-500 mt-2">{reasons.join(' ')}</p>
+                      <p className="text-sm text-gray-600 mt-2 sm:text-[13px]">{reasons.join(' ')}</p>
                     ) : null;
                   })()}
                   {person.roles.shareholder && (
@@ -1406,15 +1385,15 @@ export function StepPeopleDocuments({
                 </div>
 
                 <div>
-                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>
-                    Previous / current employer (if any)
+                  <p className="text-[15px] font-semibold text-tme-blue mb-2 sm:text-sm">
+                    Current or previous employer (if any)
                   </p>
                   {/* A company name or an address is often longer than one
                       line: a single-line input just scrolls the text out of
                       sight, so these grow downwards instead. The position is
                       short and stays a plain input. */}
-                  <div className="grid grid-cols-1 sm:grid-cols-7 gap-4">
-                    <div className="sm:col-span-3">
+                  <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
+                    <div className="lg:col-span-3">
                       <GrowingField
                         label="Employer name"
                         value={person.previousEmployer?.name ?? ''}
@@ -1429,7 +1408,7 @@ export function StepPeopleDocuments({
                         maxLength={200}
                       />
                     </div>
-                    <div className="sm:col-span-2">
+                    <div className="lg:col-span-2">
                       <GrowingField
                         label="Employer address"
                         value={person.previousEmployer?.address ?? ''}
@@ -1444,7 +1423,7 @@ export function StepPeopleDocuments({
                         maxLength={300}
                       />
                     </div>
-                    <div className="sm:col-span-2">
+                    <div className="lg:col-span-2">
                       <Input
                         label="Position"
                         value={person.previousEmployer?.position ?? ''}
@@ -1512,11 +1491,9 @@ export function StepPeopleDocuments({
 
                 {/* 6 — Remaining documents */}
                 <div>
-                  <p className="text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
-                    Documents
-                  </p>
-                  <p className="text-xs text-gray-500 mb-3">
-                    Flatbed scanner quality, not phone photos.
+                  <p className="text-[15px] font-semibold text-tme-blue mb-1 sm:text-sm">Documents</p>
+                  <p className="text-sm text-gray-600 mb-3 sm:text-[13px]">
+                    Please use a flatbed scanner, not phone photos.
                   </p>
 
                   {/* Proof of address, and the home address it proves, in one
@@ -1551,7 +1528,7 @@ export function StepPeopleDocuments({
                         <>
                           {(proofState.warnings ?? docs.proof_of_address?.validationErrors ?? [])
                             .length > 0 && (
-                            <p className="mt-2 text-xs text-gray-500">
+                            <p className="mt-2 text-sm text-gray-600 sm:text-[13px]">
                               Your file is saved. You can carry on, or replace it.
                             </p>
                           )}
@@ -1594,23 +1571,23 @@ export function StepPeopleDocuments({
                     />
                   <div>
                     <label
-                      className="block text-sm font-medium mb-1"
-                      style={{ color: TME_COLORS.primary }}
+                      htmlFor={`company-setup-home-address-${index}`}
+                      className="block text-[15px] font-semibold mb-1.5 text-tme-blue sm:text-sm sm:font-medium"
                     >
                       Full home address
                     </label>
                     <textarea
+                      id={`company-setup-home-address-${index}`}
                       value={person.fullAddress ?? ''}
                       onChange={(e) => updatePerson(index, { fullAddress: e.target.value })}
                       rows={2}
                       maxLength={400}
                       placeholder="Street, number, postcode, city, country"
-                      className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
-                      onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+                      className="w-full px-3.5 py-2.5 rounded-[10px] border-2 border-gray-200 focus:outline-none focus:border-tme-blue transition-colors duration-200 text-base sm:py-2 sm:border sm:border-gray-300 sm:rounded-lg sm:text-sm sm:focus:ring-2 sm:focus:ring-tme-blue/15"
                     />
-                    <p className="text-xs text-amber-700 mt-1">
-                      Must match the address on the statement above.
+                    <p className="text-sm text-gray-700 mt-1.5 flex items-start gap-1.5">
+                      <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-tme-blue" aria-hidden />
+                      Must match the address on the bank statement above.
                     </p>
                   </div>
                   </div>
@@ -1667,20 +1644,15 @@ export function StepPeopleDocuments({
       })}
 
       {persons.length >= COMPANY_SETUP_MAX_PERSONS && (
-        <p className="text-xs text-gray-500">
+        <p className="text-sm text-gray-600 sm:text-[13px]">
           You can add up to {COMPANY_SETUP_MAX_PERSONS} people.
         </p>
       )}
       {persons.length < COMPANY_SETUP_MAX_PERSONS && (
-        <button
-          type="button"
-          onClick={addPerson}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-sm"
-          style={{ backgroundColor: '#f0f4ff', color: TME_COLORS.primary }}
-        >
-          <Plus className="w-4 h-4" />
+        <Button tone="secondary" onClick={addPerson}>
+          <Plus className="w-4 h-4" aria-hidden />
           Add another person
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -1712,28 +1684,20 @@ export function PlainDocSlot({
   // upload slot, and whatever they upload becomes their own file.
   if (staffProvided && docRef?.path) {
     return (
-      <div
-        className="border-2 rounded-lg p-4 flex items-center gap-3"
-        style={{
-          borderColor: `${TME_COLORS.primary}30`,
-          backgroundColor: 'rgba(36,63,123,0.04)',
-        }}
-      >
-        <CheckCircle className="w-5 h-5 flex-shrink-0" style={{ color: TME_COLORS.primary }} />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-gray-700">{label}</p>
-          <p className="text-xs truncate" style={{ color: TME_COLORS.primary }}>
-            Provided by TME. Please confirm it is correct
-            {docRef.filename ? ` · ${docRef.filename}` : ''}
-          </p>
+      <div className="border-2 border-blue-100 bg-blue-50/50 rounded-[10px] p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+          <div className="min-w-0">
+            <p className="text-[15px] font-semibold text-gray-900 sm:text-sm">{label}</p>
+            <p className="text-sm text-gray-700 break-words">
+              Provided by TME. Please check it is correct
+              {docRef.filename ? ` · ${docRef.filename}` : ''}
+            </p>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors"
-        >
+        <Button tone="plain" onClick={onRemove} className="flex-shrink-0 w-full sm:w-auto">
           Not correct? Replace it
-        </button>
+        </Button>
       </div>
     );
   }
@@ -1770,21 +1734,17 @@ function StatementAddressFix({
   if (!address) return null;
   if (address.toLowerCase() === typed.toLowerCase()) return null;
   return (
-    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-      <p className="text-xs text-amber-800 mb-1">
+    <div className="mt-2 rounded-[10px] border border-amber-200 bg-amber-50 p-3.5">
+      <p className="text-sm text-amber-900 mb-1">
         {typed
           ? 'This is the address printed on the statement you uploaded:'
           : 'We read this address from the statement you uploaded:'}
       </p>
-      <p className="text-xs font-semibold text-amber-900 mb-2 break-words">{address}</p>
-      <button
-        type="button"
-        onClick={() => onUse(address)}
-        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors"
-      >
+      <p className="text-[15px] font-semibold text-amber-950 mb-3 break-words sm:text-sm">{address}</p>
+      <Button tone="plain" onClick={() => onUse(address)} className="w-full sm:w-auto">
         Use this as the home address
-      </button>
-      <p className="text-[11px] text-amber-700 mt-2">
+      </Button>
+      <p className="text-sm text-amber-900 mt-2">
         {typed
           ? 'This replaces the home address entered above, so both say the same thing.'
           : 'This fills in the home address above.'}
@@ -1796,8 +1756,8 @@ function StatementAddressFix({
 /**
  * A single-line-looking field that grows downwards as the text gets longer, so
  * a long employer name or address stays readable instead of scrolling out of
- * the box. Matches the shared Input chrome (42px start height, same border and
- * focus colour) so the row lines up with the plain inputs beside it.
+ * the box. Matches the shared Input chrome (the shared AutoGrowText: 46px phone / 40px desktop start
+ * height, same border and focus colour) so the row lines up with the plain inputs beside it.
  */
 function GrowingField({
   label,
@@ -1810,37 +1770,18 @@ function GrowingField({
   onChange: (value: string) => void;
   maxLength?: number;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  const resize = (el: HTMLTextAreaElement | null) => {
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.max(el.scrollHeight, 42)}px`;
-  };
-
-  // Re-measure when the value arrives from outside (prefill, resumed draft).
-  useEffect(() => {
-    resize(ref.current);
-  }, [value]);
-
+  const id = useId();
   return (
     <div className="w-full">
-      <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
+      <label htmlFor={id} className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
         {label}
       </label>
-      <textarea
-        ref={ref}
-        rows={1}
+      <AutoGrowText
+        id={id}
         value={value}
         maxLength={maxLength}
-        onChange={(e) => {
-          onChange(e.target.value);
-          resize(e.target);
-        }}
-        className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-colors duration-200 resize-none overflow-hidden text-sm leading-6"
-        style={{ fontFamily: 'Inter, sans-serif', minHeight: 42 }}
-        onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-        onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
+        onChange={(e) => onChange(e.target.value)}
+        className={textFieldClasses(false)}
       />
     </div>
   );
@@ -1848,19 +1789,15 @@ function GrowingField({
 
 function ManualReviewOffer({ onAccept }: { onAccept: () => void }) {
   return (
-    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-      <p className="text-xs text-amber-800 mb-2 flex items-start gap-1">
-        <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-        Having trouble with the automatic check? You can submit this file anyway and TME will verify
-        it manually.
+    <div className="mt-2 rounded-[10px] border border-amber-200 bg-amber-50 p-3.5">
+      <p className="text-sm text-amber-900 mb-3 flex items-start gap-1.5">
+        <FileText className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-700" aria-hidden />
+        Having trouble with the automatic check? You can send this file anyway and TME will check
+        it by hand.
       </p>
-      <button
-        type="button"
-        onClick={onAccept}
-        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors"
-      >
+      <Button tone="plain" onClick={onAccept} className="w-full sm:w-auto">
         Submit for manual review
-      </button>
+      </Button>
     </div>
   );
 }

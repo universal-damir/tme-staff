@@ -2,8 +2,16 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { TME_COLORS } from '@/lib/constants';
-import { CustomDropdown } from '@/components/ui';
+import {
+  Button,
+  Card,
+  ClientPageHeader,
+  CustomDropdown,
+  FormFooter,
+  Input,
+  PageBody,
+  StatusChip,
+} from '@/components/ui';
 import { requestJson, failureMessage, FAILURE_MESSAGES } from '@/lib/request-outcome';
 import { uploadFileToRoute } from '@/lib/upload-client';
 import {
@@ -11,6 +19,7 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
+  AlertCircle,
   UploadCloud,
   FileText,
   FileCode2,
@@ -53,34 +62,47 @@ interface IntakeData {
 
 const ACCEPT = '.pdf,.xml,application/pdf,application/xml,text/xml,image/jpeg,image/png,image/webp';
 
-// NOTE: Shell and Header are defined at MODULE scope (not inside the page
+const PAGE_TITLE = 'E-invoicing readiness pre-assessment';
+
+// NOTE: Frame and StatusView are defined at MODULE scope (not inside the page
 // component). Defining them inline would give them a new identity on every
 // render, so React would remount the whole subtree on each keystroke and the
 // "Other" text input would lose focus after one character.
-function Shell({ children }: { children: React.ReactNode }) {
+function Frame({
+  title = PAGE_TITLE,
+  companyName,
+  children,
+}: {
+  title?: string;
+  companyName?: string | null;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
-        {children}
-      </div>
+    <div className="min-h-screen bg-tme-page">
+      <ClientPageHeader eyebrow="E-invoicing" title={title} subtitle={companyName || undefined} />
+      <PageBody>{children}</PageBody>
     </div>
   );
 }
 
-function Header({ companyName }: { companyName?: string | null }) {
+/** One centred message (loading, link problems, thank you). */
+function StatusView({
+  icon,
+  heading,
+  children,
+}: {
+  icon: React.ReactNode;
+  heading: string;
+  children?: React.ReactNode;
+}) {
   return (
-    <div className="mb-8">
-      <div
-        className="text-xs font-semibold tracking-wide uppercase mb-2"
-        style={{ color: TME_COLORS.secondary }}
-      >
-        TME Services — E-Invoicing
+    <Card>
+      <div className="flex flex-col items-center py-8 text-center">
+        {icon}
+        <h2 className="text-xl font-semibold mb-2 text-tme-blue sm:text-lg">{heading}</h2>
+        {children}
       </div>
-      <h1 className="text-2xl font-bold" style={{ color: TME_COLORS.primary }}>
-        E-Invoicing Readiness Pre-Assessment
-      </h1>
-      {companyName && <p className="text-gray-600 mt-1">{companyName}</p>}
-    </div>
+    </Card>
   );
 }
 
@@ -97,28 +119,16 @@ function XmlGuidance({ software, guidance }: { software: string; guidance: Softw
 
   const tone =
     guidance.xml === 'maybe'
-      ? {
-          bg: 'rgba(36,63,123,0.06)',
-          color: TME_COLORS.primary,
-          Icon: FileCode2,
-          headline: `${software} can usually export invoices as XML`,
-        }
-      : {
-          bg: 'rgba(36,63,123,0.04)',
-          color: TME_COLORS.primary,
-          Icon: Info,
-          headline: "We'll help you get export-ready",
-        };
+      ? { Icon: FileCode2, headline: `${software} can usually export invoices as XML` }
+      : { Icon: Info, headline: "We'll help you get export-ready" };
 
   const { Icon } = tone;
   return (
-    <div className="mt-3 rounded-xl p-4 flex gap-3" style={{ backgroundColor: tone.bg }}>
-      <Icon className="w-5 h-5 shrink-0 mt-0.5" style={{ color: tone.color }} />
+    <div className="mt-3 rounded-xl p-4 flex gap-3 bg-blue-50/60 border border-blue-100">
+      <Icon className="w-5 h-5 shrink-0 mt-0.5 text-tme-blue" aria-hidden />
       <div>
-        <p className="text-sm font-semibold" style={{ color: TME_COLORS.primary }}>
-          {tone.headline}
-        </p>
-        <p className="text-sm text-gray-600 mt-1 leading-relaxed">{guidance.note}</p>
+        <p className="text-[15px] font-semibold text-tme-blue sm:text-sm">{tone.headline}</p>
+        <p className="text-[15px] text-gray-700 mt-1 leading-relaxed sm:text-[13px]">{guidance.note}</p>
       </div>
     </div>
   );
@@ -284,59 +294,51 @@ export default function EInvoicingIntakePage() {
 
   if (state === 'loading') {
     return (
-      <Shell>
-        <div className="flex flex-col items-center py-16 text-gray-500">
-          <Loader2 className="w-8 h-8 animate-spin mb-3" style={{ color: TME_COLORS.primary }} />
-          Loading…
-        </div>
-      </Shell>
+      <Frame>
+        <StatusView icon={<Loader2 className="w-8 h-8 animate-spin mb-3 text-tme-blue" aria-hidden />} heading="Loading…" />
+      </Frame>
     );
   }
 
   if (state === 'error') {
     return (
-      <Shell>
-        <div className="flex flex-col items-center py-12 text-center">
-          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            We could not open the form
-          </h2>
-          <p className="text-gray-600">{loadError}</p>
-        </div>
-      </Shell>
+      <Frame>
+        <StatusView
+          icon={<XCircle className="w-12 h-12 mb-4 text-tme-red" aria-hidden />}
+          heading="We could not open the form"
+        >
+          <p className="text-base text-gray-600 sm:text-[15px]">{loadError}</p>
+        </StatusView>
+      </Frame>
     );
   }
 
   if (state === 'not_found') {
     return (
-      <Shell>
-        <div className="flex flex-col items-center py-12 text-center">
-          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            This link isn’t valid
-          </h2>
-          <p className="text-gray-600">
+      <Frame>
+        <StatusView
+          icon={<XCircle className="w-12 h-12 mb-4 text-tme-red" aria-hidden />}
+          heading="This link isn’t valid"
+        >
+          <p className="text-base text-gray-600 sm:text-[15px]">
             The link may be incorrect. Please use the link from your TME email, or contact your TME
             consultant.
           </p>
-        </div>
-      </Shell>
+        </StatusView>
+      </Frame>
     );
   }
 
   if (state === 'closed') {
     return (
-      <Shell>
-        <div className="flex flex-col items-center py-12 text-center">
-          <AlertTriangle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.secondary }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            This link has expired
-          </h2>
-          <p className="text-gray-600">
-            Please contact your TME consultant to receive a fresh link.
-          </p>
-        </div>
-      </Shell>
+      <Frame>
+        <StatusView
+          icon={<AlertTriangle className="w-12 h-12 mb-4 text-amber-600" aria-hidden />}
+          heading="This link has expired"
+        >
+          <p className="text-base text-gray-600 sm:text-[15px]">Please contact your TME consultant to receive a fresh link.</p>
+        </StatusView>
+      </Frame>
     );
   }
 
@@ -344,31 +346,28 @@ export default function EInvoicingIntakePage() {
     // noInvoices is set from the GET response for the already-submitted view,
     // and from the live checkbox state right after a fresh submit.
     return (
-      <Shell>
-        <Header companyName={data?.company_name} />
-        <div className="flex flex-col items-center py-10 text-center">
-          <CheckCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.success }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            Thank you — we’ve received your submission
-          </h2>
+      <Frame companyName={data?.company_name}>
+        <StatusView
+          icon={<CheckCircle className="w-12 h-12 mb-4 text-green-700" aria-hidden />}
+          heading="Thank you — we’ve received your submission"
+        >
           {noInvoices ? (
-            <p className="text-gray-600 max-w-md">
-              You confirmed that your company does not issue any invoices. Please note that every
-              entity which holds a UAE license and conducts business must still appoint an
-              ASP (Accredited Service Provider), even if it only receives supplier invoices over
-              the network. TME Services is developing UAE-compliant e-invoicing software and is in
-              the process of becoming an ASP before the end of 2026. Currently there is nothing to
-              be done from your side. We will get back to you as soon as we make progress on the
-              ASP registration.
+            <p className="text-base text-gray-600 max-w-md leading-relaxed sm:text-[15px]">
+              You confirmed that your company does not issue any invoices. Every business with a UAE
+              license must still appoint an Accredited Service Provider (ASP), the company that
+              exchanges your e-invoices and reports them to the tax authority. This applies even if
+              you only receive supplier invoices. TME Services is building UAE e-invoicing software
+              and plans to become an ASP before the end of 2026. There is nothing you need to do now.
+              We will contact you when the ASP registration moves forward.
             </p>
           ) : (
-            <p className="text-gray-600 max-w-md">
+            <p className="text-base text-gray-600 max-w-md leading-relaxed sm:text-[15px]">
               Our team will review your invoices and accounting setup, and your TME consultant will
               be in touch with the next steps. No further action is needed from you right now.
             </p>
           )}
-        </div>
-      </Shell>
+        </StatusView>
+      </Frame>
     );
   }
 
@@ -376,63 +375,53 @@ export default function EInvoicingIntakePage() {
   const softwareOptions = (data?.software_options ?? []).map((o) => ({ value: o, label: o }));
   const guidance =
     software && software !== 'Other' ? data?.software_guidance?.[software] ?? null : null;
+  const showUploads = !noInvoices || files.length > 0;
   return (
-    <Shell>
-      <Header companyName={data?.company_name} />
+    <Frame companyName={data?.company_name}>
+      <Card>
+        <p className="text-base text-gray-700 leading-relaxed sm:text-sm">
+          The UAE is introducing mandatory e-invoicing. To pre-assess how ready your business is, we
+          need just two things from you: the accounting system you use and a range of sample invoices.
+          The more invoice types you share, the more precisely we can pinpoint your gap. Your files are
+          used only for this pre-assessment and are never shared.
+        </p>
 
-      <p className="text-gray-600 mb-8 text-sm leading-relaxed">
-        The UAE is introducing mandatory e-invoicing. To pre-assess how ready your business is, we
-        need just two things from you: the accounting system you use and a range of sample invoices.
-        The more invoice types you share, the more precisely we can pinpoint your gap. Your files are
-        used only for this pre-assessment and are never shared.
-      </p>
-
-      {/* Receive-only declaration: waives the upload requirement, never the
-          assessment itself — every licensed business still needs an ASP. */}
-      <div className="mb-8">
-        <label
-          className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
-          style={{ borderColor: TME_COLORS.border }}
-        >
+        {/* Receive-only declaration: waives the upload requirement, never the
+            assessment itself — every licensed business still needs an ASP. */}
+        <label className="mt-5 flex items-start gap-3 rounded-[10px] border-2 border-gray-200 p-3.5 cursor-pointer sm:gap-2.5 sm:rounded-lg sm:border sm:border-gray-300 sm:p-3 has-[:checked]:border-tme-blue has-[:checked]:bg-blue-50/50">
           <input
             type="checkbox"
             checked={noInvoices}
             onChange={(e) => setNoInvoices(e.target.checked)}
             disabled={uploading || submitting}
-            className="mt-0.5 w-4 h-4 shrink-0"
-            style={{ accentColor: TME_COLORS.primary }}
+            className="mt-0.5 w-5 h-5 shrink-0 accent-tme-blue sm:w-4 sm:h-4"
           />
-          <span className="text-sm text-gray-700">
+          <span className="text-[15px] text-gray-800 leading-snug sm:text-sm">
             We confirm that our company does not issue any invoices to clients or business partners.
             We only receive supplier invoices.
           </span>
         </label>
 
         {noInvoices && (
-          <div
-            className="mt-3 rounded-xl p-4 flex gap-3"
-            style={{ backgroundColor: 'rgba(36,63,123,0.06)' }}
-          >
-            <Info className="w-5 h-5 shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
+          <div className="mt-3 rounded-xl p-4 flex gap-3 bg-blue-50/60 border border-blue-100">
+            <Info className="w-5 h-5 shrink-0 mt-0.5 text-tme-blue" aria-hidden />
             <div>
-              <p className="text-sm font-semibold" style={{ color: TME_COLORS.primary }}>
-                An ASP appointment is still required
+              <p className="text-[15px] font-semibold text-tme-blue sm:text-sm">
+                You still need an Accredited Service Provider (ASP)
               </p>
-              <p className="text-sm text-gray-600 mt-1 leading-relaxed">
-                Under the UAE e-invoicing framework, every entity which holds a UAE license and
-                conducts business must appoint an ASP (Accredited Service Provider), even if it
-                only receives supplier invoices over the network and never issues its own. The
-                deadline to appoint an ASP for businesses with revenue below AED 50 million is
-                31.03.2027, with go-live on 01.07.2027. If you use an accounting or bookkeeping
-                system, you can optionally tell us below.
+              <p className="text-[15px] text-gray-700 mt-1 leading-relaxed sm:text-[13px]">
+                An ASP is the company that exchanges your e-invoices and reports them to the tax
+                authority. Every business with a UAE license must appoint one, even if it only
+                receives supplier invoices. If your yearly revenue is below AED 50 million, the
+                deadline to appoint an ASP is 31.03.2027 and e-invoicing starts on 01.07.2027. If you
+                use an accounting or bookkeeping system, you can tell us below (optional).
               </p>
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
-      {/* Accounting software */}
-      <div className="mb-8">
+      <Card title={noInvoices ? 'Your accounting system' : 'Your invoicing system'}>
         <CustomDropdown
           label={
             noInvoices
@@ -445,152 +434,137 @@ export default function EInvoicingIntakePage() {
           placeholder="Select…"
         />
         {software === 'Other' && (
-          <input
-            type="text"
-            value={softwareOther}
-            onChange={(e) => setSoftwareOther(e.target.value)}
-            placeholder="Please specify your system"
-            className="w-full mt-2 px-3 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200"
-            style={{ height: 42 }}
-            onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-            onBlur={(e) => (e.currentTarget.style.borderColor = TME_COLORS.border)}
-          />
+          <div className="mt-3">
+            <Input
+              label="Name of your system"
+              value={softwareOther}
+              onChange={(e) => setSoftwareOther(e.target.value)}
+              placeholder="Please specify your system"
+            />
+          </div>
         )}
         {!noInvoices && guidance && <XmlGuidance software={software} guidance={guidance} />}
-      </div>
+      </Card>
 
       {/* Invoice upload — hidden for receive-only clients, except that files
           uploaded BEFORE ticking the declaration stay listed and deletable
           (they would otherwise be stuck on the submission, invisible). */}
-      {(!noInvoices || files.length > 0) && (
-      <div className="mb-6">
-        {!noInvoices && (
-        <>
-        <label className="block text-sm font-medium mb-1" style={{ color: TME_COLORS.primary }}>
-          Sample invoices (XML file preferred)
-        </label>
-        <p className="text-xs text-gray-500 mb-3">
-          Upload 1–10 recent invoices. To help us determine your gap more precisely, please include a
-          variety where you have them — standard tax invoices, credit notes, commercial invoices, and
-          advance / cost-recharge invoices. XML (e-invoice) files give the most accurate result, but
-          PDF is fine too, although results may vary.
-        </p>
+      {showUploads && (
+        <Card title={noInvoices ? 'Files you uploaded' : 'Sample invoices (XML file preferred)'}>
+          {!noInvoices && (
+            <>
+              <p className="text-[15px] text-gray-700 leading-relaxed mb-4 sm:text-sm">
+                Upload 1 to 10 recent invoices. To help us find your gap more precisely, please
+                include different types where you have them: standard tax invoices, credit notes,
+                commercial invoices, and advance or cost-recharge invoices. XML files (the structured
+                e-invoice file your system can export) give the most accurate result. PDF is fine too,
+                although results may vary.
+              </p>
 
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          className="w-full border-2 border-dashed rounded-xl py-8 flex flex-col items-center justify-center gap-2 transition-colors disabled:opacity-60"
-          style={{ borderColor: TME_COLORS.border }}
-        >
-          {uploading ? (
-            <Loader2 className="w-6 h-6 animate-spin" style={{ color: TME_COLORS.primary }} />
-          ) : (
-            <UploadCloud className="w-6 h-6" style={{ color: TME_COLORS.primary }} />
+              <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-2 border-dashed border-tme-line rounded-xl">
+                <div className="flex items-start gap-3 flex-[1_1_200px] min-w-0">
+                  <UploadCloud className="w-[22px] h-[22px] shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-semibold text-gray-900 sm:text-sm">Your sample invoices</p>
+                    <p className="text-sm text-gray-600 sm:text-[13px]">XML, PDF, JPG, PNG or WEBP, up to 10 MB each.</p>
+                  </div>
+                </div>
+                <Button
+                  tone="secondary"
+                  busy={uploading}
+                  onClick={() => inputRef.current?.click()}
+                  className="w-full sm:w-auto"
+                >
+                  {uploading ? 'Uploading…' : 'Upload file'}
+                </Button>
+              </div>
+              <input
+                ref={inputRef}
+                type="file"
+                accept={ACCEPT}
+                multiple
+                className="hidden"
+                onChange={(e) => handleFiles(e.target.files)}
+              />
+            </>
           )}
-          <span className="text-sm text-gray-600">
-            {uploading ? 'Uploading…' : 'Click to choose files'}
-          </span>
-        </button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT}
-          multiple
-          className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
-        />
-        </>
-        )}
 
-        {noInvoices && files.length > 0 && (
-          <p className="text-xs text-gray-500 mb-1">
-            You uploaded sample invoices before confirming the declaration above. They will not
-            be reviewed. You can remove them below.
-          </p>
-        )}
+          {noInvoices && files.length > 0 && (
+            <p className="text-[15px] text-gray-700 leading-relaxed sm:text-sm">
+              You uploaded sample invoices before confirming the declaration above. They will not
+              be reviewed. You can remove them below.
+            </p>
+          )}
 
-        {files.length > 0 && (
-          <ul className="mt-4 space-y-2">
-            {files.map((f, i) => (
-              <li
-                key={`${f.filename}-${i}`}
-                className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100"
-              >
-                {f.channel === 'digital_xml' ? (
-                  <FileCode2 className="w-5 h-5 shrink-0" style={{ color: TME_COLORS.primary }} />
-                ) : (
-                  <FileText className="w-5 h-5 shrink-0" style={{ color: TME_COLORS.primary }} />
-                )}
-                <span className="text-sm text-gray-700 truncate flex-1">{f.filename}</span>
-                <span
-                  className="text-[11px] font-medium px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: 'rgba(36,63,123,0.08)', color: TME_COLORS.primary }}
+          {files.length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {files.map((f, i) => (
+                <li
+                  key={`${f.filename}-${i}`}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-3 pr-1 py-1 rounded-[10px] border border-gray-200"
                 >
-                  {f.channel === 'digital_xml' ? 'XML' : 'PDF / image'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(i)}
-                  disabled={deletingIndex !== null || uploading || submitting}
-                  aria-label={`Remove ${f.filename}`}
-                  title="Remove this file"
-                  className="shrink-0 p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                >
-                  {deletingIndex === i ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                  {f.channel === 'digital_xml' ? (
+                    <FileCode2 className="w-5 h-5 shrink-0 text-tme-blue" aria-hidden />
                   ) : (
-                    <Trash2 className="w-4 h-4" />
+                    <FileText className="w-5 h-5 shrink-0 text-tme-blue" aria-hidden />
                   )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+                  <span className="text-[15px] text-gray-800 break-all flex-1 min-w-0 sm:text-sm">{f.filename}</span>
+                  <StatusChip tone="blue">{f.channel === 'digital_xml' ? 'XML' : 'PDF / image'}</StatusChip>
+                  <Button
+                    tone="dangerGhost"
+                    onClick={() => handleDelete(i)}
+                    disabled={deletingIndex !== null || uploading || submitting}
+                    aria-label={`Remove ${f.filename}`}
+                    className="w-11 shrink-0 px-0! sm:w-9 sm:min-h-9!"
+                  >
+                    {deletingIndex === i ? (
+                      <Loader2 className="w-5 h-5 animate-spin sm:w-4 sm:h-4" aria-hidden />
+                    ) : (
+                      <Trash2 className="w-5 h-5 sm:w-4 sm:h-4" aria-hidden />
+                    )}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       )}
 
-      {data?.price_aed != null && !noInvoices && (
-        <label
-          className="mb-4 flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
-          style={{ borderColor: TME_COLORS.border }}
-        >
-          <input
-            type="checkbox"
-            checked={priceAgreed}
-            onChange={(e) => setPriceAgreed(e.target.checked)}
-            className="mt-0.5 w-4 h-4 shrink-0"
-            style={{ accentColor: TME_COLORS.primary }}
-          />
-          <span className="text-sm text-gray-700">
-            I agree to the pre-assessment fee of{' '}
-            <strong style={{ color: TME_COLORS.primary }}>
-              AED {data.price_aed.toLocaleString('en-US')}
-            </strong>{' '}
-            (plus 5% VAT). The fee will be invoiced together with your pre-assessment report.
-          </span>
-        </label>
-      )}
+      <Card title="Send to TME">
+        <div className="space-y-4">
+          {data?.price_aed != null && !noInvoices && (
+            <label className="flex items-start gap-3 rounded-[10px] border-2 border-gray-200 p-3.5 cursor-pointer sm:gap-2.5 sm:rounded-lg sm:border sm:border-gray-300 sm:p-3 has-[:checked]:border-tme-blue has-[:checked]:bg-blue-50/50">
+              <input
+                type="checkbox"
+                checked={priceAgreed}
+                onChange={(e) => setPriceAgreed(e.target.checked)}
+                className="mt-0.5 w-5 h-5 shrink-0 accent-tme-blue sm:w-4 sm:h-4"
+              />
+              <span className="text-[15px] text-gray-800 leading-snug sm:text-sm">
+                I agree to the pre-assessment fee of{' '}
+                <strong className="text-tme-blue">AED {data.price_aed.toLocaleString('en-US')}</strong>{' '}
+                (plus 5% VAT). The fee will be invoiced together with your pre-assessment report.
+              </span>
+            </label>
+          )}
 
-      {error && (
-        <div
-          className="mb-4 text-sm rounded-lg p-3"
-          style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: TME_COLORS.error }}
-        >
-          {error}
+          {error && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-[10px] border border-red-200 bg-red-50 p-3 text-sm font-medium text-tme-red sm:text-[13px]"
+            >
+              <AlertCircle className="w-[18px] h-[18px] shrink-0 mt-px" aria-hidden />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <FormFooter>
+            <Button tone="primary" size="lg" onClick={handleSubmit} disabled={!canSubmit} busy={submitting} fullWidthOnMobile>
+              {submitting ? 'Submitting…' : noInvoices ? 'Send my answers to TME' : 'Send invoices for review'}
+            </Button>
+          </FormFooter>
         </div>
-      )}
-
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={!canSubmit}
-        className="w-full py-3 rounded-lg font-semibold text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        style={{ backgroundColor: TME_COLORS.primary }}
-      >
-        {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-        {submitting ? 'Submitting…' : 'Submit for review'}
-      </button>
-    </Shell>
+      </Card>
+    </Frame>
   );
 }

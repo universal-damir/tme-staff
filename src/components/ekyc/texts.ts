@@ -9,7 +9,8 @@ import type { EkycText } from '@/types/ekyc';
 const t = (en: string, de: string): EkycText => ({ en, de, deReviewed: false });
 
 export const EKYC_UI = {
-  brand: t('TME Services eKYC', 'TME Services eKYC'),
+  /** Area name in the page band, under the TME Services wordmark. */
+  area: t('Know your customer (KYC)', 'Kundenidentifizierung (KYC)'),
   loading: t('Loading...', 'Wird geladen...'),
   select: t('Please select', 'Bitte auswählen'),
   selectCountries: t('Select one or more countries', 'Ein oder mehrere Länder auswählen'),

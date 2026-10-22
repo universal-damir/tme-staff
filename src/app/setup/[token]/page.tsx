@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { TME_COLORS } from '@/lib/constants';
+import { Card, ClientPageHeader, PageBody } from '@/components/ui';
 import { CompanySetupForm } from '@/components/company-setup/CompanySetupForm';
 import { requestJson, failureMessage } from '@/lib/request-outcome';
 import type {
@@ -10,7 +10,7 @@ import type {
   CompanySetupPrefillData,
   CompanySetupSubmittedData,
 } from '@/types/company-setup';
-import { AlertTriangle, CheckCircle, Loader2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Info, Loader2, XCircle } from 'lucide-react';
 
 type PageState =
   | 'loading'
@@ -30,37 +30,41 @@ interface IntakePayload {
   expiresAt: string | null;
 }
 
-// `wide` is the form itself: it carries three-column rows (name parts, employer
-// details, document tiles) that were being squeezed into a 3xl column while the
-// screen stayed empty left and right. The narrow width stays for the one-message
-// screens (expired, cancelled, thank you), where a short line reads better.
-function Shell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
+// The form is wide (three-column rows: name parts, employer details, document
+// tiles); the one-message screens (expired, cancelled, thank you) keep the
+// narrower 880px column, where a short line reads better.
+const FORM_WIDTH = 'max-w-5xl';
+
+function Header({ wide = false }: { wide?: boolean }) {
   return (
-    <div className="min-h-screen px-4 py-8" style={{ backgroundColor: TME_COLORS.background }}>
-      <div className={`mx-auto ${wide ? 'max-w-5xl' : 'max-w-2xl'}`}>
-        <div className="mb-6">
-          <div
-            className="text-xs font-semibold tracking-wide uppercase mb-1"
-            style={{ color: TME_COLORS.secondary }}
-          >
-            TME Services: Company Setup
-          </div>
-          <h1 className="text-2xl font-bold" style={{ color: TME_COLORS.primary }}>
-            IFZA Company Setup
-          </h1>
-        </div>
-        {children}
-      </div>
+    <ClientPageHeader
+      eyebrow="Company setup"
+      title="Set up your company"
+      subtitle="Your new company in the IFZA free zone (International Free Zone Authority, Dubai)"
+      maxWidth={wide ? FORM_WIDTH : undefined}
+    />
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-tme-page">
+      <Header />
+      <PageBody>{children}</PageBody>
     </div>
   );
 }
 
 function CenterCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
-      <div className="flex flex-col items-center py-8 text-center">{children}</div>
-    </div>
+    <Card>
+      <div className="flex flex-col items-center py-6 sm:py-8 text-center">{children}</div>
+    </Card>
   );
+}
+
+function CenterTitle({ children }: { children: React.ReactNode }) {
+  return <h2 className="text-xl sm:text-lg font-semibold mb-2 text-tme-blue">{children}</h2>;
 }
 
 export default function CompanySetupIntakePage() {
@@ -103,8 +107,8 @@ export default function CompanySetupIntakePage() {
     return (
       <Shell>
         <CenterCard>
-          <Loader2 className="w-8 h-8 animate-spin mb-3" style={{ color: TME_COLORS.primary }} />
-          <span className="text-gray-500">Loading…</span>
+          <Loader2 className="w-8 h-8 animate-spin mb-3 text-tme-blue" aria-hidden />
+          <span className="text-base text-gray-600 sm:text-sm">Loading your form…</span>
         </CenterCard>
       </Shell>
     );
@@ -114,11 +118,9 @@ export default function CompanySetupIntakePage() {
     return (
       <Shell>
         <CenterCard>
-          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            We could not open the form
-          </h2>
-          <p className="text-gray-600 max-w-md">{loadError}</p>
+          <XCircle className="w-12 h-12 mb-4 text-tme-red" aria-hidden />
+          <CenterTitle>We could not open the form</CenterTitle>
+          <p className="text-base text-gray-600 max-w-md sm:text-sm">{loadError}</p>
         </CenterCard>
       </Shell>
     );
@@ -128,11 +130,9 @@ export default function CompanySetupIntakePage() {
     return (
       <Shell>
         <CenterCard>
-          <XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            This link is not valid
-          </h2>
-          <p className="text-gray-600">
+          <XCircle className="w-12 h-12 mb-4 text-tme-red" aria-hidden />
+          <CenterTitle>This link is not valid</CenterTitle>
+          <p className="text-base text-gray-600 max-w-md sm:text-sm">
             The link may be incorrect. Please use the link from your TME email, or contact your
             TME consultant.
           </p>
@@ -145,11 +145,9 @@ export default function CompanySetupIntakePage() {
     return (
       <Shell>
         <CenterCard>
-          <AlertTriangle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.secondary }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            This link has expired
-          </h2>
-          <p className="text-gray-600 max-w-md">
+          <AlertTriangle className="w-12 h-12 mb-4 text-amber-600" aria-hidden />
+          <CenterTitle>This link has expired</CenterTitle>
+          <p className="text-base text-gray-600 max-w-md sm:text-sm">
             Setup links stay open for a limited time. Anything you already filled in is saved,
             please ask your TME consultant to send you a fresh link and you can carry on where you
             left off.
@@ -163,11 +161,9 @@ export default function CompanySetupIntakePage() {
     return (
       <Shell>
         <CenterCard>
-          <AlertTriangle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.secondary }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            This setup form has been closed
-          </h2>
-          <p className="text-gray-600 max-w-md">
+          <Info className="w-12 h-12 mb-4 text-tme-blue" aria-hidden />
+          <CenterTitle>This setup form has been closed</CenterTitle>
+          <p className="text-base text-gray-600 max-w-md sm:text-sm">
             TME has closed this company setup form, so it no longer accepts entries. If you did not
             expect this, please contact your TME consultant.
           </p>
@@ -180,14 +176,12 @@ export default function CompanySetupIntakePage() {
     return (
       <Shell>
         <CenterCard>
-          <CheckCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.success }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            Thank you, we have received your submission
-          </h2>
-          <p className="text-gray-600 max-w-md">
-            Our team will review your details and documents, and your TME consultant will be in
-            touch with the next steps. Please note that the company names remain subject to
-            authority approval. No further action is needed from you right now.
+          <CheckCircle className="w-12 h-12 mb-4 text-green-600" aria-hidden />
+          <CenterTitle>Thank you, we have your details</CenterTitle>
+          <p className="text-base text-gray-600 max-w-md sm:text-sm">
+            Your TME consultant will check your details and documents and contact you about the
+            next steps. The free zone authority still has to approve the company name. You do not
+            need to do anything right now.
           </p>
         </CenterCard>
       </Shell>
@@ -195,8 +189,10 @@ export default function CompanySetupIntakePage() {
   }
 
   return (
-    <Shell wide>
+    <div className="min-h-screen bg-tme-page">
+      <Header wide />
       <CompanySetupForm
+        maxWidth={FORM_WIDTH}
         token={token}
         prefill={data?.prefill ?? null}
         savedData={data?.submittedData ?? null}
@@ -212,6 +208,6 @@ export default function CompanySetupIntakePage() {
           window.scrollTo({ top: 0 });
         }}
       />
-    </Shell>
+    </div>
   );
 }

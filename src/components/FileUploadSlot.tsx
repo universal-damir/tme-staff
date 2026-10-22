@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { TME_COLORS } from '@/lib/constants';
 import { Upload, FileText, CheckCircle, X, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { FieldError } from '@/components/ui/FormBits';
 import { useIsMobile } from '@/lib/useIsMobile';
 import { isUploadFailure, type UploadResult } from '@/lib/supabase';
 import { FAILURE_MESSAGES } from '@/lib/request-outcome';
@@ -78,54 +79,49 @@ export function FileUploadSlot({
   };
 
   return (
-    <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 transition-all duration-200"
-      style={{ borderColor: uploaded ? TME_COLORS.primary : error ? '#ef4444' : '#e5e7eb' }}
+    <div
+      className={`border-2 border-dashed rounded-[10px] p-4 sm:px-4 sm:py-3 transition-all duration-200 ${
+        uploaded ? 'border-tme-blue' : error ? 'border-tme-red' : 'border-gray-200'
+      }`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           {uploaded ? (
-            <CheckCircle className="w-5 h-5 flex-shrink-0" style={{ color: TME_COLORS.primary }} />
+            <CheckCircle className="w-5 h-5 flex-shrink-0 text-tme-blue" aria-hidden />
           ) : (
-            <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
+            <FileText className="w-5 h-5 text-gray-500 flex-shrink-0" aria-hidden />
           )}
           <div className="min-w-0">
-            <p className="text-sm font-medium text-gray-700">{label}</p>
+            <p className="text-[15px] font-semibold leading-snug text-tme-blue sm:text-sm sm:font-medium">{label}</p>
             {uploaded && filename ? (
-              <p className="text-xs text-gray-500 truncate">{filename}</p>
+              <p className="text-sm sm:text-[13px] text-gray-600 break-all">{filename}</p>
             ) : description ? (
-              <p className="text-xs text-gray-400">{description}</p>
+              <p className="text-sm sm:text-[13px] text-gray-600">{description}</p>
             ) : null}
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
           {uploaded ? (
-            <button
-              type="button"
-              onClick={onRemove}
-              className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"
-              title="Remove file"
-            >
-              <X className="w-4 h-4 text-red-500" />
-            </button>
+            <Button tone="dangerGhost" onClick={onRemove} aria-label={`Remove file: ${label}`}>
+              <X className="w-4 h-4" aria-hidden />
+              Remove
+            </Button>
           ) : isUploading ? (
-            <Loader2 className="w-5 h-5 animate-spin" style={{ color: TME_COLORS.primary }} />
+            <span className="size-11 sm:size-9 inline-flex items-center justify-center" aria-label="Uploading">
+              <Loader2 className="w-5 h-5 animate-spin text-tme-blue" aria-hidden />
+            </span>
           ) : (
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-sm"
-              style={{ backgroundColor: '#f0f4ff', color: TME_COLORS.primary }}
-            >
-              <Upload className="w-3.5 h-3.5" />
+            <Button tone="secondary" onClick={() => inputRef.current?.click()}>
+              <Upload className="w-4 h-4" aria-hidden />
               Upload
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
       {error && (
-        <p className="text-xs text-red-500 mt-2">{error}</p>
+        <FieldError>{error}</FieldError>
       )}
 
       {/* Upfront accepted-files notice, worded per device — without it,
@@ -133,7 +129,7 @@ export function FileUploadSlot({
           never, when the picker greys images out) and assume the system is
           broken. */}
       {!uploaded && !error && (
-        <p className="text-xs text-amber-700 mt-2">
+        <p className="text-sm leading-snug text-amber-800 mt-2 sm:text-[13px]">
           {isMobile
             ? 'Only PDF scans of official documents are accepted on this device. Camera photos are not. Please use a scanner app, or upload from a computer.'
             : 'Only scans of official documents are accepted (PDF, JPEG, or PNG).'}

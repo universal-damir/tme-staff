@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { TME_COLORS, INPUT_HEIGHT } from '@/lib/constants';
+import { FieldError } from './FormBits';
 
 interface DropdownOption {
   value: string;
@@ -28,8 +28,6 @@ interface CustomDropdownProps {
   onCustomEntry?: (text: string) => void;
   /** Guidance text shown below the custom entry option */
   customEntryHint?: string;
-  /** Let a long selected label wrap in the closed field instead of being cut off. */
-  wrapLabel?: boolean;
   /** Accessible name of the field when the label is rendered outside (id of the label element). */
   ariaLabelledBy?: string;
   /** Placeholder of the search box (searchable only). Default 'Type to search...'. */
@@ -52,7 +50,6 @@ export default function CustomDropdown({
   loading = false,
   onCustomEntry,
   customEntryHint,
-  wrapLabel = false,
   ariaLabelledBy,
   searchPlaceholder = 'Type to search...',
   noOptionsText = 'No options found',
@@ -152,7 +149,6 @@ export default function CustomDropdown({
 
   // Close dropdown when clicking outside
   useEffect(() => {
-    if (isMobile) return; // Native select handles its own closing
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
       if (
@@ -249,140 +245,160 @@ export default function CustomDropdown({
 
   const displayLabel = options.find((opt) => opt.value === value)?.label || placeholder;
 
-  // --- MOBILE: Use native <select> for best UX (iOS picker wheel, Android native) ---
-  if (isMobile) {
-    return (
-      <div ref={containerRef} className="relative">
-        {label && (
-          <label
-            className="block text-sm font-medium mb-1"
-            style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
-          >
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
+  const labelId = `${listboxId}-label`;
+  const labelledBy = ariaLabelledBy ?? (label ? labelId : undefined);
 
-        <div className="relative">
-          <select
-            aria-labelledby={ariaLabelledBy}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            disabled={disabled}
-            className={`w-full px-3 py-2 text-sm rounded-lg border-2 transition-all duration-200 appearance-none bg-white ${
-              disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : ''
-            }`}
-            style={{
-              height: `${INPUT_HEIGHT}px`,
-              borderColor: error ? '#ef4444' : '#e5e7eb',
-              fontFamily: 'Inter, sans-serif',
-              color: value ? '#111827' : '#9ca3af',
-            }}
-          >
-            <option value="" disabled>
-              {placeholder}
-            </option>
-            {options.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.sublabel ? `${option.label} / ${option.sublabel}` : option.label}
-              </option>
-            ))}
-          </select>
+  // Phones: the list opens as a bottom sheet (no native <select>), so lock
+  // the page behind it while it is open.
+  useEffect(() => {
+    if (!isOpen || !isMobile) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isOpen, isMobile]);
 
-          {/* Arrow icon overlay */}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-            <svg
-              className="w-5 h-5"
-              style={{ color: TME_COLORS.primary }}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+  const closeList = () => {
+    setIsOpen(false);
+    setSearchTerm('');
+    setFocusedIndex(-1);
+  };
+
+  const chevron = (
+    <motion.svg
+      animate={{ rotate: isOpen ? 180 : 0 }}
+      transition={{ duration: 0.2 }}
+      className="w-5 h-5 sm:w-[18px] sm:h-[18px] text-tme-blue"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </motion.svg>
+  );
+
+  const optionRows =
+    filteredOptions.length > 0 ? (
+      filteredOptions.map((option, index) => {
+        const selected = value === option.value;
+        return (
+          <div
+            key={option.value}
+            id={optionId(index)}
+            role="option"
+            aria-selected={selected}
+            onClick={() => handleSelect(option.value)}
+            onMouseEnter={() => setFocusedIndex(index)}
+            className={`flex flex-col justify-center min-h-11 px-3.5 py-2.5 cursor-pointer transition-colors text-[15px] leading-snug md:min-h-9 md:px-3 md:py-2 md:text-sm ${
+              selected ? 'font-semibold md:font-medium text-tme-blue bg-blue-100' : 'text-gray-900 hover:bg-blue-50'
+            } ${index === focusedIndex ? 'bg-blue-50 ring-2 ring-inset ring-tme-blue/40' : ''}`}
+          >
+            {option.label}
+            {option.sublabel && (
+              <span className="block text-sm md:text-[13px] font-normal text-gray-600">{option.sublabel}</span>
+            )}
           </div>
+        );
+      })
+    ) : loading ? (
+      <div className="px-3.5 py-4 text-center text-gray-600 text-[15px] md:text-sm">Loading...</div>
+    ) : onCustomEntry && searchTerm.trim() ? (
+      <div className="px-2 py-2">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            onCustomEntry(searchTerm.trim());
+            setIsOpen(false);
+            setSearchTerm('');
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onCustomEntry(searchTerm.trim());
+              setIsOpen(false);
+              setSearchTerm('');
+            }
+          }}
+          className="flex items-center min-h-11 px-3 cursor-pointer rounded-[10px] text-[15px] font-semibold text-tme-blue md:min-h-9 md:rounded-lg md:text-sm md:font-medium hover:bg-blue-50"
+        >
+          Use &ldquo;{searchTerm.trim()}&rdquo;
         </div>
-
-        {error && error.trim() && (
-          <p className="text-red-500 text-xs mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
-            {error}
-          </p>
+        {customEntryHint && (
+          <p className="px-3 py-2 text-sm md:text-[13px] text-gray-600 leading-relaxed">{customEntryHint}</p>
         )}
       </div>
+    ) : (
+      <div className="px-3.5 py-4 text-center text-gray-600 text-[15px] md:text-sm">{noOptionsText}</div>
     );
-  }
 
-  // --- DESKTOP: Custom dropdown with portal ---
+  const searchBoxProps = {
+    value: searchTerm,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+      setSearchTerm(e.target.value);
+      setFocusedIndex(e.target.value ? 0 : -1);
+      if (!isOpen) setIsOpen(true);
+    },
+    onKeyDown: handleKeyDown,
+    placeholder: searchPlaceholder,
+    role: 'combobox' as const,
+    'aria-expanded': isOpen,
+    'aria-controls': listboxId,
+    'aria-autocomplete': 'list' as const,
+    'aria-labelledby': labelledBy,
+    'aria-activedescendant':
+      focusedIndex >= 0 && focusedIndex < filteredOptions.length ? optionId(focusedIndex) : undefined,
+  };
+
+  // Desktop: the list opens under (or over) the field. Phones: a bottom sheet
+  // with 44px rows. Never a native <select>.
+  const borderClass = error
+    ? 'border-tme-red'
+    : isOpen
+      ? 'border-tme-blue'
+      : 'border-gray-200 sm:border-gray-300 hover:border-tme-blue sm:hover:border-tme-blue focus:border-tme-blue sm:focus:border-tme-blue';
+
   return (
     <div ref={containerRef} className="relative">
       {label && (
-        <label
-          className="block text-sm font-medium mb-1"
-          style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
-        >
+        <label id={labelId} className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {required && (
+            <span className="text-tme-red ml-1" aria-hidden>
+              *
+            </span>
+          )}
         </label>
       )}
 
       <div className="relative">
-        {searchable && isOpen ? (
+        {searchable && isOpen && !isMobile ? (
           <div className="relative">
-            <motion.input
+            <input
               ref={inputRef}
               type="text"
-              value={searchTerm}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                setSearchTerm(e.target.value);
-                setFocusedIndex(e.target.value ? 0 : -1);
-                if (!isOpen) setIsOpen(true);
-              }}
-              onFocus={(e: React.FocusEvent<HTMLInputElement>) => {
-                setIsOpen(true);
-                if (!error) e.target.style.borderColor = TME_COLORS.primary;
-              }}
-              onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
-                if (!isOpen) {
-                  e.target.style.borderColor = '#e5e7eb';
-                }
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={searchPlaceholder}
-              role="combobox"
-              aria-expanded={isOpen}
-              aria-controls={listboxId}
-              aria-autocomplete="list"
-              aria-labelledby={ariaLabelledBy}
-              aria-activedescendant={focusedIndex >= 0 && focusedIndex < filteredOptions.length ? optionId(focusedIndex) : undefined}
-              className="w-full px-3 py-2 text-sm rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200"
-              style={{
-                height: `${INPUT_HEIGHT}px`,
-                borderColor: error ? '#ef4444' : TME_COLORS.primary,
-                fontFamily: 'Inter, sans-serif',
-              }}
+              {...searchBoxProps}
+              onFocus={() => setIsOpen(true)}
+              className={`w-full h-[46px] pl-3.5 pr-11 text-base text-gray-900 bg-white rounded-[10px] border-2 focus:outline-none transition-colors duration-200 placeholder:text-gray-500 sm:h-10 sm:pl-3 sm:pr-10 sm:rounded-lg sm:border md:text-sm sm:ring-[3px] ${
+                error ? 'border-tme-red sm:ring-tme-red/15' : 'border-tme-blue sm:ring-tme-blue/15'
+              }`}
               autoFocus
             />
-            <div
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 cursor-pointer"
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Close list"
+              className="absolute right-0.5 top-1/2 -translate-y-1/2 size-11 sm:size-9 inline-flex items-center justify-center"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setIsOpen(!isOpen);
-                if (isOpen) setSearchTerm('');
+                closeList();
               }}
             >
-              <motion.svg
-                animate={{ rotate: isOpen ? 180 : 0 }}
-                transition={{ duration: 0.2 }}
-                className="w-5 h-5"
-                style={{ color: TME_COLORS.primary }}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </motion.svg>
-            </div>
+              {chevron}
+            </button>
           </div>
         ) : (
           <motion.div
@@ -392,9 +408,13 @@ export default function CustomDropdown({
             aria-haspopup="listbox"
             aria-expanded={isOpen}
             aria-controls={isOpen ? listboxId : undefined}
-            aria-labelledby={ariaLabelledBy}
+            aria-labelledby={labelledBy}
+            aria-disabled={disabled || undefined}
+            aria-invalid={error ? true : undefined}
             aria-activedescendant={
-              isOpen && focusedIndex >= 0 && focusedIndex < filteredOptions.length ? optionId(focusedIndex) : undefined
+              isOpen && !isMobile && focusedIndex >= 0 && focusedIndex < filteredOptions.length
+                ? optionId(focusedIndex)
+                : undefined
             }
             onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
               if (disabled) return;
@@ -409,154 +429,110 @@ export default function CustomDropdown({
             }}
             onClick={() => {
               if (disabled) return;
-              if (isOpen) setIsOpen(false);
+              if (isOpen) closeList();
               else openList();
             }}
-            whileHover={!disabled ? { scale: 1.01 } : undefined}
-            className={`w-full px-3 py-2 rounded-lg border-2 border-gray-200 transition-all duration-200 flex items-center justify-between ${
-              disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'cursor-pointer'
-            }`}
-            style={{
-              minHeight: `${INPUT_HEIGHT}px`,
-              height: formatBrackets || wrapLabel ? 'auto' : `${INPUT_HEIGHT}px`,
-              borderColor: error ? '#ef4444' : isOpen ? TME_COLORS.primary : '#e5e7eb',
-              fontFamily: 'Inter, sans-serif',
-            }}
-            onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
-              if (!disabled && !isOpen && !error) e.currentTarget.style.borderColor = TME_COLORS.primary;
-            }}
-            onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
-              if (!disabled && !isOpen && !error) e.currentTarget.style.borderColor = '#e5e7eb';
-            }}
+            className={`w-full min-h-[46px] pl-3.5 pr-2 rounded-[10px] border-2 bg-white transition-colors duration-200 flex items-center justify-between gap-2 focus:outline-none sm:min-h-10 sm:pl-3 sm:pr-1.5 sm:rounded-lg sm:border ${borderClass} py-1.5 sm:py-1 ${disabled ? 'opacity-60 cursor-not-allowed bg-gray-50' : 'cursor-pointer'}`}
           >
-            <div
-              className={`text-sm flex-1 min-w-0 ${value ? 'text-gray-900' : 'text-gray-500'}`}
-              style={{ fontFamily: 'Inter, sans-serif' }}
-            >
+            <div className={`text-base sm:text-sm flex-1 min-w-0 ${value ? 'text-gray-900' : 'text-gray-500'}`}>
               {formatBrackets && displayLabel.includes('(') ? (
                 <>
-                  <span className="truncate block">{displayLabel.split('(')[0].trim()}</span>
-                  <span className="text-xs text-gray-500 truncate block">({displayLabel.split('(')[1]}</span>
+                  <span className="block break-words">{displayLabel.split('(')[0].trim()}</span>
+                  <span className="text-sm sm:text-[13px] text-gray-600 block break-words">({displayLabel.split('(')[1]}</span>
                 </>
               ) : (
-                <span className={wrapLabel ? 'block py-0.5' : 'truncate block'}>{displayLabel}</span>
+                <span className="block py-0.5 break-words">{displayLabel}</span>
               )}
             </div>
-
-            <div
-              className={`flex-shrink-0 ${disabled ? '' : 'cursor-pointer'}`}
-              onClick={(e) => {
-                if (!disabled) {
-                  e.stopPropagation();
-                  setIsOpen(!isOpen);
-                  if (isOpen) setSearchTerm('');
-                }
-              }}
-            >
-              <motion.svg
-                animate={{ rotate: isOpen ? 180 : 0 }}
-                transition={{ duration: 0.2 }}
-                className="w-5 h-5"
-                style={{ color: TME_COLORS.primary }}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </motion.svg>
-            </div>
+            <span className="flex-shrink-0 inline-flex items-center justify-center size-8">{chevron}</span>
           </motion.div>
         )}
       </div>
 
-      {isMounted && isOpen && createPortal(
-        <AnimatePresence>
-          <motion.div
-            ref={dropdownRef}
-            id={listboxId}
-            role="listbox"
-            aria-labelledby={ariaLabelledBy}
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-            className="fixed bg-white border-2 rounded-lg shadow-lg max-h-60 overflow-y-auto"
-            style={{
-              borderColor: TME_COLORS.primary,
-              fontFamily: 'Inter, sans-serif',
-              ...(dropdownPosition.top !== undefined ? { top: `${dropdownPosition.top}px` } : {}),
-              ...(dropdownPosition.bottom !== undefined ? { bottom: `${dropdownPosition.bottom}px` } : {}),
-              left: `${dropdownPosition.left}px`,
-              width: `${dropdownPosition.width}px`,
-              zIndex: 9999,
-            }}
-          >
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((option, index) => (
+      {isMounted &&
+        isOpen &&
+        createPortal(
+          <AnimatePresence>
+            {isMobile ? (
+              <div className="fixed inset-0 z-[9999] flex flex-col justify-end">
                 <motion.div
-                  key={option.value}
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={value === option.value}
-                  onClick={() => handleSelect(option.value)}
-                  onMouseEnter={() => setFocusedIndex(index)}
-                  whileHover={{ backgroundColor: `${TME_COLORS.primary}10` }}
-                  className={`px-3 py-2 cursor-pointer transition-colors text-sm ${
-                    value === option.value ? 'font-semibold' : ''
-                  } ${index === focusedIndex ? 'bg-blue-50 ring-2 ring-inset ring-[#243F7B]/40' : ''}`}
-                  style={{
-                    backgroundColor: value === option.value ? `${TME_COLORS.primary}20` : undefined,
-                    color: value === option.value ? TME_COLORS.primary : '#1f2937',
-                    fontFamily: 'Inter, sans-serif',
-                  }}
+                  aria-hidden
+                  className="absolute inset-0 bg-black/40"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  onClick={closeList}
+                />
+                <motion.div
+                  ref={dropdownRef}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby={labelledBy}
+                  initial={{ y: 40, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.2 }}
+                  className="relative bg-white rounded-t-[14px] shadow-2xl max-h-[75dvh] flex flex-col"
+                  style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
                 >
-                  {option.label}
-                  {option.sublabel && (
-                    <span className="block text-xs font-normal text-gray-500">
-                      {option.sublabel}
+                  <div className="flex items-center justify-between gap-2 pl-4 pr-1.5 py-1.5 border-b border-gray-200">
+                    <span className="text-[17px] font-semibold text-tme-blue truncate">
+                      {label || placeholder}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeList();
+                        refocusTrigger();
+                      }}
+                      aria-label="Close list"
+                      className="size-11 inline-flex items-center justify-center rounded-full text-tme-blue hover:bg-blue-50 tme-btn-focus"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  {searchable && (
+                    <div className="px-3 pt-3 pb-2">
+                      <input
+                        ref={inputRef}
+                        type="text"
+                        {...searchBoxProps}
+                        className="w-full h-[46px] px-3.5 text-base text-gray-900 bg-white rounded-[10px] border-2 border-gray-200 focus:border-tme-blue focus:outline-none placeholder:text-gray-500"
+                      />
+                    </div>
                   )}
+                  <div id={listboxId} role="listbox" aria-labelledby={labelledBy} className="overflow-y-auto overscroll-contain py-1">
+                    {optionRows}
+                  </div>
                 </motion.div>
-              ))
-            ) : loading ? (
-              <div className="px-3 py-4 text-center text-gray-400 text-sm">
-                Loading...
-              </div>
-            ) : onCustomEntry && searchTerm.trim() ? (
-              <div className="px-3 py-2">
-                <motion.div
-                  onClick={() => {
-                    onCustomEntry(searchTerm.trim());
-                    setIsOpen(false);
-                    setSearchTerm('');
-                  }}
-                  whileHover={{ backgroundColor: `${TME_COLORS.primary}10` }}
-                  className="px-3 py-2 cursor-pointer rounded-lg text-sm font-medium"
-                  style={{ color: TME_COLORS.primary }}
-                >
-                  Use &ldquo;{searchTerm.trim()}&rdquo;
-                </motion.div>
-                {customEntryHint && (
-                  <p className="px-3 py-2 text-xs text-gray-400 leading-relaxed">
-                    {customEntryHint}
-                  </p>
-                )}
               </div>
             ) : (
-              <div className="px-3 py-4 text-center text-gray-400 text-sm">
-                {noOptionsText}
-              </div>
+              <motion.div
+                ref={dropdownRef}
+                id={listboxId}
+                role="listbox"
+                aria-labelledby={labelledBy}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="fixed bg-white border-2 border-tme-blue rounded-[10px] shadow-lg max-h-60 sm:border sm:rounded-lg overflow-y-auto py-1"
+                style={{
+                  ...(dropdownPosition.top !== undefined ? { top: `${dropdownPosition.top}px` } : {}),
+                  ...(dropdownPosition.bottom !== undefined ? { bottom: `${dropdownPosition.bottom}px` } : {}),
+                  left: `${dropdownPosition.left}px`,
+                  width: `${dropdownPosition.width}px`,
+                  zIndex: 9999,
+                }}
+              >
+                {optionRows}
+              </motion.div>
             )}
-          </motion.div>
-        </AnimatePresence>,
-        document.body
-      )}
+          </AnimatePresence>,
+          document.body
+        )}
 
-      {error && error.trim() && (
-        <p className="text-red-500 text-xs mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
-          {error}
-        </p>
-      )}
+      {error && error.trim() && <FieldError>{error}</FieldError>}
     </div>
   );
 }

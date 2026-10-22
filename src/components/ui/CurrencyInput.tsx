@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { TME_COLORS, INPUT_HEIGHT } from '@/lib/constants';
+import React, { useState, useEffect, useId } from 'react';
+import { FieldError } from './FormBits';
 
 interface CurrencyInputProps {
   label: string;
@@ -56,6 +55,7 @@ export default function CurrencyInput({
   // Set default placeholder based on decimals
   const defaultPlaceholder = placeholder || (decimals === 0 ? '0' : '0.00');
   const [displayValue, setDisplayValue] = useState('');
+  const fieldId = useId();
   const [isFocused, setIsFocused] = useState(false);
 
   // Format number with thousand separators
@@ -133,58 +133,44 @@ export default function CurrencyInput({
 
   return (
     <div>
-      <label
-        className="block text-sm font-medium mb-1"
-        style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
-      >
+      <label htmlFor={fieldId} className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
         {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
+        {required && (
+          <span className="text-tme-red ml-1" aria-hidden>
+            *
+          </span>
+        )}
       </label>
 
       <div className="relative">
-        <motion.input
+        <input
+          id={fieldId}
           type="text"
           inputMode={decimals === 0 ? "numeric" : "decimal"}
           value={displayValue}
           onChange={handleChange}
           disabled={disabled}
           placeholder={defaultPlaceholder}
-          className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 focus:outline-none transition-all duration-200 text-sm"
-          style={{
-            height: INPUT_HEIGHT,
-            fontFamily: 'Inter, sans-serif',
-            paddingRight: currency ? '4rem' : '0.75rem',
-            backgroundColor: disabled ? '#f9fafb' : 'white',
-            color: disabled ? '#9ca3af' : 'inherit',
-          }}
-          onFocus={(e: React.FocusEvent<HTMLInputElement>) => {
-            handleFocus();
-            e.target.style.borderColor = TME_COLORS.primary;
-          }}
-          onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
-            handleBlur(e);
-            e.target.style.borderColor = error ? '#ef4444' : '#e5e7eb';
-          }}
-          whileFocus={{ scale: 1.01 }}
+          aria-invalid={error ? true : undefined}
+          className={`w-full h-[46px] pl-3.5 rounded-[10px] border-2 text-base transition-[color,border-color,box-shadow] duration-200 focus:outline-none placeholder:text-gray-500 sm:h-10 sm:pl-3 sm:rounded-lg sm:border md:text-sm sm:focus:ring-[3px] ${
+            currency ? 'pr-16' : 'pr-3.5 sm:pr-3'
+          } ${error ? 'border-tme-red focus:border-tme-red sm:focus:ring-tme-red/15' : 'border-gray-200 sm:border-gray-300 focus:border-tme-blue sm:focus:border-tme-blue sm:focus:ring-tme-blue/15'} ${
+            disabled ? 'bg-gray-50 text-gray-600' : 'bg-white text-gray-900'
+          }`}
+          onFocus={() => handleFocus()}
+          onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleBlur(e)}
         />
 
         {/* Currency Label */}
         {currency && (
-          <div
-            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm font-medium text-gray-500 pointer-events-none"
-            style={{ fontFamily: 'Inter, sans-serif' }}
-          >
+          <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[15px] font-semibold text-gray-600 sm:right-3 sm:text-[13px] sm:font-medium pointer-events-none">
             {currency}
           </div>
         )}
       </div>
 
       {/* Error Message */}
-      {error && (
-        <p className="text-red-500 text-xs mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
-          {error}
-        </p>
-      )}
+      <FieldError>{error}</FieldError>
     </div>
   );
 }

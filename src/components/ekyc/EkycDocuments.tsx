@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from "react";
 import { CheckCircle, FileText, Loader2, Upload } from "lucide-react";
-import { TME_COLORS } from "@/lib/constants";
+import { Button } from "@/components/ui";
 import {
   EKYC_DOCUMENT_SLOTS,
   EKYC_DOCUMENT_UPLOAD_HINT,
@@ -70,17 +70,16 @@ function SlotRow({
   };
 
   const shownError = localError ?? (document ? undefined : error);
-  const borderColor = shownError
-    ? TME_COLORS.error
+  const borderClass = shownError
+    ? "border-tme-red"
     : document
-      ? TME_COLORS.primary
-      : TME_COLORS.border;
+      ? "border-tme-blue"
+      : "border-gray-200 sm:border-gray-300";
 
   return (
     <div
       id={`ekyc-documents-${slot}-field`}
-      className="scroll-mt-28 flex flex-col rounded-lg border-2 p-3 sm:p-4"
-      style={{ borderColor }}
+      className={`scroll-mt-40 lg:scroll-mt-28 flex flex-col rounded-[10px] border-2 bg-white p-4 sm:rounded-lg sm:border ${borderClass}`}
     >
       <BiLabel text={label} className="min-w-0" />
       <FieldHint text={hint} />
@@ -89,8 +88,8 @@ function SlotRow({
         {document ? (
           <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
             <CheckCircle
-              className="h-5 w-5 shrink-0"
-              style={{ color: TME_COLORS.success }}
+              className="h-5 w-5 shrink-0 text-green-700"
+              aria-hidden="true"
             />
             <div className="min-w-0">
               <div className="font-medium text-gray-800">
@@ -100,16 +99,15 @@ function SlotRow({
                 href={`/api/kyc/${token}/file?slot=${slot}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1 truncate text-xs underline"
-                style={{ color: TME_COLORS.primary }}
+                className="flex min-h-11 min-w-0 items-center gap-1.5 text-sm text-tme-blue underline underline-offset-2 sm:min-h-0 sm:py-0.5 sm:text-[13px]"
                 title={biInline(EKYC_UI.view, bilingual)}
               >
-                <FileText className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">
+                <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 break-all">
                   {document.filename || biInline(EKYC_UI.view, bilingual)}
                 </span>
                 {document.size > 0 && (
-                  <span className="shrink-0 text-gray-500 no-underline">
+                  <span className="shrink-0 text-gray-600 no-underline">
                     ({formatSize(document.size)})
                   </span>
                 )}
@@ -129,21 +127,16 @@ function SlotRow({
               className="hidden"
               onChange={(e) => void pick(e.target.files?.[0])}
             />
-            <button
-              type="button"
+            <Button
+              tone={document ? "plain" : "secondary"}
               disabled={busy}
               onClick={() => inputRef.current?.click()}
-              className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg border-2 px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60"
-              style={{
-                borderColor: TME_COLORS.primary,
-                color: document ? TME_COLORS.primary : "#fff",
-                backgroundColor: document ? "#fff" : TME_COLORS.primary,
-              }}
+              className="shrink-0"
             >
               {busy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               ) : (
-                <Upload className="h-4 w-4" />
+                <Upload className="h-4 w-4" aria-hidden="true" />
               )}
               <Bi
                 text={
@@ -156,7 +149,7 @@ function SlotRow({
                 variant="inline"
                 className="items-center"
               />
-            </button>
+            </Button>
           </>
         )}
       </div>

@@ -1,10 +1,87 @@
 @import "tailwindcss";
 
+/* TME look (approved 22.10.2026, mockup "A. Cloud band"). Values copied from
+   the portal globals.css (button standard 17.10.2026). Beige = accent line only. */
 :root {
   --tme-primary: #243F7B;
   --tme-secondary: #D2BC99;
-  --background: #f5f5f5;
+  --tme-blue: #243F7B;
+  --tme-blue-hi: #2c4c92;
+  --tme-blue-lo: #1c3166;
+  --tme-wash: #3B82F6;
+  --tme-red: #B42318;
+  --tme-beige: #D2BC99; /* accent only, never a button, never text */
+  --tme-page: #F4F6F9;
+  --tme-grain-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --tme-btn-primary-image:
+    radial-gradient(120% 160% at 15% -20%, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0) 55%),
+    radial-gradient(90% 140% at 100% 120%, rgba(59,130,246,0.45) 0%, rgba(59,130,246,0) 60%),
+    linear-gradient(135deg, var(--tme-blue-hi) 0%, var(--tme-blue) 60%, var(--tme-blue-lo) 100%);
+  --tme-btn-primary-shadow: 0 1px 2px rgba(36,63,123,0.25), 0 4px 12px -4px rgba(36,63,123,0.45);
+  --tme-btn-secondary-image:
+    radial-gradient(110% 150% at 58% -10%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0) 55%),
+    radial-gradient(90% 140% at 22% 10%, #3B82F666 0%, transparent 65%),
+    radial-gradient(100% 150% at 104% 127%, #3B82F659 0%, transparent 60%),
+    radial-gradient(80% 120% at 62% 104%, #3B82F633 0%, transparent 55%),
+    linear-gradient(0deg, #3B82F614, #3B82F614);
+  --tme-btn-danger-image:
+    radial-gradient(120% 160% at 15% -20%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 55%),
+    linear-gradient(135deg, #c9352a 0%, var(--tme-red) 60%, #8f1c13 100%);
+  --tme-btn-danger-shadow: 0 1px 2px rgba(180,35,24,0.25), 0 4px 12px -4px rgba(180,35,24,0.4);
+  /* Client-facing, phone-first: every button is a 44px+ tap target on phones.
+     From 640px (sm) Button.tsx uses the calm desktop scale: sm 36 / md 40 / lg 44px. */
+  --btn-h-sm: 2.5rem;  /* 40px, dense rows */
+  --btn-h-md: 2.75rem; /* 44px, default */
+  --btn-h-lg: 3rem;    /* 48px */
+  --btn-radius: 0.75rem;
+
+  --background: var(--tme-page);
   --foreground: #171717;
+}
+
+/* Tailwind colour utilities: bg-tme-blue, text-tme-blue, border-tme-blue,
+   bg-tme-page, text-tme-red, bg-tme-beige, ... */
+@theme {
+  --color-tme-blue: #243F7B;
+  --color-tme-blue-hi: #2c4c92;
+  --color-tme-blue-lo: #1c3166;
+  --color-tme-wash: #3B82F6;
+  --color-tme-beige: #D2BC99;
+  --color-tme-red: #B42318;
+  --color-tme-page: #F4F6F9;
+  --color-tme-line: #CBD5E5;
+}
+
+/* TME button tones as classes (Button.tsx uses them; usable on any element).
+   .tme-grain adds the film grain as a ::before layer. */
+@layer components {
+  .tme-grain { position: relative; isolation: isolate; overflow: hidden; }
+  .tme-grain::before {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background-image: var(--tme-grain-noise); background-size: 128px 128px;
+    mix-blend-mode: overlay; opacity: 0.35;
+  }
+  .tme-btn-primary {
+    background-color: var(--tme-blue); background-image: var(--tme-btn-primary-image);
+    color: #fff; box-shadow: var(--tme-btn-primary-shadow);
+  }
+  .tme-btn-secondary {
+    background-color: #fff; background-image: var(--tme-btn-secondary-image);
+    color: var(--tme-blue); border: 1px solid rgba(59,130,246,0.33);
+  }
+  .tme-btn-secondary.tme-grain::before { opacity: 0.5; }
+  .tme-btn-plain { background-color: #fff; color: var(--tme-blue); border: 1px solid #e5e7eb; }
+  .tme-btn-plain:hover { border-color: #cfd5e1; }
+  .tme-btn-danger {
+    background-color: var(--tme-red); background-image: var(--tme-btn-danger-image);
+    color: #fff; box-shadow: var(--tme-btn-danger-shadow);
+  }
+  .tme-btn-danger.tme-grain::before { opacity: 0.3; }
+  .tme-btn-ghost { background-color: transparent; color: var(--tme-blue); }
+  .tme-btn-ghost:hover { background-color: #eef2fa; }
+  .tme-btn-danger-ghost { background-color: transparent; color: var(--tme-red); }
+  .tme-btn-danger-ghost:hover { background-color: #fdecea; }
+  .tme-btn-focus:focus-visible { outline: 2px solid var(--tme-wash); outline-offset: 2px; }
 }
 
 /* clip (not hidden): stops sideways scroll WITHOUT making body a scroll box,
@@ -41,7 +118,9 @@ body {
   background: #a1a1a1;
 }
 
-/* Prevent iOS Safari zoom on input focus (requires font-size >= 16px) */
+/* Prevent iOS Safari zoom on input focus (requires font-size >= 16px).
+   Desktop sizes (22.10.2026): fields are 40px from sm (640px), but their TEXT drops to
+   14px only from md (768px, `md:text-sm`), so phones and small tablets keep 16px. */
 @media screen and (max-width: 768px) {
   input, select, textarea {
     font-size: 16px !important;

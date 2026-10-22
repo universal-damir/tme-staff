@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { TME_COLORS } from '@/lib/constants';
 import { Check } from 'lucide-react';
 
 interface FormProgressProps {
@@ -12,7 +11,7 @@ interface FormProgressProps {
 export function FormProgress({ currentStep, isSamePerson }: FormProgressProps) {
   const steps = isSamePerson
     ? [
-        { id: 'combined', label: 'Complete Form', description: 'All information' },
+        { id: 'combined', label: 'Complete form', description: 'All information' },
         { id: 'complete', label: 'Done', description: 'Submitted' },
       ]
     : [
@@ -37,77 +36,60 @@ export function FormProgress({ currentStep, isSamePerson }: FormProgressProps) {
     return 'upcoming';
   };
 
+  // Sits inside the cloudy page header band: a compact row of stages
+  // (who fills in which part). Done = TME blue with a tick, current = blue
+  // outline, still to come = grey (gray-600 text, readable on the band).
   return (
-    <div className="w-full py-4">
-      <div className="flex items-center justify-center">
-        {steps.map((step, index) => {
-          const status = getStepStatus(step.id);
-          const isLast = index === steps.length - 1;
+    <ol className="flex items-start gap-2 sm:gap-3" aria-label="Form stages">
+      {steps.map((step, index) => {
+        const status = getStepStatus(step.id);
+        const isLast = index === steps.length - 1;
 
-          return (
-            <React.Fragment key={step.id}>
-              <div className="flex flex-col items-center">
-                {/* Circle */}
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
-                    status === 'complete'
-                      ? 'bg-green-500 border-green-500'
-                      : status === 'current'
-                      ? 'border-2'
-                      : 'border-gray-300 bg-white'
+        return (
+          <React.Fragment key={step.id}>
+            <li
+              className="flex items-start gap-2 min-w-0"
+              aria-current={status === 'current' ? 'step' : undefined}
+            >
+              <span
+                className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center border-2 text-sm font-semibold ${
+                  status === 'complete'
+                    ? 'bg-tme-blue border-tme-blue text-white'
+                    : status === 'current'
+                    ? 'bg-white border-tme-blue text-tme-blue'
+                    : 'bg-white border-tme-line text-gray-600'
+                }`}
+                aria-hidden
+              >
+                {status === 'complete' ? <Check className="w-4 h-4" /> : index + 1}
+              </span>
+              <span className="min-w-0 pt-0.5">
+                <span
+                  className={`block text-[15px] leading-snug sm:text-sm ${
+                    status === 'upcoming' ? 'font-medium text-gray-600' : 'font-semibold text-tme-blue'
                   }`}
-                  style={
-                    status === 'current'
-                      ? { borderColor: TME_COLORS.primary, backgroundColor: 'white' }
-                      : {}
-                  }
                 >
-                  {status === 'complete' ? (
-                    <Check className="w-5 h-5 text-white" />
-                  ) : (
-                    <span
-                      className={`text-sm font-semibold ${
-                        status === 'current' ? '' : 'text-gray-400'
-                      }`}
-                      style={status === 'current' ? { color: TME_COLORS.primary } : {}}
-                    >
-                      {index + 1}
-                    </span>
-                  )}
-                </div>
+                  {step.label}
+                  <span className="sr-only">
+                    {status === 'complete' ? ' (done)' : status === 'current' ? ' (current)' : ' (to come)'}
+                  </span>
+                </span>
+                <span className="hidden sm:block text-sm leading-snug text-gray-600 sm:text-[13px]">{step.description}</span>
+              </span>
+            </li>
 
-                {/* Label */}
-                <div className="mt-2 text-center">
-                  <p
-                    className={`text-sm font-medium ${
-                      status === 'upcoming' ? 'text-gray-400' : ''
-                    }`}
-                    style={
-                      status === 'current' || status === 'complete'
-                        ? { color: TME_COLORS.primary }
-                        : {}
-                    }
-                  >
-                    {step.label}
-                  </p>
-                  <p className="text-xs text-gray-400 hidden md:block">{step.description}</p>
-                </div>
-              </div>
-
-              {/* Connector */}
-              {!isLast && (
-                <div
-                  className={`w-16 md:w-24 h-0.5 mx-2 mt-[-28px] ${
-                    getStepStatus(steps[index + 1].id) !== 'upcoming'
-                      ? 'bg-green-500'
-                      : 'bg-gray-300'
-                  }`}
-                />
-              )}
-            </React.Fragment>
-          );
-        })}
-      </div>
-    </div>
+            {/* Connector */}
+            {!isLast && (
+              <li
+                aria-hidden
+                className={`flex-1 min-w-4 h-0.5 mt-3.5 rounded-full ${
+                  getStepStatus(steps[index + 1].id) !== 'upcoming' ? 'bg-tme-blue' : 'bg-tme-line'
+                }`}
+              />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </ol>
   );
 }

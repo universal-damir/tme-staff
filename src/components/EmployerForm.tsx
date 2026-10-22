@@ -3,13 +3,12 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
-  TME_COLORS,
   SPONSOR_OPTIONS,
   WEEKLY_OFF_OPTIONS,
   LEAVE_TYPES,
 } from '@/lib/constants';
 import { useMohreProfessions } from '@/hooks/useMohreProfessions';
-import { Input, Select, Button, CustomDropdown, CustomDatePicker } from '@/components/ui';
+import { Input, Button, CustomDropdown, CustomDatePicker, Card, FieldError, FieldHelp, FormFooter } from '@/components/ui';
 import { SalaryBreakdown } from '@/components/SalaryBreakdown';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import type { EmployerFormData, EmployerFormProps } from '@/types';
@@ -31,15 +30,17 @@ interface FormSectionProps {
 
 function FormSection({ title, icon, children }: FormSectionProps) {
   return (
-    <div className="bg-white rounded-xl p-6 shadow-sm">
-      <div className="flex items-center gap-3 mb-6">
-        {icon}
-        <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
+    <Card
+      seed={title}
+      title={
+        <span className="flex items-center gap-2">
+          {icon}
           {title}
-        </h2>
-      </div>
+        </span>
+      }
+    >
       {children}
-    </div>
+    </Card>
   );
 }
 
@@ -89,26 +90,26 @@ function ReadOnlySalarySummary(props: ReadOnlySalarySummaryProps) {
   const hasBreakdown = !!props.otherBreakdown && props.otherBreakdown.length > 0;
   return (
     <div className="border-2 border-gray-200 rounded-lg overflow-hidden">
-      <div className="px-3 py-2 bg-gray-50 border-b-2 border-gray-200 text-xs font-medium text-gray-600">
-        Currency: <span style={{ color: TME_COLORS.primary }}>{props.currency}</span>
+      <div className="px-3 py-2 bg-gray-50 border-b-2 border-gray-200 text-sm font-medium text-gray-600">
+        Currency: <span className="text-tme-blue">{props.currency}</span>
       </div>
       <div className="divide-y divide-gray-100">
         {rows.map((r) => (
           <div key={r.label} className="flex items-center justify-between px-3 py-2 text-sm">
             <span className="text-gray-600">{r.label}</span>
-            <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(r.value)}</span>
+            <span className="font-medium text-tme-blue">{fmt(r.value)}</span>
           </div>
         ))}
         {hasBreakdown && (
           <div className="bg-gray-50 px-3 py-2">
-            <div className="text-xs font-medium text-gray-600 mb-1">Other breakdown</div>
+            <div className="text-sm font-medium text-gray-600 mb-1">Other breakdown</div>
             <div className="divide-y divide-gray-100">
               {props.otherBreakdown!.map((entry, idx) => (
                 <div key={`${entry.type}-${idx}`} className="flex items-center justify-between pl-3 py-1.5 text-sm">
-                  <span className="text-gray-500">
+                  <span className="text-gray-600">
                     {PAYROLL_OTHER_TYPE_LABELS[entry.type as keyof typeof PAYROLL_OTHER_TYPE_LABELS] ?? entry.type}
                   </span>
-                  <span className="font-medium" style={{ color: TME_COLORS.primary }}>{fmt(entry.amount)}</span>
+                  <span className="font-medium text-tme-blue">{fmt(entry.amount)}</span>
                 </div>
               ))}
             </div>
@@ -339,26 +340,23 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
       {isSubmitting && (
         <div className="fixed inset-0 z-50 bg-white/70 backdrop-blur-sm flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-10 h-10 border-4 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: TME_COLORS.primary }} />
-            <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Submitting your form...</p>
+            <div className="w-10 h-10 border-4 border-gray-200 border-t-tme-blue rounded-full animate-spin" />
+            <p className="text-[15px] font-medium text-tme-blue sm:text-sm">Submitting your form...</p>
           </div>
         </div>
       )}
       {jobTitlesLoading && (
-        <div className="absolute inset-0 z-40 bg-white/80 backdrop-blur-[2px] rounded-xl flex items-center justify-center">
+        <div className="absolute inset-0 z-40 bg-white/80 backdrop-blur-[2px] rounded-[14px] flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-4 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: TME_COLORS.primary }} />
-            <p className="text-sm font-medium text-gray-500">Loading form data...</p>
+            <div className="w-8 h-8 border-4 border-gray-200 border-t-tme-blue rounded-full animate-spin" />
+            <p className="text-[15px] font-medium text-gray-600 sm:text-sm">Loading form data...</p>
           </div>
         </div>
       )}
       {submission.onboarding_type === 'cancel_copy' && (
-        <div
-          className="p-4 rounded-lg flex items-start gap-3 border-2"
-          style={{ backgroundColor: '#F3F5FA', borderColor: TME_COLORS.primary }}
-        >
-          <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-          <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+        <div className="p-4 rounded-[14px] flex items-start gap-3 border border-tme-line bg-[#F3F5FA]">
+          <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+          <p className="text-[15px] leading-normal text-tme-blue sm:text-sm">
             {CANCEL_COPY_INTRO}
           </p>
         </div>
@@ -366,7 +364,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
       {/* Position Details */}
       <FormSection
         title="Position Details"
-        icon={<Briefcase className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        icon={<Briefcase className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
       >
         <div className="space-y-4">
           {/* Job Titles Row */}
@@ -397,7 +395,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
                 }}
                 customEntryHint="This title may not be available in the authority's approved visa job list. Our team will verify and inform you. You can use this title without restriction for your company job description."
               />
-              <p className="text-xs text-gray-500 mt-1">Official designation for visa and government documents</p>
+              <FieldHelp>Official designation for visa and government documents</FieldHelp>
               {jobTitleVisa === 'Other' && (
                 <div className="mt-2">
                   <Input
@@ -413,14 +411,11 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label
-                  className="block text-sm font-medium"
-                  style={{ color: TME_COLORS.primary }}
-                >
-                  Job Title (Company) <span className="text-red-500 ml-1">*</span>
+              <div className="flex flex-wrap items-center justify-between gap-x-3 mb-1.5">
+                <label className="block text-[15px] font-semibold leading-snug text-tme-blue sm:text-sm sm:font-medium">
+                  Job Title (Company) <span className="text-tme-red ml-1" aria-hidden>*</span>
                 </label>
-                <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+                <label className="flex items-center gap-2 min-h-11 sm:min-h-0 text-sm text-gray-700 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={jobTitleSameAsVisa}
@@ -435,18 +430,14 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
                         }
                       }
                     }}
-                    className="rounded border-gray-300"
-                    style={{ accentColor: TME_COLORS.primary }}
+                    className="w-4 h-4 rounded border-gray-300 accent-tme-blue"
                   />
                   Same as Visa
                 </label>
               </div>
               {jobTitleSameAsVisa ? (
-                <div
-                  className="w-full px-3 py-2 rounded-lg border-2 border-gray-200 h-[42px] flex items-center text-sm"
-                  style={{ backgroundColor: '#f9fafb', color: TME_COLORS.primary }}
-                >
-                  {jobTitleVisa === 'Other' ? (watch('job_title_visa_custom') || 'Other') : jobTitleVisa || <span className="text-gray-400">Select visa title first</span>}
+                <div className="w-full px-3.5 py-2 rounded-[10px] border-2 border-gray-200 min-h-[46px] flex items-center text-base bg-gray-50 text-tme-blue sm:min-h-10 sm:border sm:border-gray-300 sm:rounded-lg sm:text-sm">
+                  {jobTitleVisa === 'Other' ? (watch('job_title_visa_custom') || 'Other') : jobTitleVisa || <span className="text-gray-600">Select visa title first</span>}
                 </div>
               ) : (
                 <>
@@ -464,9 +455,9 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
                     }}
                     customEntryHint="You can use any title for your internal company designation."
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <FieldHelp>
                     {submission.is_same_person ? 'Your' : 'Employee’s'} actual position within the company
-                  </p>
+                  </FieldHelp>
                 </>
               )}
               {!jobTitleSameAsVisa && jobTitleCompany === 'Other' && (
@@ -520,31 +511,29 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
         </div>
       </FormSection>
 
-      {/* Salary Contract + Payroll — on renewal, render side-by-side on lg+ so the
-          employer can compare contract vs current payroll without scrolling.
-          On new-hire (no payroll yet) the contract section stays full-width. */}
-      <div className={isRenewal && payrollTotal !== undefined ? "grid grid-cols-1 lg:grid-cols-2 gap-4 items-start" : ""}>
+      {/* Salary Contract + Payroll — on renewal the payroll card sits right under
+          the contract card (stacked, so both stay readable in the 880px column
+          and on phones). On new-hire (no payroll yet) only the contract shows. */}
+      <div className={isRenewal && payrollTotal !== undefined ? "space-y-6" : ""}>
       {/* Salary Contract — editable */}
       <FormSection
         title="Salary Contract"
-        icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        icon={<Banknote className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
       >
         {isRenewal && (
-          <p className="text-xs text-gray-500 italic mb-3">
+          <p className="text-[15px] leading-normal text-gray-600 mb-4 sm:text-sm">
             The salary as written in the previous employment contract. The renewed contract will be issued with this amount.
           </p>
         )}
         {isRenewal && payrollTotal ? (
-          <div className="mb-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleMatchPayrollToContract}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border border-[#243F7B] text-[#243F7B] transition-all hover:bg-[#243F7B] hover:text-white hover:shadow-sm"
-            >
-              <Copy className="w-3 h-3" />
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <Button tone="secondary" onClick={handleMatchPayrollToContract}>
+              <Copy className="w-4 h-4" aria-hidden />
               Match to current payroll
-            </button>
-            {matchFeedback === 'contract' && <span className="text-xs text-green-600 font-medium animate-pulse">Matched!</span>}
+            </Button>
+            {matchFeedback === 'contract' && (
+              <span className="text-sm text-green-700 font-medium" role="status">Matched</span>
+            )}
           </div>
         ) : null}
         <SalaryBreakdown
@@ -576,15 +565,14 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
       {isRenewal && payrollTotal !== undefined && (
         <FormSection
           title="Current Salary Payroll (reference)"
-          icon={<Banknote className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          icon={<Banknote className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <div className="space-y-3">
             <div
-              className="flex items-start gap-3 p-4 rounded-lg"
-              style={{ backgroundColor: '#F3F4F6' }}
+              className="flex items-start gap-3 p-4 rounded-[10px] bg-gray-100"
             >
-              <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-gray-500" />
-              <p className="text-sm text-gray-700">
+              <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-gray-600" aria-hidden />
+              <p className="text-[15px] leading-normal text-gray-700 sm:text-sm">
                 This is the payroll currently on file — what is actually paid each month.
               </p>
             </div>
@@ -606,7 +594,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
       {/* Leave & Terms */}
       <FormSection
         title="Leave & Terms"
-        icon={<Calendar className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        icon={<Calendar className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
       >
         <div className="space-y-4">
           {/* Starting Date — only for new hires */}
@@ -634,10 +622,7 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
             />
 
             <div>
-              <label
-                className="block text-sm font-medium mb-1"
-                style={{ color: TME_COLORS.primary }}
-              >
+              <label className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium">
                 Annual Leave
               </label>
               <div className="flex items-center gap-2">
@@ -668,10 +653,10 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
           {/* Row 2: Notice Period | Probation */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm mb-1">
-                <span className="font-medium" style={{ color: TME_COLORS.primary }}>Notice Period</span>
+              <label className="block text-[15px] leading-snug mb-1.5 sm:text-sm">
+                <span className="font-semibold sm:font-medium text-tme-blue">Notice Period</span>
                 {' '}
-                <span className="text-gray-400">
+                <span className="text-gray-600">
                   ({Number(noticePeriodValue) || 0} {pluralizePeriod(Number(noticePeriodValue), noticePeriodUnit)})
                 </span>
               </label>
@@ -700,10 +685,10 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
             </div>
 
             <div>
-              <label className="block text-sm mb-1">
-                <span className="font-medium" style={{ color: TME_COLORS.primary }}>Probation</span>
+              <label className="block text-[15px] leading-snug mb-1.5 sm:text-sm">
+                <span className="font-semibold sm:font-medium text-tme-blue">Probation</span>
                 {' '}
-                <span className="text-gray-400">
+                <span className="text-gray-600">
                   ({Number(probationPeriodValue) || 0} {pluralizePeriod(Number(probationPeriodValue), probationPeriodUnit)})
                 </span>
               </label>
@@ -740,17 +725,16 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
       {isDMCC && !isRenewal && (
         <FormSection
           title="Job Offer Letter (DMCC Requirement)"
-          icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          icon={<FileText className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <div className="space-y-4">
             <div
-              className="flex items-start gap-3 p-4 rounded-lg"
-              style={{ backgroundColor: '#FEF3C7' }}
+              className="flex items-start gap-3 p-4 rounded-[10px] bg-amber-50 border border-amber-200"
             >
-              <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
-              <div className="text-sm text-amber-800">
+              <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-700" aria-hidden />
+              <div className="text-[15px] leading-normal text-amber-900 sm:text-sm">
                 <p className="font-medium">DMCC requires the Job Offer Letter to be stamped and duly signed with a blue pen by both the employer and the employee.</p>
-                <p className="mt-1 text-xs">
+                <p className="mt-1">
                   Please upload the signed and stamped copy. This document will be included in the confirmation document.
                 </p>
               </div>
@@ -786,18 +770,18 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
       {!isRenewal && !isCancelCopy && (
       <FormSection
         title="UAE Visa Status"
-        icon={<Globe className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        icon={<Globe className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
       >
         <div className="space-y-3">
-          <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
-            {submission.is_same_person ? 'Are you currently in the UAE?' : 'Is the applicant currently in the UAE?'} <span className="text-red-500">*</span>
+          <p className="text-[15px] font-semibold leading-snug text-tme-blue sm:text-sm">
+            {submission.is_same_person ? 'Are you currently in the UAE?' : 'Is the applicant currently in the UAE?'} <span className="text-tme-red" aria-hidden>*</span>
           </p>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6" role="radiogroup">
             {([
               { value: true, label: 'Yes' },
               { value: false, label: 'No' },
             ] as const).map((opt) => (
-              <label key={opt.label} className="flex items-center gap-2 cursor-pointer">
+              <label key={opt.label} className="flex items-center gap-2 min-h-11 cursor-pointer sm:min-h-9">
                 <input
                   type="radio"
                   name="applicant_in_uae"
@@ -807,26 +791,23 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
                     setValue('applicant_in_uae', opt.value);
                     setApplicantInUAEError(null);
                   }}
-                  className="w-4 h-4"
-                  style={{ accentColor: TME_COLORS.primary }}
+                  className="w-5 h-5 accent-tme-blue"
                 />
-                <span className="text-sm" style={{ color: TME_COLORS.primary }}>{opt.label}</span>
+                <span className="text-base text-tme-blue sm:text-sm">{opt.label}</span>
               </label>
             ))}
           </div>
           {applicantInUAE === true && (
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50">
-              <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-600" />
-              <p className="text-xs text-blue-800">
+            <div className="flex items-start gap-2 p-3 rounded-[10px] bg-blue-50">
+              <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-blue-700" aria-hidden />
+              <p className="text-[15px] leading-normal text-blue-900 sm:text-sm">
                 {submission.is_same_person
                   ? 'You’ll confirm your current visa category (and upload any required supporting documents) later.'
                   : 'The employee will confirm their current visa category (and upload any required supporting documents) during their part of the onboarding form.'}
               </p>
             </div>
           )}
-          {applicantInUAEError && (
-            <p className="text-sm text-red-500">{applicantInUAEError}</p>
-          )}
+          <FieldError>{applicantInUAEError}</FieldError>
         </div>
       </FormSection>
       )}
@@ -834,10 +815,10 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
       {/* Signature */}
       <FormSection
         title="Signature"
-        icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+        icon={<FileSignature className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
       >
         <div className="space-y-4">
-          <p className="text-sm text-gray-600">
+          <p className="text-[15px] leading-normal text-gray-600 sm:text-sm">
             By signing below, I confirm that the information provided above is accurate and complete.
           </p>
           <SignaturePad
@@ -845,22 +826,22 @@ export function EmployerForm({ submission, onSubmit, isSubmitting, isRenewal, em
             disabled={isSubmitting}
             label="Employer Signature"
           />
-          {signatureError && (
-            <p className="text-sm text-red-500">{signatureError}</p>
-          )}
+          <FieldError>{signatureError}</FieldError>
         </div>
       </FormSection>
 
       {/* Submit Button */}
-      <div className="flex justify-end">
+      <FormFooter>
         <Button
           type="submit"
-          loading={isSubmitting}
+          tone="primary"
+          busy={isSubmitting}
           size="lg"
+          fullWidthOnMobile
         >
-          {submission.is_same_person ? 'Continue to Employee Details' : 'Submit & Send to Employee'}
+          {submission.is_same_person ? 'Continue to employee details' : 'Sign and send to employee'}
         </Button>
-      </div>
+      </FormFooter>
     </form>
   );
 }

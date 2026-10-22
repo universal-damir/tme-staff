@@ -2,7 +2,6 @@
 
 import React, { useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { TME_COLORS } from '@/lib/constants';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
 import { FileUploadSlot } from '@/components/FileUploadSlot';
@@ -36,7 +35,8 @@ import {
 import { callAiCheck } from '@/lib/ai-check-client';
 import { requestJson, failureMessage } from '@/lib/request-outcome';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
-import { AlertTriangle, Camera, CreditCard, FileText, GraduationCap } from 'lucide-react';
+import { AlertCircle, Camera, CreditCard, FileText, GraduationCap } from 'lucide-react';
+import { Button, Card, FormFooter } from '@/components/ui';
 import { SampleImageToggle } from '@/components/SampleImageToggle';
 
 /**
@@ -924,41 +924,40 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
     const show = shouldOfferManualReview(rejections[key] ?? 0) && hasFile && !alreadyValidated;
     if (!show) return null;
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-        <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+      <div className="rounded-[10px] border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
+        <p className="text-[15px] leading-normal text-tme-blue sm:text-sm">
           <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this document meets the requirements, you can submit it for manual review.
         </p>
-        <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+        <label className="flex items-start gap-3 text-[15px] leading-normal cursor-pointer text-gray-700 py-1 sm:text-sm">
           <input
             type="checkbox"
-            className="mt-0.5 flex-shrink-0"
+            className="mt-1 w-5 h-5 flex-shrink-0 accent-tme-blue sm:w-4 sm:h-4"
             checked={!!reviewConfirmed[key]}
             onChange={(e) => setReviewConfirmed((prev) => ({ ...prev, [key]: e.target.checked }))}
           />
           <span>{confirmCopy}</span>
         </label>
-        <div className="flex justify-end">
-          <button
-            type="button"
+        <FormFooter>
+          <Button
+            tone="secondary"
             onClick={onManualReview}
             disabled={!reviewConfirmed[key] || !!reviewSubmitting[key]}
-            className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: TME_COLORS.primary }}
+            busy={!!reviewSubmitting[key]}
           >
             {reviewSubmitting[key] ? 'Submitting...' : 'Submit for manual review'}
-          </button>
-        </div>
+          </Button>
+        </FormFooter>
       </div>
     );
   };
 
   const sectionIcon = (key: RequestedKey) => {
-    if (key === 'photo') return <Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />;
+    if (key === 'photo') return <Camera className="w-[18px] h-[18px] text-tme-blue" aria-hidden />;
     if (key === 'eid_front' || key === 'eid_back')
-      return <CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />;
+      return <CreditCard className="w-[18px] h-[18px] text-tme-blue" aria-hidden />;
     if (key === 'degree_attested' || key === 'transcript_of_records')
-      return <GraduationCap className="w-5 h-5" style={{ color: TME_COLORS.primary }} />;
-    return <FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />;
+      return <GraduationCap className="w-[18px] h-[18px] text-tme-blue" aria-hidden />;
+    return <FileText className="w-[18px] h-[18px] text-tme-blue" aria-hidden />;
   };
 
   const renderSlot = (key: RequestedKey) => {
@@ -1102,72 +1101,82 @@ export function DocumentRequestForm({ submission, onSubmitted }: DocumentRequest
 
   if (requested.length === 0) {
     return (
-      <div className="bg-white rounded-xl p-6 shadow-sm">
-        <p className="text-sm text-gray-600">
+      <Card>
+        <p className="text-base leading-normal text-gray-700 sm:text-sm">
           No documents are currently requested. If you believe this is an error, please contact your HR representative.
         </p>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Intro */}
-      <div className="bg-white rounded-xl p-6 shadow-sm">
-        <p className="text-sm text-gray-600">
+      <Card title="What we need from you" seed="document-request-intro">
+        <p className="text-[15px] leading-normal text-gray-600 sm:text-sm">
           {isDependentRequest
             ? `TME Services needs you to upload the following ${requested.length === 1 ? 'document' : 'documents'} for your dependent.`
             : `TME Services needs you to re-upload the following ${requested.length === 1 ? 'document' : 'documents'}.`}{' '}
           Once every item shows as uploaded and accepted, you can submit.
         </p>
-        <ul className="mt-3 space-y-1">
+        <ul className="mt-3 space-y-1.5">
           {requested.map((key) => (
-            <li key={key} className="flex items-center gap-2 text-sm text-gray-700">
+            <li key={key} className="flex items-center gap-2.5 text-[15px] text-gray-700 sm:text-sm">
               <span
-                className={`w-2 h-2 rounded-full flex-shrink-0 ${isSatisfied(key) ? 'bg-green-500' : 'bg-gray-300'}`}
+                className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isSatisfied(key) ? 'bg-green-600' : 'bg-tme-line'}`}
+                aria-hidden
               />
               {displayName(key)}
+              {isSatisfied(key) && <span className="sr-only"> (done)</span>}
             </li>
           ))}
         </ul>
-      </div>
+      </Card>
 
       {/* One section per requested document */}
       {requested.map((key) => (
-        <div key={key} className="bg-white rounded-xl p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            {sectionIcon(key)}
-            <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
+        <Card
+          key={key}
+          seed={`document-request-${key}`}
+          title={
+            <span className="flex items-center gap-2">
+              {sectionIcon(key)}
               {displayName(key)}
-            </h2>
-          </div>
+            </span>
+          }
+        >
           {renderSlot(key)}
-        </div>
+        </Card>
       ))}
 
       {/* Submit */}
-      <div className="bg-white rounded-xl p-6 shadow-sm">
+      <Card>
         {submitError && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-            <p className="text-sm text-red-700">{submitError}</p>
+          <div
+            role="alert"
+            className="mb-4 p-4 bg-red-50 border-2 border-red-200 rounded-[10px] flex items-start gap-2"
+          >
+            <AlertCircle className="w-5 h-5 text-tme-red flex-shrink-0 mt-px" aria-hidden />
+            <p className="text-[15px] font-medium leading-snug text-tme-red sm:text-[13px]">{submitError}</p>
           </div>
         )}
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={!allSatisfied || submitting}
-          className="w-full px-8 py-3 rounded-lg font-semibold text-white transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ backgroundColor: TME_COLORS.primary }}
-        >
-          {submitting ? 'Submitting...' : 'Submit Documents'}
-        </button>
+        <FormFooter>
+          <Button
+            tone="primary"
+            size="lg"
+            onClick={handleSubmit}
+            disabled={!allSatisfied || submitting}
+            busy={submitting}
+          >
+            {submitting ? 'Submitting...' : 'Send documents to TME'}
+          </Button>
+        </FormFooter>
         {!allSatisfied && (
-          <p className="mt-2 text-xs text-gray-500 text-center">
+          <p className="mt-3 text-sm text-gray-600 sm:text-right">
             Upload every requested document above to enable submission.
           </p>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

@@ -8,9 +8,8 @@
  */
 
 import React, { useState } from 'react';
-import { Clock, AlertTriangle } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
-import { Button } from '@/components/ui';
+import { Clock, AlertCircle } from 'lucide-react';
+import { Button, Card, ClientPageHeader, FormFooter, PageBody } from '@/components/ui';
 import { formatDubaiDateShort } from '@/lib/utils';
 import type { EmployerStatusView } from '@/types';
 import { requestJson, failureMessage, FAILURE_MESSAGES } from '@/lib/request-outcome';
@@ -82,84 +81,77 @@ export function EmployerRecallStatus({
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-        <div
-          className="w-16 h-16 rounded-full mx-auto mb-6 flex items-center justify-center"
-          style={{ backgroundColor: '#E8ECF5' }}
-        >
-          <Clock className="w-8 h-8" style={{ color: TME_COLORS.primary }} />
-        </div>
-        <h1 className="text-xl font-bold text-gray-900 mb-4">Waiting for the employee</h1>
-        <p className="text-gray-600">
-          You sent this form to {name}
-          {date ? ` on ${date}` : ''}. We are waiting for them to fill in their part.
-        </p>
+    <div className="min-h-screen bg-tme-page">
+      <ClientPageHeader
+        eyebrow="Employer details"
+        title="Waiting for the employee"
+        subtitle={trimmedName || undefined}
+      />
+      <PageBody>
+        <Card padded>
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-full shrink-0 flex items-center justify-center bg-[#E8ECF5]">
+              <Clock className="w-6 h-6 text-tme-blue" aria-hidden />
+            </div>
+            <p className="text-base leading-normal text-gray-700 pt-2.5 sm:text-sm">
+              You sent this form to {name}
+              {date ? ` on ${date}` : ''}. We are waiting for them to fill in their part.
+            </p>
+          </div>
 
-        {view.can_recall ? (
-          confirming ? (
-            <div className="mt-6 text-left rounded-lg border-2 border-gray-200 p-4">
-              <h2 className="text-base font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-                Recall this form?
-              </h2>
-              <p className="text-sm text-gray-600">
-                The link we sent to {name} will stop working straight away. Your answers stay filled
-                in. You make your changes and sign again. Then we send {name} a new email with a new
-                link.
-              </p>
-              <div className="mt-4 flex flex-col sm:flex-row gap-3">
+          {view.can_recall ? (
+            confirming ? (
+              <div className="mt-6 rounded-[10px] border-2 border-gray-200 p-4 sm:p-5">
+                <h2 className="text-[17px] font-semibold leading-snug mb-2 text-tme-blue sm:text-[15px]">Recall this form?</h2>
+                <p className="text-[15px] leading-normal text-gray-600 sm:text-sm">
+                  The link we sent to {name} will stop working straight away. Your answers stay filled
+                  in. You make your changes and sign again. Then we send {name} a new email with a new
+                  link.
+                </p>
+                <FormFooter className="mt-4">
+                  <Button tone="plain" onClick={() => setConfirming(false)} disabled={sending}>
+                    Cancel
+                  </Button>
+                  <Button tone="primary" onClick={handleRecall} busy={sending} disabled={sending}>
+                    {sending ? 'Recalling...' : 'Yes, recall the form'}
+                  </Button>
+                </FormFooter>
+              </div>
+            ) : (
+              <div className="mt-6">
+                <p className="text-[15px] leading-normal text-gray-600 mb-4 sm:text-sm">
+                  Did you make a mistake in your part? You can take the form back, correct it and sign
+                  again.
+                </p>
                 <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={handleRecall}
-                  disabled={sending}
+                  tone="secondary"
+                  fullWidthOnMobile
+                  onClick={() => {
+                    setError(null);
+                    setConfirming(true);
+                  }}
                 >
-                  {sending ? 'Recalling...' : 'Yes, recall the form'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setConfirming(false)}
-                  disabled={sending}
-                >
-                  Cancel
+                  Recall and correct
                 </Button>
               </div>
-            </div>
+            )
           ) : (
-            <div className="mt-6">
-              <p className="text-sm text-gray-600 mb-4">
-                Did you make a mistake in your part? You can take the form back, correct it and sign
-                again.
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setError(null);
-                  setConfirming(true);
-                }}
-              >
-                Recall and correct
-              </Button>
-            </div>
-          )
-        ) : (
-          <p className="mt-6 text-sm text-gray-600">
-            If something needs to change, please contact TME Services.
-          </p>
-        )}
+            <p className="mt-6 text-[15px] leading-normal text-gray-600 sm:text-sm">
+              If something needs to change, please contact TME Services.
+            </p>
+          )}
 
-        {error && (
-          <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3 text-left">
-            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-      </div>
+          {error && (
+            <div
+              role="alert"
+              className="mt-6 p-4 bg-red-50 border border-red-200 rounded-[10px] flex items-start gap-2"
+            >
+              <AlertCircle className="w-[18px] h-[18px] text-tme-red flex-shrink-0 mt-px" aria-hidden />
+              <p className="text-sm font-medium leading-snug text-tme-red">{error}</p>
+            </div>
+          )}
+        </Card>
+      </PageBody>
     </div>
   );
 }

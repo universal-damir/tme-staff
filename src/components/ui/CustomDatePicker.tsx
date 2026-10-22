@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
-import { TME_COLORS, INPUT_HEIGHT } from '@/lib/constants';
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Button } from './Button';
+import { FieldError } from './FormBits';
 
 interface CustomDatePickerProps {
   label?: string;
@@ -32,8 +33,9 @@ interface CustomDatePickerProps {
 /**
  * CustomDatePicker - Reusable date picker component
  * Features:
- * - TME design standards (42px height, colors, fonts)
- * - Calendar popup with month/year navigation
+ * - TME design standards (46px height, 16px text, 2px border, blue focus)
+ * - Calendar popup with month/year navigation (month and year pickers are
+ *   button grids, never a native <select>)
  * - Date format: dd.mm.yyyy (display and value)
  * - Clickable calendar icon to toggle
  * - Consistent with CustomDropdown and other components
@@ -51,6 +53,13 @@ export default function CustomDatePicker({
   ariaDescribedBy,
 }: CustomDatePickerProps) {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  // Which grid the open calendar shows: the days of a month, the 12 months,
+  // or the list of years.
+  const [view, setView] = useState<'days' | 'months' | 'years'>('days');
+  const yearListRef = useRef<HTMLDivElement>(null);
+  const autoId = useId();
+  const labelId = `${autoId}-label`;
+  const labelledBy = ariaLabelledBy ?? (label ? labelId : undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const calendarRef = useRef<HTMLDivElement>(null);
   const today = new Date();
@@ -137,87 +146,85 @@ export default function CustomDatePicker({
     }
   };
 
+  // Every open starts on the day grid.
+  useEffect(() => {
+    if (!isCalendarOpen) setView('days');
+  }, [isCalendarOpen]);
+
+  // Year list: start scrolled to the year being shown.
+  useEffect(() => {
+    if (view !== 'years') return;
+    const el = yearListRef.current?.querySelector('[data-current-year="true"]');
+    (el as HTMLElement | null)?.scrollIntoView?.({ block: 'center' });
+  }, [view]);
+
+  const years = Array.from({ length: 111 }, (_, i) => today.getFullYear() - 100 + i);
+
+  const toggleCalendar = () => {
+    if (disabled) return;
+    if (!isCalendarOpen) {
+      // Navigate to value's month/year when opening
+      const d = parseValueDate();
+      setCurrentMonth(d.month);
+      setCurrentYear(d.year);
+    }
+    setIsCalendarOpen(!isCalendarOpen);
+  };
+
   const formatDisplayDate = (dateString: string) => {
     if (!dateString) return placeholder;
     // Value is already in dd.mm.yyyy format
     return dateString;
   };
 
+  const navBtn =
+    'size-11 sm:size-9 inline-flex items-center justify-center rounded-full text-tme-blue hover:bg-blue-50 transition-colors duration-150 flex-shrink-0 tme-btn-focus';
+  const headerBtn =
+    'min-h-11 sm:min-h-9 px-2.5 inline-flex items-center gap-1 rounded-[10px] sm:rounded-lg text-[15px] sm:text-sm font-semibold text-tme-blue border-2 border-transparent hover:border-tme-line hover:bg-blue-50 transition-colors tme-btn-focus';
+  const gridBtn = (active: boolean) =>
+    `min-h-11 sm:min-h-9 rounded-[10px] sm:rounded-lg text-[15px] sm:text-sm font-medium transition-colors tme-btn-focus ${
+      active ? 'bg-tme-blue text-white' : 'text-gray-800 hover:bg-blue-50'
+    }`;
+
   return (
     <div ref={containerRef} className="relative">
       {label && (
-        <label
-          className="block text-sm font-medium mb-1"
-          style={{ color: TME_COLORS.primary, fontFamily: 'Inter, sans-serif' }}
-        >
+        <label id={labelId} className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {required && (
+            <span className="text-tme-red ml-1" aria-hidden>
+              *
+            </span>
+          )}
         </label>
       )}
 
       {/* Display / Toggle */}
       <div className="relative">
-        <motion.button
+        <button
           type="button"
-          aria-labelledby={ariaLabelledBy}
+          aria-labelledby={labelledBy}
           aria-describedby={ariaDescribedBy}
-          aria-expanded={ariaLabelledBy ? isCalendarOpen : undefined}
-          onClick={() => {
-            if (disabled) return;
-            if (!isCalendarOpen) {
-              // Navigate to value's month/year when opening
-              const d = parseValueDate();
-              setCurrentMonth(d.month);
-              setCurrentYear(d.year);
-            }
-            setIsCalendarOpen(!isCalendarOpen);
-          }}
-          whileHover={!disabled ? { scale: 1.01 } : undefined}
-          className={`w-full px-3 py-2 rounded-lg border-2 border-gray-200 transition-all duration-200 flex items-center justify-between text-left ${
-            disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'cursor-pointer bg-white'
-          }`}
-          style={{
-            height: `${INPUT_HEIGHT}px`,
-            borderColor: error ? '#ef4444' : isCalendarOpen ? TME_COLORS.primary : '#e5e7eb',
-            fontFamily: 'Inter, sans-serif',
-          }}
-          onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
-            if (!disabled && !isCalendarOpen && !error) {
-              e.currentTarget.style.borderColor = TME_COLORS.primary;
-            }
-          }}
-          onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
-            if (!disabled && !isCalendarOpen && !error) {
-              e.currentTarget.style.borderColor = '#e5e7eb';
-            }
-          }}
+          aria-expanded={isCalendarOpen}
+          aria-invalid={error ? true : undefined}
+          disabled={disabled}
+          onClick={toggleCalendar}
+          className={`w-full h-[46px] pl-3.5 pr-2 rounded-[10px] border-2 transition-colors duration-200 flex items-center justify-between gap-2 text-left focus:outline-none sm:h-10 sm:pl-3 sm:pr-1.5 sm:rounded-lg sm:border ${
+            error
+              ? 'border-tme-red'
+              : isCalendarOpen
+                ? 'border-tme-blue'
+                : 'border-gray-200 sm:border-gray-300 hover:border-tme-blue sm:hover:border-tme-blue focus:border-tme-blue sm:focus:border-tme-blue'
+          } ${disabled ? 'opacity-60 cursor-not-allowed bg-gray-50' : 'cursor-pointer bg-white'}`}
         >
           {/* Display value */}
-          <span
-            className={`text-sm ${value ? 'text-gray-900' : 'text-gray-500'}`}
-            style={{ fontFamily: 'Inter, sans-serif' }}
-          >
+          <span className={`text-base sm:text-sm ${value ? 'text-gray-900' : 'text-gray-500'}`}>
             {formatDisplayDate(value)}
           </span>
-
-          {/* Calendar icon - clickable to toggle */}
-          <div
-            className={`flex-shrink-0 ${disabled ? '' : 'cursor-pointer'}`}
-            onClick={(e) => {
-              if (!disabled) {
-                e.stopPropagation();
-                if (!isCalendarOpen) {
-                  const d = parseValueDate();
-                  setCurrentMonth(d.month);
-                  setCurrentYear(d.year);
-                }
-                setIsCalendarOpen(!isCalendarOpen);
-              }
-            }}
-          >
-            <Calendar className="w-5 h-5" style={{ color: TME_COLORS.primary }} />
-          </div>
-        </motion.button>
+          <span className="flex-shrink-0 inline-flex items-center justify-center size-8" aria-hidden>
+            <Calendar className="w-5 h-5 sm:w-[18px] sm:h-[18px] text-tme-blue" />
+          </span>
+        </button>
       </div>
 
       {/* Calendar Popup */}
@@ -229,177 +236,189 @@ export default function CustomDatePicker({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
-            className="absolute z-50 w-full mt-1 bg-white border-2 rounded-lg shadow-xl p-4 min-w-[280px]"
+            className="absolute z-50 w-full mt-1 bg-white border-2 border-tme-blue rounded-[10px] shadow-xl p-3 sm:p-4 min-w-[300px]"
             onClick={(e) => e.stopPropagation()}
             onTouchEnd={(e) => e.stopPropagation()}
-            style={{ borderColor: TME_COLORS.primary, maxWidth: 'calc(100vw - 2rem)' }}
+            style={{ maxWidth: 'calc(100vw - 2rem)' }}
           >
             {/* Calendar Header */}
-            <div className="flex items-center justify-between mb-4 gap-2">
-              <motion.button
+            <div className="flex items-center justify-between mb-3 gap-1">
+              <button
                 type="button"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
                 onClick={() => navigateMonth('prev')}
-                className="p-1 hover:bg-gray-100 rounded-full transition-colors duration-150 flex-shrink-0"
+                className={`${navBtn} ${view === 'days' ? '' : 'invisible'}`}
+                aria-label="Previous month"
+                tabIndex={view === 'days' ? 0 : -1}
               >
-                <ChevronLeft className="w-5 h-5" style={{ color: TME_COLORS.primary }} />
-              </motion.button>
+                <ChevronLeft className="w-5 h-5" aria-hidden />
+              </button>
 
-              <div className="flex items-center gap-2 flex-1">
-                {/* Month Selector */}
-                <select
-                  value={currentMonth}
-                  onChange={(e) => setCurrentMonth(Number(e.target.value))}
-                  className="px-2 py-1 text-sm font-semibold rounded border transition-all cursor-pointer"
-                  style={{
-                    color: TME_COLORS.primary,
-                    fontFamily: 'Inter, sans-serif',
-                    borderColor: `${TME_COLORS.primary}80`,
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = `${TME_COLORS.primary}80`)}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = `${TME_COLORS.primary}80`)}
+              <div className="flex items-center justify-center gap-1 flex-1 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setView(view === 'months' ? 'days' : 'months')}
+                  aria-expanded={view === 'months'}
+                  aria-label={`Month: ${monthNames[currentMonth]}. Choose a month`}
+                  className={`${headerBtn} ${view === 'months' ? 'border-tme-blue' : ''}`}
                 >
-                  {monthNames.map((month, index) => (
-                    <option key={index} value={index}>
-                      {month}
-                    </option>
-                  ))}
-                </select>
-
-                {/* Year Selector */}
-                <select
-                  value={currentYear}
-                  onChange={(e) => setCurrentYear(Number(e.target.value))}
-                  className="px-2 py-1 text-sm font-semibold rounded border transition-all cursor-pointer"
-                  style={{
-                    color: TME_COLORS.primary,
-                    fontFamily: 'Inter, sans-serif',
-                    borderColor: `${TME_COLORS.primary}80`,
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = `${TME_COLORS.primary}80`)}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = TME_COLORS.primary)}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = `${TME_COLORS.primary}80`)}
+                  <span className="truncate">{monthNames[currentMonth]}</span>
+                  <ChevronDown className="w-4 h-4 flex-shrink-0" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView(view === 'years' ? 'days' : 'years')}
+                  aria-expanded={view === 'years'}
+                  aria-label={`Year: ${currentYear}. Choose a year`}
+                  className={`${headerBtn} ${view === 'years' ? 'border-tme-blue' : ''}`}
                 >
-                  {Array.from({ length: 111 }, (_, i) => today.getFullYear() - 100 + i).map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
+                  {currentYear}
+                  <ChevronDown className="w-4 h-4 flex-shrink-0" aria-hidden />
+                </button>
               </div>
 
-              <motion.button
+              <button
                 type="button"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
                 onClick={() => navigateMonth('next')}
-                className="p-1 hover:bg-gray-100 rounded-full transition-colors duration-150 flex-shrink-0"
+                className={`${navBtn} ${view === 'days' ? '' : 'invisible'}`}
+                aria-label="Next month"
+                tabIndex={view === 'days' ? 0 : -1}
               >
-                <ChevronRight className="w-5 h-5" style={{ color: TME_COLORS.primary }} />
-              </motion.button>
+                <ChevronRight className="w-5 h-5" aria-hidden />
+              </button>
             </div>
 
-            {/* Day Headers */}
-            <div className="grid grid-cols-7 gap-1 mb-2">
-              {dayNames.map((day, index) => (
-                <div
-                  key={`${day}-${index}`}
-                  className="text-center text-sm font-semibold py-2 w-10 h-8 flex items-center justify-center"
-                  style={{ color: TME_COLORS.primary }}
-                >
-                  {day}
-                </div>
-              ))}
-            </div>
-
-            {/* Calendar Days */}
-            <div className="grid grid-cols-7 gap-1">
-              {/* Empty cells for days before month starts */}
-              {Array.from({ length: getFirstDayOfMonth(currentMonth, currentYear) }).map((_, index) => (
-                <div key={`empty-${index}`} className="h-10 w-10" />
-              ))}
-
-              {/* Days of the month */}
-              {Array.from({ length: getDaysInMonth(currentMonth, currentYear) }).map((_, index) => {
-                const day = index + 1;
-                const date = new Date(currentYear, currentMonth, day);
-                const dateString = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
-                const isSelected = value === dateString;
-                const isToday =
-                  new Date().getDate() === day &&
-                  new Date().getMonth() === currentMonth &&
-                  new Date().getFullYear() === currentYear;
-
-                return (
-                  <motion.button
+            {view === 'months' && (
+              <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Choose a month">
+                {monthNames.map((month, index) => (
+                  <button
                     type="button"
-                    key={day}
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => handleDateSelect(day)}
-                    className={`h-10 w-10 rounded-lg text-sm font-medium transition-all duration-150 flex items-center justify-center ${
-                      isSelected
-                        ? 'text-white shadow-md'
-                        : isToday
-                        ? 'text-white border-2'
-                        : 'text-gray-700 hover:bg-gray-100'
-                    }`}
-                    style={{
-                      backgroundColor: isSelected ? TME_COLORS.primary : isToday ? TME_COLORS.secondary : 'transparent',
-                      borderColor: isToday ? TME_COLORS.primary : 'transparent'
+                    key={index}
+                    aria-pressed={index === currentMonth}
+                    onClick={() => {
+                      setCurrentMonth(index);
+                      setView('days');
                     }}
+                    className={gridBtn(index === currentMonth)}
                   >
-                    {day}
-                  </motion.button>
-                );
-              })}
-            </div>
+                    {month}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {view === 'years' && (
+              <div
+                ref={yearListRef}
+                className="grid grid-cols-4 gap-1.5 max-h-64 overflow-y-auto overscroll-contain pr-1"
+                role="group"
+                aria-label="Choose a year"
+              >
+                {years.map((year) => (
+                  <button
+                    type="button"
+                    key={year}
+                    data-current-year={year === currentYear ? 'true' : undefined}
+                    aria-pressed={year === currentYear}
+                    onClick={() => {
+                      setCurrentYear(year);
+                      setView('days');
+                    }}
+                    className={gridBtn(year === currentYear)}
+                  >
+                    {year}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {view === 'days' && (
+              <>
+                {/* Day Headers */}
+                <div className="grid grid-cols-7 gap-1 mb-1" aria-hidden>
+                  {dayNames.map((day, index) => (
+                    <div
+                      key={`${day}-${index}`}
+                      className="text-center text-sm sm:text-[13px] font-semibold sm:font-medium h-8 flex items-center justify-center text-tme-blue"
+                    >
+                      {day}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Calendar Days */}
+                <div className="grid grid-cols-7 gap-1">
+                  {/* Empty cells for days before month starts */}
+                  {Array.from({ length: getFirstDayOfMonth(currentMonth, currentYear) }).map((_, index) => (
+                    <div key={`empty-${index}`} className="h-11 sm:h-9" />
+                  ))}
+
+                  {/* Days of the month */}
+                  {Array.from({ length: getDaysInMonth(currentMonth, currentYear) }).map((_, index) => {
+                    const day = index + 1;
+                    const date = new Date(currentYear, currentMonth, day);
+                    const dateString = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
+                    const isSelected = value === dateString;
+                    const isToday =
+                      new Date().getDate() === day &&
+                      new Date().getMonth() === currentMonth &&
+                      new Date().getFullYear() === currentYear;
+
+                    return (
+                      <button
+                        type="button"
+                        key={day}
+                        aria-label={dateString}
+                        aria-pressed={isSelected}
+                        aria-current={isToday ? 'date' : undefined}
+                        onClick={() => handleDateSelect(day)}
+                        className={`h-11 sm:h-9 w-full rounded-[10px] sm:rounded-lg text-[15px] sm:text-sm font-medium transition-colors duration-150 flex items-center justify-center tme-btn-focus ${
+                          isSelected
+                            ? 'bg-tme-blue text-white shadow-md'
+                            : isToday
+                              ? 'border-2 border-tme-blue text-tme-blue font-semibold hover:bg-blue-50'
+                              : 'text-gray-800 hover:bg-blue-50'
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
 
             {/* Calendar Footer */}
-            <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-200">
-              <motion.button
-                type="button"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+            <div className="flex justify-between items-center gap-2 mt-3 pt-3 border-t border-gray-200">
+              <Button
+                tone="plain"
                 onClick={() => {
                   onChange('');
                   setIsCalendarOpen(false);
                 }}
-                className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors duration-150"
               >
                 {texts?.clear ?? 'Clear'}
-              </motion.button>
+              </Button>
 
-              <motion.button
-                type="button"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+              <Button
+                tone="secondary"
                 onClick={() => {
-                  const today = new Date();
-                  setCurrentMonth(today.getMonth());
-                  setCurrentYear(today.getFullYear());
-                  handleDateSelect(today.getDate());
+                  const now = new Date();
+                  setCurrentMonth(now.getMonth());
+                  setCurrentYear(now.getFullYear());
+                  const formatted = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`;
+                  onChange(formatted);
+                  setIsCalendarOpen(false);
                 }}
-                className="px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150"
-                style={{ backgroundColor: TME_COLORS.secondary, color: TME_COLORS.primary }}
               >
                 {texts?.today ?? 'Today'}
-              </motion.button>
+              </Button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Error message */}
-      {error && (
-        <p className="text-red-500 text-xs mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
-          {error}
-        </p>
-      )}
+      <FieldError>{error}</FieldError>
     </div>
   );
 }

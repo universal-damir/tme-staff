@@ -5,13 +5,22 @@ import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  TME_COLORS,
   NATIONALITIES,
   RELIGIONS,
   MARITAL_STATUS_OPTIONS,
   UAE_EMIRATES,
 } from '@/lib/constants';
-import { Input, Button, CustomDropdown, CustomDatePicker, PhoneInput } from '@/components/ui';
+import {
+  Input,
+  Button,
+  Card,
+  FieldError,
+  FormFooter,
+  GrainGradient,
+  CustomDropdown,
+  CustomDatePicker,
+  PhoneInput,
+} from '@/components/ui';
 import { SignaturePad } from '@/components/SignatureCanvas';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { UploadSlot } from '@/components/UploadSlot';
@@ -295,29 +304,37 @@ interface FormSectionProps {
   title: string;
   icon: React.ReactNode;
   children: React.ReactNode;
+  /** Kept for the call sites; the step number now lives in StepProgress only. */
   stepNumber?: number;
 }
 
-function FormSection({ title, icon, children, stepNumber }: FormSectionProps) {
+/** A step card: white card with the title (and a small 18px icon) in the cloud strip. */
+function FormSection({ title, icon, children }: FormSectionProps) {
   return (
-    <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm">
-      <div className="flex items-center gap-3 mb-6">
-        {stepNumber !== undefined && (
-          <span
-            className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-            style={{ backgroundColor: TME_COLORS.primary }}
-          >
-            {stepNumber}
+    <Card
+      seed={title}
+      title={
+        <span className="flex items-center gap-2">
+          <span className="flex shrink-0 text-tme-blue [&>svg]:w-[18px] [&>svg]:h-[18px]" aria-hidden>
+            {icon}
           </span>
-        )}
-        {icon}
-        <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
           {title}
-        </h2>
-      </div>
+        </span>
+      }
+    >
       {children}
-    </div>
+    </Card>
   );
+}
+
+/** "Personal Details" -> "personal details", "UAE Visa History" -> "UAE visa history", "&" -> "and". */
+function stepPhrase(step: number): string {
+  const label = STEP_LABELS[step - 1] || '';
+  return label
+    .replace(/&/g, 'and')
+    .split(' ')
+    .map((w) => (/^[A-Z]{2,}$/.test(w) ? w : w.toLowerCase()))
+    .join(' ');
 }
 
 // --- Step navigation buttons (Back + Continue) ---
@@ -327,43 +344,34 @@ function StepNavButtons({
   onBack,
   showBack = true,
   label,
+  nextStep,
 }: {
   enabled: boolean;
   onContinue: () => void;
   onBack?: () => void;
   showBack?: boolean;
   label?: string;
+  /** Internal index of the step Continue opens; gives the "Continue to ..." label. */
+  nextStep?: number;
 }) {
+  const continueLabel = label || (nextStep ? `Continue to ${stepPhrase(nextStep)}` : 'Continue');
   return (
-    <div className={`flex ${showBack && onBack ? 'justify-between' : 'justify-end'} mt-4`}>
+    <FormFooter className="mt-6">
       {showBack && onBack && (
-        <button
-          type="button"
-          onClick={onBack}
-          className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border-2 hover:bg-gray-50"
-          style={{ color: TME_COLORS.primary, borderColor: TME_COLORS.primary }}
-        >
-          <ChevronLeft className="w-4 h-4" />
+        <Button tone="plain" onClick={onBack}>
+          <ChevronLeft className="w-[18px] h-[18px]" aria-hidden />
           Back
-        </button>
+        </Button>
       )}
-      <button
-        type="button"
-        onClick={onContinue}
-        disabled={!enabled}
-        className={`px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-all duration-200 flex items-center gap-2 ${
-          enabled ? 'hover:opacity-90 cursor-pointer' : 'opacity-40 cursor-not-allowed'
-        }`}
-        style={{ backgroundColor: TME_COLORS.primary }}
-      >
-        {label || 'Continue'}
-        <ChevronRight className="w-4 h-4" />
-      </button>
-    </div>
+      <Button tone="primary" onClick={onContinue} disabled={!enabled}>
+        {continueLabel}
+        <ChevronRight className="w-[18px] h-[18px]" aria-hidden />
+      </Button>
+    </FormFooter>
   );
 }
 
-// --- Sticky Step Progress Bar ---
+// --- Sticky Step Progress Bar (the ONE sticky element on the page) ---
 function StepProgress({
   currentStep,
   viewingStep,
@@ -382,64 +390,67 @@ function StepProgress({
   const displayedStep = position < 0 ? viewingStep : position + 1;
   const prevStep = position > 0 ? steps[position - 1] : viewingStep;
   const nextStep = position >= 0 && position < total - 1 ? steps[position + 1] : viewingStep;
+  const viewingLabel = STEP_LABELS[viewingStep - 1] || '';
+  const arrowClass =
+    'size-11 sm:size-9 shrink-0 inline-flex items-center justify-center rounded-[10px] sm:rounded-lg text-tme-blue hover:bg-white/70 transition-colors disabled:opacity-30 disabled:cursor-not-allowed tme-btn-focus';
   return (
-    <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-sm mb-2">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
+    <div className="sticky top-0 z-40 mb-2">
+      <GrainGradient
+        color="#3B82F6"
+        seed="tme-staff-dependent-steps"
+        grainOpacity={0.5}
+        className="rounded-[14px] border border-gray-200 px-1.5 sm:px-2 pt-1 pb-0.5 sm:py-1"
+      >
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => onStepClick(prevStep)}
             disabled={position <= 0}
-            className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Previous step"
+            className={arrowClass}
           >
-            <ChevronLeft className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
+            <ChevronLeft className="w-5 h-5 sm:w-[18px] sm:h-[18px]" aria-hidden />
           </button>
-          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: TME_COLORS.primary }}>
+          <p className="flex-1 min-w-0 text-center text-[15px] sm:text-sm font-semibold leading-snug text-tme-blue" aria-live="polite">
             Step {displayedStep} of {total}
-          </span>
+            {viewingLabel ? `: ${viewingLabel}` : ''}
+          </p>
           <button
             type="button"
             onClick={() => onStepClick(nextStep)}
             disabled={nextStep === viewingStep || nextStep > currentStep}
-            className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Next step"
+            className={arrowClass}
           >
-            <ChevronRight className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
+            <ChevronRight className="w-5 h-5 sm:w-[18px] sm:h-[18px]" aria-hidden />
           </button>
         </div>
-        <span
-          className="text-xs font-medium px-2 py-0.5 rounded-full"
-          style={{ backgroundColor: `${TME_COLORS.primary}15`, color: TME_COLORS.primary }}
-        >
-          {STEP_LABELS[viewingStep - 1] || ''}
-        </span>
-      </div>
-      <div className="flex items-center gap-1.5 mb-2">
-        {steps.map((step) => {
-          const isCompleted = step < currentStep;
-          const isCurrent = step === currentStep;
-          const isViewing = step === viewingStep;
-          const isClickable = step <= currentStep;
-          return (
-            <button
-              key={step}
-              type="button"
-              onClick={() => isClickable && onStepClick(step)}
-              disabled={!isClickable}
-              className={`h-2 flex-1 rounded-full transition-all duration-200 ${
-                isViewing ? '' : isCompleted ? 'bg-green-400' : isCurrent ? '' : 'bg-gray-200'
-              } ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
-              style={
-                isViewing
-                  ? { backgroundColor: TME_COLORS.primary }
-                  : isCurrent && !isViewing
-                  ? { backgroundColor: `${TME_COLORS.primary}60` }
-                  : undefined
-              }
-              title={STEP_LABELS[step - 1]}
-            />
-          );
-        })}
-      </div>
+        <div className="flex items-center gap-1.5 px-1 sm:pb-1">
+          {steps.map((step, i) => {
+            const isDone = step < currentStep;
+            const isViewing = step === viewingStep;
+            const isClickable = step <= currentStep;
+            const segment = isViewing || isDone ? 'bg-tme-blue' : step === currentStep ? 'bg-tme-blue/40' : 'bg-tme-line';
+            return (
+              <button
+                key={step}
+                type="button"
+                onClick={() => isClickable && onStepClick(step)}
+                disabled={!isClickable}
+                aria-label={`Go to step ${i + 1}: ${STEP_LABELS[step - 1]}`}
+                aria-current={isViewing ? 'step' : undefined}
+                className={`group flex-1 min-h-11 sm:min-h-6 flex flex-col justify-center ${isClickable ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+              >
+                <span
+                  className={`block rounded-[3px] transition-all duration-200 ${segment} ${isViewing ? 'h-2' : 'h-1.5'} ${
+                    isClickable ? 'group-hover:opacity-80' : ''
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </GrainGradient>
     </div>
   );
 }
@@ -1945,29 +1956,29 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
   ) => {
     if (!show) return null;
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mt-3 space-y-3">
-        <p className="text-sm" style={{ color: TME_COLORS.primary }}>
+      <div className="rounded-[12px] border border-amber-200 bg-amber-50 p-4 mt-4 space-y-3">
+        <p className="text-[15px] sm:text-sm leading-normal text-tme-blue">
           <strong>Still can&apos;t get it accepted?</strong> If you&apos;re sure this document meets the requirements, you can submit it for manual review.
         </p>
-        <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+        <label className="flex items-start gap-3 text-[15px] sm:text-sm leading-normal cursor-pointer text-gray-700 min-h-11 sm:min-h-0">
           <input
             type="checkbox"
-            className="mt-0.5 flex-shrink-0"
+            className="mt-0.5 w-5 h-5 sm:w-4 sm:h-4 flex-shrink-0 accent-tme-blue"
             checked={confirmed}
             onChange={(e) => setConfirmed(e.target.checked)}
           />
           <span>{confirmCopy}</span>
         </label>
-        <div className="flex justify-end">
-          <button
-            type="button"
+        <div className="flex flex-col sm:flex-row sm:justify-end">
+          <Button
+            tone="secondary"
             onClick={onManualReview}
-            disabled={!confirmed || submittingFlag}
-            className="px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: TME_COLORS.primary }}
+            disabled={!confirmed}
+            busy={submittingFlag}
+            fullWidthOnMobile
           >
             {submittingFlag ? 'Submitting...' : 'Submit for manual review'}
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -1981,10 +1992,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       className={`space-y-6 relative ${submitting ? 'pointer-events-none' : ''}`}
     >
       {submitting && (
-        <div className="fixed inset-0 z-50 bg-white/70 backdrop-blur-sm flex items-center justify-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-10 h-10 border-4 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: TME_COLORS.primary }} />
-            <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Submitting the form...</p>
+        <div className="fixed inset-0 z-50 bg-white/70 backdrop-blur-sm flex items-center justify-center px-4" role="status" aria-live="polite">
+          <div className="flex flex-col items-center gap-3 rounded-[14px] border border-gray-200 bg-white px-6 py-5">
+            <div className="w-10 h-10 sm:w-8 sm:h-8 border-4 sm:border-[3px] border-gray-200 border-t-tme-blue rounded-full animate-spin" aria-hidden />
+            <p className="text-base sm:text-[15px] font-semibold text-tme-blue">Sending the form to TME...</p>
           </div>
         </div>
       )}
@@ -2006,13 +2017,13 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           exist nowhere else (review what is on file, newly taken photo, no
           certificate needed again). */}
       {isRenewal && (
-        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-[14px] p-5 sm:p-6">
           <div className="flex items-start gap-3">
-            <Users className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-            <div className="text-sm text-gray-600">
+            <Users className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+            <div className="text-[15px] sm:text-[13px] leading-normal text-gray-600">
               <p>
                 You are renewing the residence visa of{' '}
-                <span className="font-medium" style={{ color: TME_COLORS.primary }}>
+                <span className="font-semibold text-tme-blue">
                   {dependentType ? `your ${relationshipNoun}` : 'your dependent'}
                 </span>
                 {prefill.sponsor_staff_name ? (
@@ -2036,7 +2047,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       <RevealSection show={viewingStep === 1 || viewingStep === 8}>
         <FormSection
           title="ID Photo"
-          icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          icon={<Camera className="w-[18px] h-[18px]" />}
           stepNumber={displayedStepNumber(1)}
         >
           <PhotoUpload
@@ -2093,7 +2104,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           )}
 
           {viewingStep === 1 && (
-            <StepNavButtons enabled={isPhotoUploaded} onContinue={() => setViewingStep(stepAfter(1))} showBack={false} />
+            <StepNavButtons enabled={isPhotoUploaded} onContinue={() => setViewingStep(stepAfter(1))} nextStep={stepAfter(1)} showBack={false} />
           )}
         </FormSection>
       </RevealSection>
@@ -2103,20 +2114,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           passport has changed (same treatment as EmployeeForm's renewal
           panel). Only ever rendered when BOTH pages are on file. */}
       {isRenewal && hasExistingPassport && (viewingStep === 2 || viewingStep === 8) && !passportChanged && (
-        <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm mb-6">
-          <div className="flex items-center gap-3 mb-4">
-            <span
-              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-              style={{ backgroundColor: TME_COLORS.primary }}
-            >
-              {displayedStepNumber(2)}
-            </span>
-            <Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />
-            <h2 className="text-lg font-semibold" style={{ color: TME_COLORS.primary }}>
-              Current Passport on File
-            </h2>
-          </div>
-          <p className="text-sm text-gray-600 mb-4">
+        <div className="mb-6">
+        <FormSection title="Current Passport on File" icon={<Camera className="w-[18px] h-[18px]" />}>
+          <p className="text-[15px] sm:text-[13px] leading-normal text-gray-600 mb-4">
             These are the passport documents TME Services holds for your {relationshipNoun}.
             Please review them and confirm they are still valid.
           </p>
@@ -2152,13 +2152,13 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   passportUnchangedRef.current = checked;
                   void saveDocRefs(buildDocRefs());
                 }}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300"
+                className="mt-0.5 w-5 h-5 sm:w-4 sm:h-4 flex-shrink-0 rounded border-gray-300 accent-tme-blue"
               />
               <div>
-                <span className="text-sm font-medium text-gray-800">
+                <span className="text-[15px] sm:text-sm font-medium leading-normal text-gray-800">
                   I confirm the passport is the same as shown above
                 </span>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">
                   It has not been renewed, replaced, or lost since the last submission.
                 </p>
               </div>
@@ -2169,9 +2169,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               (8) the panel is a read-back of what was confirmed, and a
               Continue button there would jump the sponsor backwards. */}
           {viewingStep === 2 && (
-          <div className="flex items-center justify-between mt-5">
-            <button
-              type="button"
+          <FormFooter
+            className="mt-5"
+            left={
+            <Button
+              tone="secondary"
               onClick={() => {
                 setPassportChanged(true);
                 setPassportConfirmed(false);
@@ -2182,13 +2184,14 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   void saveDocRefs(buildDocRefs());
                 }
               }}
-              className="text-sm text-red-600 hover:text-red-700 font-medium underline text-left"
             >
-              The passport has changed — I need to upload new pages
-            </button>
+              The passport has changed: upload new pages
+            </Button>
+            }
+          >
             {passportConfirmed && (
-              <button
-                type="button"
+              <Button
+                tone="primary"
                 onClick={() => {
                   // Persist the attestation so the server-side submit gate can
                   // verify the skip (defense-in-depth; it also checks both
@@ -2197,15 +2200,14 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   void saveDocRefs(buildDocRefs());
                   setViewingStep(stepAfter(2));
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-white text-sm flex-shrink-0"
-                style={{ backgroundColor: TME_COLORS.primary }}
               >
-                Continue
-                <ChevronRight className="w-4 h-4" />
-              </button>
+                Continue to {stepPhrase(stepAfter(2))}
+                <ChevronRight className="w-4 h-4" aria-hidden />
+              </Button>
             )}
-          </div>
+          </FormFooter>
           )}
+        </FormSection>
         </div>
       )}
 
@@ -2220,19 +2222,19 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         <div className="space-y-6">
           <FormSection
             title="Passport Cover (OUTSIDE)"
-            icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Camera className="w-[18px] h-[18px]" />}
             stepNumber={displayedStepNumber(2)}
           >
             <div className="space-y-4">
               {!isReview && (
-                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                <div className="flex items-start gap-3 p-4 rounded-[12px] bg-[#EBF4FF]">
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+                  <div className="text-[15px] sm:text-sm leading-normal text-tme-blue">
                     <p className="font-medium">Upload the passport cover (open/spread showing front + back cover)</p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       Single page photos are not accepted. The passport must be spread open.
                     </p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
                       {isMobile
                         ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
@@ -2268,23 +2270,23 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 shouldOfferManualReview(coverRejectionCount) && !!coverUI.file && !passportPages.cover?.validated,
               )}
             </div>
-            {passportError && <p className="mt-2 text-sm text-red-500">{passportError}</p>}
+            <FieldError>{passportError}</FieldError>
           </FormSection>
 
           <FormSection
             title="Passport Data (INSIDE)"
-            icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Camera className="w-[18px] h-[18px]" />}
           >
             <div className="space-y-4">
               {!isReview && (
-                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                <div className="flex items-start gap-3 p-4 rounded-[12px] bg-[#EBF4FF]">
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+                  <div className="text-[15px] sm:text-sm leading-normal text-tme-blue">
                     <p className="font-medium">Upload the passport inside pages (open/spread showing data page + opposite page)</p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       The dependent&apos;s details will be automatically extracted from this page.
                     </p>
-                    <p className="mt-2 text-xs text-gray-600">
+                    <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                       All four corners of the passport must be visible — no glare, blur, or cut-off edges.{' '}
                       {isMobile
                         ? 'Upload a scanned PDF — the camera is disabled, and only proper scans are accepted.'
@@ -2323,12 +2325,12 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           </FormSection>
 
           {extractingPassport && (
-            <div className="rounded-xl border-2 border-blue-100 bg-blue-50/50 p-6">
+            <div className="rounded-[14px] border border-gray-200 bg-[#EBF4FF] p-5 sm:p-6" role="status" aria-live="polite">
               <div className="flex items-center gap-3">
-                <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent" />
+                <div className="animate-spin rounded-full h-5 w-5 shrink-0 border-2 border-tme-blue border-t-transparent" aria-hidden />
                 <div>
-                  <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Reading passport data...</p>
-                  <p className="text-xs text-gray-500 mt-0.5">Extracting the details from the passport. This may take a few seconds.</p>
+                  <p className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">Reading passport data...</p>
+                  <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">Extracting the details from the passport. This may take a few seconds.</p>
                 </div>
               </div>
             </div>
@@ -2338,15 +2340,15 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           {requiresAdditionalPage && (
             <FormSection
               title={additionalPageCopy.title}
-              icon={<Camera className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+              icon={<Camera className="w-[18px] h-[18px]" />}
             >
               <div className="space-y-4">
                 {!isReview && (
-                  <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                    <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                  <div className="flex items-start gap-3 p-4 rounded-[12px] bg-[#EBF4FF]">
+                    <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+                    <div className="text-[15px] sm:text-sm leading-normal text-tme-blue">
                       <p className="font-medium">{additionalPageCopy.heading}</p>
-                      <p className="mt-1 text-xs text-gray-600">{additionalPageCopy.sub}</p>
+                      <p className="mt-1 text-sm sm:text-[13px] text-gray-600">{additionalPageCopy.sub}</p>
                       <SampleImageToggle imageSrc={additionalPageCopy.sampleSrc} altText={additionalPageCopy.sampleAlt} label="See example photo" />
                     </div>
                   </div>
@@ -2376,10 +2378,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                     second page at all. India is never offered this — the
                     address page always exists. */}
                 {additionalPageVariant === 'syria' && !isReview && (
-                  <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+                  <label className="flex items-start gap-3 text-[15px] sm:text-sm leading-normal cursor-pointer text-gray-700 min-h-11 sm:min-h-0">
                     <input
                       type="checkbox"
-                      className="mt-0.5 flex-shrink-0"
+                      className="mt-0.5 w-5 h-5 sm:w-4 sm:h-4 flex-shrink-0 accent-tme-blue"
                       checked={additionalPageNotApplicable}
                       onChange={(e) => handleAdditionalPageNotApplicable(e.target.checked)}
                     />
@@ -2423,6 +2425,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               enabled={isPassportComplete && !extractingPassport}
               onContinue={() => setViewingStep(stepAfter(2))}
               onBack={() => setViewingStep(stepBefore(2))}
+              nextStep={stepAfter(2)}
             />
           )}
         </div>
@@ -2433,10 +2436,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         <div className="space-y-6">
         <FormSection
           title="Personal Details"
-          icon={<User className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          icon={<User className="w-[18px] h-[18px]" />}
           stepNumber={displayedStepNumber(3)}
         >
-          <p className="text-sm text-gray-500 mb-4">
+          <p className="text-[15px] sm:text-[13px] leading-normal text-gray-600 mb-4">
             These details were auto-filled from the passport. Please review and correct if needed.
           </p>
           <div className="space-y-4">
@@ -2477,9 +2480,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             {/* Blank family name soft-confirm — some passports (e.g. many
                 Indian ones) carry no surname. */}
             {noLastNameWarning && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                <p className="font-medium">No family name entered</p>
-                <p className="mt-0.5 text-xs">
+              <div role="alert" className="p-4 bg-amber-50 border border-amber-200 rounded-[12px] text-[15px] sm:text-sm leading-normal text-amber-900">
+                <p className="font-semibold">No family name entered</p>
+                <p className="mt-1 text-sm">
                   Some passports (e.g. many Indian passports) have no surname — if that is the case here,
                   click Continue again to proceed without a family name. Otherwise fill in the family name first.
                 </p>
@@ -2586,24 +2589,19 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               gate they could walk to the end and only learn about it from
               the submit-time 422. */}
           {viewingStep === 3 && requiresAdditionalPage && !isAdditionalPageUploaded && (
-            <div className="mt-4 p-4 rounded-lg border border-amber-300 bg-amber-50 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-amber-800">
-                <p className="font-medium">{additionalPageCopy.title} still missing</p>
+            <div className="mt-4 p-4 rounded-[12px] border border-amber-300 bg-amber-50 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" aria-hidden />
+              <div className="text-[15px] sm:text-sm leading-normal text-amber-900">
+                <p className="font-semibold">{additionalPageCopy.title} still missing</p>
                 <p className="mt-1">
                   {additionalPageVariant === 'syria'
                     ? 'Syrian passports also need the additional page (date/place of issue and national number).'
                     : 'Indian passports also need the last page (parents’ names and address).'}{' '}
                   Please upload it in the Passport step before continuing.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setViewingStep(2)}
-                  className="mt-2 px-4 py-1.5 rounded-lg text-sm font-medium text-white hover:opacity-90"
-                  style={{ backgroundColor: TME_COLORS.primary }}
-                >
-                  Go to Passport step
-                </button>
+                <Button tone="secondary" size="sm" className="mt-3" onClick={() => setViewingStep(2)}>
+                  Go to the passport step
+                </Button>
               </div>
             </div>
           )}
@@ -2619,18 +2617,15 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         {requiresPakistanId && (
           <FormSection
             title="Pakistani National ID (CNIC/NICOP)"
-            icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<CreditCard className="w-[18px] h-[18px]" />}
           >
             <div className="space-y-4">
               {!isReview && (
-                <div
-                  className="flex items-start gap-3 p-4 rounded-lg"
-                  style={{ backgroundColor: '#EBF4FF' }}
-                >
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                <div className="flex items-start gap-3 p-4 rounded-[12px] bg-[#EBF4FF]">
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+                  <div className="text-[15px] sm:text-sm leading-normal text-tme-blue">
                     <p className="font-medium">Pakistani nationals are required to provide a copy of their National ID Card (CNIC/NICOP) with chip</p>
-                    <p className="mt-1 text-xs text-gray-600">
+                    <p className="mt-1 text-sm sm:text-[13px] text-gray-600">
                       Please upload the front and back of the dependent&apos;s Pakistan National Identity Card.
                     </p>
                   </div>
@@ -2641,7 +2636,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   is only needed when the card changed. */}
               {isRenewal && (pakistanIdFrontOnFile || pakistanIdBackOnFile) && (
                 <div className="space-y-3">
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm sm:text-[13px] text-gray-600">
                     These are the copies TME Services holds. Upload a new front or back below only if the card has been renewed or replaced.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2657,16 +2652,16 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
               {/* Sample images above upload areas */}
               {!isReview && (
-                <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3 mb-4">
                   <div className="text-center">
-                    <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Front example</p>
+                    <p className="text-sm font-medium mb-1 text-tme-blue">Front example</p>
                     <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src="/samples/pakistan-id-front-example.png" alt="Example Pakistan ID front" className="h-32 sm:h-40 object-contain" />
                     </div>
                   </div>
                   <div className="text-center">
-                    <p className="text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>Back example</p>
+                    <p className="text-sm font-medium mb-1 text-tme-blue">Back example</p>
                     <div className="rounded-lg overflow-hidden border border-gray-200 inline-block">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src="/samples/pakistan-id-back-example.png" alt="Example Pakistan ID back" className="h-32 sm:h-40 object-contain" />
@@ -2678,7 +2673,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
                 {/* Front */}
                 <div className="flex flex-col">
-                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Front</p>
+                  <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Front</p>
                   <UploadSlot
                     label=""
                     description="Front of Pakistan ID"
@@ -2703,7 +2698,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
 
                 {/* Back */}
                 <div className="flex flex-col">
-                  <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>Back</p>
+                  <p className="text-[15px] sm:text-sm font-semibold sm:font-medium mb-2 text-tme-blue">Back</p>
                   <UploadSlot
                     label=""
                     description="Back of Pakistan ID"
@@ -2734,7 +2729,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 </div>
               )}
 
-              {pakistanIdError && <p className="text-sm text-red-500">{pakistanIdError}</p>}
+              <FieldError>{pakistanIdError}</FieldError>
             </div>
           </FormSection>
         )}
@@ -2743,6 +2738,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           <StepNavButtons
             enabled={isPersonalComplete && isPassportComplete && isPakistanIdComplete}
             onBack={() => setViewingStep(stepBefore(3))}
+            nextStep={stepAfter(3)}
             onContinue={() => {
               if (!lastName && !noLastNameWarning) {
                 setNoLastNameWarning(true);
@@ -2762,31 +2758,31 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       <RevealSection show={!isRenewal && (viewingStep === 4 || viewingStep === 8)}>
         <FormSection
           title={multipleCertificates ? 'Relationship Certificates' : 'Relationship Certificate'}
-          icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          icon={<FileText className="w-[18px] h-[18px]" />}
           stepNumber={displayedStepNumber(4)}
         >
           <div className="space-y-4">
             {!isReview && (
-              <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+              <div className="flex items-start gap-3 p-4 rounded-[12px] bg-[#EBF4FF]">
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+                <div className="text-[15px] sm:text-sm leading-normal text-tme-blue">
                   <p className="font-medium">
                     {multipleCertificates
                       ? 'Upload the certificates listed below'
                       : `Upload the ${certSet.primaryLabel}`}
                   </p>
-                  <p className="mt-2 text-xs text-gray-600">
+                  <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                     {multipleCertificates ? 'Each certificate' : 'The certificate'} must be attested by the
                     UAE Ministry of Foreign Affairs (MoFA) or, at minimum, by the UAE Embassy in the country
                     where it was issued. If a certificate is in a language other than English or Arabic, a
                     legal translation must be attached. An unattested certificate will be rejected by the
                     immigration authorities.
                   </p>
-                  <p className="mt-2 text-xs text-gray-600">
+                  <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                     Please note that TME Services can only proceed with the dependent visa application once
                     all of the requested documents have been provided.
                   </p>
-                  <p className="mt-2 text-xs text-gray-600">
+                  <p className="mt-2 text-sm sm:text-[13px] text-gray-600">
                     In case your marriage or birth certificate hasn&apos;t been attested yet, please
                     contact TME Services so that we can guide you through the process.
                   </p>
@@ -2821,7 +2817,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-medium text-gray-700">{certSet.marriageLabel}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <p className="text-sm sm:text-[13px] text-gray-600 mt-0.5">
                     Based on the marital status provided in Personal Details.
                   </p>
                 </div>
@@ -2860,11 +2856,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 const age = ageFromIsoDate(dateOfBirth);
                 return age !== null && age >= 18;
               })() && (
-                <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                  <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+                <div className="flex items-start gap-3 p-4 rounded-[12px] bg-[#EBF4FF]">
+                  <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+                  <div className="text-[15px] sm:text-sm leading-normal text-tme-blue">
                     <p className="font-medium">Declaration of Unmarried Status</p>
-                    <p className="mt-1 text-xs text-gray-600">
+                    <p className="mt-1 text-sm sm:text-[13px] text-gray-600">
                       As the dependent is 18 years of age or older, the authorities also require an
                       undertaking letter from the Sponsor confirming that the dependent is unmarried.
                       You do not need to upload anything here. TME Services will arrange the required
@@ -2878,11 +2874,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 — an info note, no upload. Only for Mother (not Father), and
                 only while her Step-3 marital status is Married. */}
             {dependentType === 'Mother' && maritalStatus === 'Married' && (
-              <div className="flex items-start gap-3 p-4 rounded-lg" style={{ backgroundColor: '#EBF4FF' }}>
-                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-                <div className="text-sm" style={{ color: TME_COLORS.primary }}>
+              <div className="flex items-start gap-3 p-4 rounded-[12px] bg-[#EBF4FF]">
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+                <div className="text-[15px] sm:text-sm leading-normal text-tme-blue">
                   <p className="font-medium">Husband&apos;s Approval to proceed with Visa Application (NOC)</p>
-                  <p className="mt-1 text-xs text-gray-600">
+                  <p className="mt-1 text-sm sm:text-[13px] text-gray-600">
                     As the dependent is married, the authorities also require a no-objection
                     certificate (NOC) confirming her husband&apos;s approval for her to obtain the
                     residence visa. You do not need to upload anything here. TME Services will
@@ -2892,10 +2888,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               </div>
             )}
 
-            <label className="flex items-start gap-2 text-sm cursor-pointer text-gray-700">
+            <label className="flex items-start gap-3 text-[15px] sm:text-sm leading-normal cursor-pointer text-gray-700 min-h-11 sm:min-h-0">
               <input
                 type="checkbox"
-                className="mt-0.5 flex-shrink-0"
+                className="mt-0.5 w-5 h-5 sm:w-4 sm:h-4 flex-shrink-0 accent-tme-blue"
                 checked={attestationConfirmed}
                 onChange={(e) => setValue('certificate_attestation_confirmed', e.target.checked, { shouldDirty: true })}
               />
@@ -2906,11 +2902,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               </span>
             </label>
 
-            {certificateError && <p className="text-sm text-red-500">{certificateError}</p>}
+            <FieldError>{certificateError}</FieldError>
           </div>
 
           {viewingStep === 4 && (
-            <StepNavButtons enabled={isCertificateComplete} onContinue={() => setViewingStep(stepAfter(4))} onBack={() => setViewingStep(stepBefore(4))} />
+            <StepNavButtons enabled={isCertificateComplete} onContinue={() => setViewingStep(stepAfter(4))} nextStep={stepAfter(4)} onBack={() => setViewingStep(stepBefore(4))} />
           )}
         </FormSection>
       </RevealSection>
@@ -2919,11 +2915,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
       <RevealSection show={!isRenewal && (viewingStep === 5 || viewingStep === 8)}>
         <FormSection
           title="UAE Visa History"
-          icon={<ShieldCheck className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+          icon={<ShieldCheck className="w-[18px] h-[18px]" />}
           stepNumber={displayedStepNumber(5)}
         >
           <div className="space-y-4">
-            <p className="text-sm text-gray-600">
+            <p className="text-[15px] sm:text-sm font-semibold sm:font-medium text-tme-blue">
               Has the dependent previously held a UAE residence visa and Emirates ID?
             </p>
             {/* Radio pair, same pattern as EmployeeForm's UAE-docs question —
@@ -2934,7 +2930,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 { value: true, label: 'Yes' },
                 { value: false, label: 'No' },
               ].map((opt) => (
-                <label key={String(opt.value)} className="flex items-center gap-2 cursor-pointer">
+                <label key={String(opt.value)} className="flex items-center gap-2 cursor-pointer min-h-11 sm:min-h-0">
                   <input
                     type="radio"
                     name="previously_held_uae_visa_choice"
@@ -2943,17 +2939,16 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                       setPreviouslyHeldVisa(opt.value);
                       setValue('previously_held_uae_visa', opt.value, { shouldDirty: true });
                     }}
-                    className="w-4 h-4"
-                    style={{ accentColor: TME_COLORS.primary }}
+                    className="w-5 h-5 accent-tme-blue"
                   />
-                  <span className="text-sm" style={{ color: TME_COLORS.primary }}>{opt.label}</span>
+                  <span className="text-base sm:text-sm text-tme-blue">{opt.label}</span>
                 </label>
               ))}
             </div>
 
             {previouslyHeldVisa === true && (
               <div className="space-y-4 pl-6 border-l-2 border-gray-200">
-                <p className="text-sm text-gray-600">
+                <p className="text-sm sm:text-[13px] text-gray-600">
                   Please upload the previous residence visa and both sides of the Emirates ID.
                 </p>
                 <FileUploadSlot
@@ -2985,7 +2980,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           </div>
 
           {viewingStep === 5 && (
-            <StepNavButtons enabled={isVisaHistoryComplete} onContinue={() => setViewingStep(stepAfter(5))} onBack={() => setViewingStep(stepBefore(5))} />
+            <StepNavButtons enabled={isVisaHistoryComplete} onContinue={() => setViewingStep(stepAfter(5))} nextStep={stepAfter(5)} onBack={() => setViewingStep(stepBefore(5))} />
           )}
         </FormSection>
       </RevealSection>
@@ -2995,7 +2990,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         <div className="space-y-6">
           <FormSection
             title="Home Country Address"
-            icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<MapPin className="w-[18px] h-[18px]" />}
             stepNumber={displayedStepNumber(6)}
           >
             <div className="space-y-4">
@@ -3029,9 +3024,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             </div>
           </FormSection>
 
-          <FormSection title="UAE Address" icon={<MapPin className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}>
+          <FormSection title="UAE Address" icon={<MapPin className="w-[18px] h-[18px]" />}>
             <div className="space-y-4">
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-3 cursor-pointer min-h-11 sm:min-h-0">
                 <input
                   type="checkbox"
                   checked={isInUAE}
@@ -3045,9 +3040,9 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                       setValue('uae_emirate', '');
                     }
                   }}
-                  className="w-4 h-4 rounded border-gray-300"
+                  className="w-5 h-5 shrink-0 rounded border-gray-300 accent-tme-blue"
                 />
-                <span className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                <span className="text-[15px] sm:text-sm font-medium text-tme-blue">
                   The dependent is currently in the UAE
                 </span>
               </label>
@@ -3083,7 +3078,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
           </FormSection>
 
           {viewingStep === 6 && (
-            <StepNavButtons enabled={isAddressComplete} onContinue={() => setViewingStep(stepAfter(6))} onBack={() => setViewingStep(stepBefore(6))} />
+            <StepNavButtons enabled={isAddressComplete} onContinue={() => setViewingStep(stepAfter(6))} nextStep={stepAfter(6)} onBack={() => setViewingStep(stepBefore(6))} />
           )}
         </div>
       </RevealSection>
@@ -3093,7 +3088,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         <div className="space-y-6">
           <FormSection
             title="Mobile Numbers"
-            icon={<Phone className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<Phone className="w-[18px] h-[18px]" />}
             stepNumber={displayedStepNumber(7)}
           >
             <div className="space-y-4">
@@ -3107,7 +3102,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   disabled={mobileUaeUseSponsor}
                 />
                 {sponsorMobile && (
-                  <label className="flex items-center gap-2 mt-3 text-sm text-gray-700 cursor-pointer select-none">
+                  <label className="flex items-center gap-3 mt-2 min-h-11 sm:min-h-0 text-[15px] sm:text-sm text-gray-700 cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={mobileUaeUseSponsor}
@@ -3116,7 +3111,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                         setValue('mobile_uae_use_sponsor', checked, { shouldDirty: true });
                         setValue('mobile_uae', checked ? sponsorMobile : '', { shouldDirty: true });
                       }}
-                      className="rounded"
+                      className="w-5 h-5 shrink-0 rounded accent-tme-blue"
                     />
                     Use my (the sponsor&apos;s) mobile number
                   </label>
@@ -3134,7 +3129,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 {/* Copies the sponsor's HOME-COUNTRY number, never the UAE
                     one — hidden when the sponsor has no home number on file. */}
                 {sponsorHomeMobile && (
-                  <label className="flex items-center gap-2 mt-3 text-sm text-gray-700 cursor-pointer select-none">
+                  <label className="flex items-center gap-3 mt-2 min-h-11 sm:min-h-0 text-[15px] sm:text-sm text-gray-700 cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={mobileHomeUseSponsor}
@@ -3143,7 +3138,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                         setValue('mobile_home_use_sponsor', checked, { shouldDirty: true });
                         setValue('mobile_home_country', checked ? sponsorHomeMobile : '', { shouldDirty: true });
                       }}
-                      className="rounded"
+                      className="w-5 h-5 shrink-0 rounded accent-tme-blue"
                     />
                     Use my (the sponsor&apos;s) home country mobile number
                   </label>
@@ -3152,7 +3147,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             </div>
           </FormSection>
 
-          <FormSection title="Email" icon={<Mail className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}>
+          <FormSection title="Email" icon={<Mail className="w-[18px] h-[18px]" />}>
             <Input
               label="Email"
               type="email"
@@ -3168,7 +3163,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               })}
             />
             {sponsorEmail && (
-              <label className="flex items-center gap-2 mt-3 text-sm text-gray-700 cursor-pointer select-none">
+              <label className="flex items-center gap-3 mt-2 min-h-11 sm:min-h-0 text-[15px] sm:text-sm text-gray-700 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={emailUseSponsor}
@@ -3177,7 +3172,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                     setValue('email_use_sponsor', checked, { shouldDirty: true });
                     setValue('email', checked ? sponsorEmail : '', { shouldValidate: true, shouldDirty: true });
                   }}
-                  className="rounded"
+                  className="w-5 h-5 shrink-0 rounded accent-tme-blue"
                 />
                 Use my (the sponsor&apos;s) email address
               </label>
@@ -3189,7 +3184,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               written back to the payroll account. */}
           <FormSection
             title="Sponsor's Bank Account"
-            icon={<CreditCard className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<CreditCard className="w-[18px] h-[18px]" />}
           >
             <Input
               label="Your (the sponsor's) UAE bank account (IBAN)"
@@ -3209,10 +3204,10 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
             />
           </FormSection>
 
-          <FormSection title="Anything Else?" icon={<Info className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}>
+          <FormSection title="Anything Else?" icon={<Info className="w-[18px] h-[18px]" />}>
             <textarea
-              className="w-full px-4 py-2 border-2 rounded-lg text-sm focus:outline-none transition-colors"
-              style={{ borderColor: TME_COLORS.border, minHeight: '96px' }}
+              className="w-full min-h-24 px-4 py-3 sm:px-3 sm:py-2 border-2 sm:border border-gray-200 sm:border-gray-300 rounded-[10px] sm:rounded-lg text-base sm:text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-tme-blue sm:focus:ring-2 sm:focus:ring-tme-blue/15 transition-colors"
+              aria-label="Anything else TME Services should know (optional)"
               placeholder="Any additional information TME Services should know (optional)"
               {...register('other_information')}
             />
@@ -3223,7 +3218,7 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
               enabled={isContactComplete}
               onContinue={() => setViewingStep(stepAfter(7))}
               onBack={() => setViewingStep(stepBefore(7))}
-              label="Review & Sign"
+              nextStep={stepAfter(7)}
             />
           )}
         </div>
@@ -3234,11 +3229,11 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
         <div>
           <FormSection
             title="Review & Sign"
-            icon={<FileSignature className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
+            icon={<FileSignature className="w-[18px] h-[18px]" />}
             stepNumber={displayedStepNumber(8)}
           >
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">
+              <p className="text-[15px] sm:text-[13px] leading-normal text-gray-600">
                 By signing below, I confirm that the information and documents provided above for my{' '}
                 {relationshipNoun} are accurate and complete.
               </p>
@@ -3248,8 +3243,8 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                   server side); travels in the payload as
                   details_confirmed_up_to_date. */}
               {isRenewal && (
-                <div className="border border-gray-200 rounded-lg p-4">
-                  <label className="flex items-start gap-3 cursor-pointer">
+                <div className="border border-gray-200 rounded-[12px] p-4">
+                  <label className="flex items-start gap-3 cursor-pointer min-h-11 sm:min-h-0">
                     <input
                       type="checkbox"
                       checked={detailsConfirmed}
@@ -3257,15 +3252,13 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                         setValue('details_confirmed_up_to_date', e.target.checked, { shouldDirty: true });
                         if (e.target.checked && detailsConfirmError) setDetailsConfirmError(null);
                       }}
-                      className="mt-0.5 w-4 h-4 rounded border-gray-300"
+                      className="mt-0.5 w-5 h-5 sm:w-4 sm:h-4 flex-shrink-0 rounded border-gray-300 accent-tme-blue"
                     />
-                    <span className="text-sm font-medium text-gray-800">
+                    <span className="text-[15px] sm:text-sm font-medium leading-normal text-gray-800">
                       I confirm that the details and documents TME Services has on file are still up to date.
                     </span>
                   </label>
-                  {detailsConfirmError && (
-                    <p className="mt-2 text-sm text-red-500">{detailsConfirmError}</p>
-                  )}
+                  <FieldError>{detailsConfirmError}</FieldError>
                 </div>
               )}
 
@@ -3278,31 +3271,26 @@ export function DependentForm({ submission, onSubmitted }: DependentFormProps) {
                 label="Sponsor Signature"
                 initialValue={signature}
               />
-              {signatureError && <p className="text-sm text-red-500">{signatureError}</p>}
+              <FieldError>{signatureError}</FieldError>
             </div>
           </FormSection>
 
           {submitError && (
-            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-              <p className="text-sm text-red-700">{submitError}</p>
+            <div role="alert" className="mt-4 p-4 bg-red-50 border border-red-200 rounded-[12px] flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-tme-red flex-shrink-0 mt-0.5" aria-hidden />
+              <p className="text-[15px] sm:text-[13px] font-medium leading-normal text-tme-red">{submitError}</p>
             </div>
           )}
 
-          <div className="flex justify-between items-center mt-6">
-            <button
-              type="button"
-              onClick={() => setViewingStep(stepBefore(8))}
-              className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border-2 hover:bg-gray-50"
-              style={{ color: TME_COLORS.primary, borderColor: TME_COLORS.primary }}
-            >
-              <ChevronLeft className="w-4 h-4" />
+          <FormFooter className="mt-6">
+            <Button tone="plain" size="lg" onClick={() => setViewingStep(stepBefore(8))}>
+              <ChevronLeft className="w-4 h-4" aria-hidden />
               Back
-            </button>
-            <Button type="submit" loading={submitting} size="lg">
-              Submit Dependent Form
             </Button>
-          </div>
+            <Button type="submit" tone="primary" busy={submitting} size="lg">
+              Send the dependent form to TME
+            </Button>
+          </FormFooter>
         </div>
       </RevealSection>
     </form>

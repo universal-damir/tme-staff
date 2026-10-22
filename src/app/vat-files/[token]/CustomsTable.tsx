@@ -12,8 +12,10 @@
 // component that gets only its own answer object and plain values, and the
 // callbacks are stable, so typing in one row re-renders that row only.
 //
-// Look (11.10): a compact "fintech" table: ~52 px rows, quiet select cells
-// (hairline until hover / focus), document pills, a "..." menu per row.
+// Look (11.10, readability pass 22.10): every answer is the same bordered box
+// (amber border = required and still empty), one Status chip per row ("Done" /
+// "N to answer"), Upload buttons / "uploaded" chips for the documents, a "..."
+// menu per row.
 //
 // Read-only (11.10, a closed request): the same table with the answers as
 // plain text, the replies as text, document pills that only show what came
@@ -38,10 +40,11 @@ import {
   Plus,
   RotateCcw,
   Scissors,
+  Upload,
   X,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { TME_COLORS } from '@/lib/constants';
+import { AutoGrowText, Button, ButtonLink, GrainGradient, StatusChip } from '@/components/ui';
 import ChoiceSelect, { type ChoiceOption } from './ChoiceSelect';
 import {
   copyableAnswer,
@@ -156,7 +159,7 @@ function ReplyWho({ meta, sent, className = '' }: { meta: VatCustomsReplyMeta | 
   const sentAt = useContext(SentAtContext);
   const text = replyStatusLine(meta, names, sent, sentAt);
   if (!text) return null;
-  return <span className={`block text-[11px] leading-snug text-gray-500 break-words ${className}`}>{text}</span>;
+  return <span className={`block text-sm leading-snug text-gray-600 break-words ${className}`}>{text}</span>;
 }
 
 /** Round 5: a reply that went out with a Send: plain text, who sent it; round 5 item 8: the notes under it (children). */
@@ -173,12 +176,12 @@ function SentReply({
 }) {
   return (
     <div className={className}>
-      <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-1.5">
-        <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500 mb-0.5">
-          <Lock className="w-3 h-3" aria-hidden />
+      <div className="rounded-[10px] bg-white border border-gray-200 px-3 py-2">
+        <span className="flex items-center gap-1.5 text-[13px] font-medium text-gray-600 mb-0.5">
+          <Lock className="w-3.5 h-3.5" aria-hidden />
           Your reply
         </span>
-        <p className="text-[13px] leading-snug break-words whitespace-pre-line text-gray-900">{text}</p>
+        <p className="text-[15px] leading-snug break-words whitespace-pre-line text-gray-900">{text}</p>
         <ReplyWho meta={meta} sent className="mt-1" />
       </div>
       {children}
@@ -189,12 +192,12 @@ function SentReply({
 /** Round 5 item 8: a note as text (sent, or any note on a closed request). */
 function NoteText({ text, meta, sent, locked }: { text: string; meta: VatCustomsReplyMeta | undefined; sent: boolean; locked: boolean }) {
   return (
-    <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-1.5">
-      <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500 mb-0.5">
-        {locked && <Lock className="w-3 h-3" aria-hidden />}
+    <div className="rounded-[10px] bg-white border border-gray-200 px-3 py-2">
+      <span className="flex items-center gap-1.5 text-[13px] font-medium text-gray-600 mb-0.5">
+        {locked && <Lock className="w-3.5 h-3.5" aria-hidden />}
         Your note
       </span>
-      <p className="text-[13px] leading-snug break-words whitespace-pre-line text-gray-900">{text}</p>
+      <p className="text-[15px] leading-snug break-words whitespace-pre-line text-gray-900">{text}</p>
       <ReplyWho meta={meta} sent={sent} className="mt-1" />
     </div>
   );
@@ -249,7 +252,7 @@ function ReplyNotes({
             onChange={(e) => onNote(questionId, noteId, e.target.value)}
             rows={2}
             placeholder="Your note"
-            className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-base md:text-[13px] leading-snug text-gray-900 placeholder:text-gray-400 resize-y focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20 disabled:bg-gray-50"
+            className="w-full min-h-[46px] rounded-[10px] border-2 border-gray-200 bg-white px-3.5 py-2.5 text-base leading-snug text-gray-900 placeholder:text-gray-500 resize-y transition-colors focus:outline-none focus:border-tme-blue disabled:bg-gray-50"
           />
           <button
             type="button"
@@ -258,11 +261,10 @@ function ReplyNotes({
               onNote(questionId, noteId, null);
             }}
             disabled={disabled}
-            title="Remove this note"
             aria-label={`Remove this note, ${ctx}`}
-            className={`shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 ${FOCUS_RING}`}
+            className="shrink-0 inline-flex items-center justify-center size-11 rounded-[10px] tme-btn-danger-ghost transition-colors disabled:opacity-50 tme-btn-focus"
           >
-            <X className="w-4 h-4" aria-hidden />
+            <X className="w-5 h-5" aria-hidden />
           </button>
         </div>
         {value.trim() && meta ? <ReplyWho meta={meta} sent={false} className="mt-1" /> : null}
@@ -277,19 +279,12 @@ function ReplyNotes({
         n.sent ? <NoteText key={n.id} text={n.text} meta={n.meta} sent locked /> : box(n.id, n.text, n.meta, n.id === adding)
       )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <p className="text-[11px] leading-snug text-gray-500">{canAdd ? 'Sent. Need to add something? Add a note.' : 'Sent.'}</p>
+        <p className="text-sm leading-snug text-gray-600">{canAdd ? 'Sent. Need to add something? Add a note.' : 'Sent.'}</p>
         {canAdd && !emptyOpen && (
-          <button
-            type="button"
-            onClick={() => setAdding(newCustomsNoteId())}
-            disabled={disabled}
-            aria-label={`Add a note, ${ctx}`}
-            className={`inline-flex items-center gap-1 rounded-md px-1.5 h-7 text-[12px] font-medium hover:bg-[#243F7B]/5 disabled:opacity-50 ${FOCUS_RING}`}
-            style={{ color: PRIMARY }}
-          >
-            <Plus className="w-3.5 h-3.5" aria-hidden />
+          <Button tone="ghost" onClick={() => setAdding(newCustomsNoteId())} disabled={disabled} aria-label={`Add a note, ${ctx}`}>
+            <Plus className="w-4 h-4" aria-hidden />
             Add a note
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -335,8 +330,7 @@ function ConflictNote({
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className="rounded-lg border px-3 py-2.5 text-[13px]"
-      style={{ backgroundColor: '#FFFBEB', borderColor: '#FCD34D' }}
+      className="rounded-[10px] border border-amber-300 bg-amber-50 px-3.5 py-3 text-[15px]"
       role="alert"
     >
       <div className="flex items-start gap-2">
@@ -348,24 +342,13 @@ function ConflictNote({
           <p className="mt-0.5 text-gray-700 leading-snug break-words">
             Your text: <span className="text-gray-900">{describeLineAnswer(note.mine)}</span>
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => onUseMine?.(lineId)}
-              disabled={disabled}
-              className={`h-8 px-3 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50 ${FOCUS_RING}`}
-              style={{ backgroundColor: PRIMARY }}
-            >
-              Use mine
-            </button>
-            <button
-              type="button"
-              onClick={() => onKeepTheirs?.(lineId)}
-              disabled={disabled}
-              className={`h-8 px-3 rounded-lg text-[13px] font-medium text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 ${FOCUS_RING}`}
-            >
-              Keep theirs
-            </button>
+          <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row">
+            <Button tone="plain" onClick={() => onKeepTheirs?.(lineId)} disabled={disabled}>
+              Keep their version
+            </Button>
+            <Button tone="primary" onClick={() => onUseMine?.(lineId)} disabled={disabled}>
+              Use my version
+            </Button>
           </div>
         </div>
       </div>
@@ -402,8 +385,7 @@ function LockedReplyNote({
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className="rounded-lg border px-3 py-2.5 text-[13px]"
-      style={{ backgroundColor: '#FFFBEB', borderColor: '#FCD34D' }}
+      className="rounded-[10px] border border-amber-300 bg-amber-50 px-3.5 py-3 text-[15px]"
       role="alert"
     >
       <div className="flex items-start gap-2">
@@ -415,24 +397,20 @@ function LockedReplyNote({
                 {isRefusedNoteKey(qid) ? 'This note was already sent.' : 'This reply was already sent.'} Your text was not saved:
               </p>
               <p className="mt-0.5 text-gray-900 leading-snug break-words whitespace-pre-line select-text">{text}</p>
-              <button
-                type="button"
-                onClick={() => void copy(qid, text)}
-                className={`mt-1.5 h-8 px-3 rounded-lg inline-flex items-center gap-1.5 text-[13px] font-medium text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 ${FOCUS_RING}`}
-              >
-                {copied === qid ? <Check className="w-3.5 h-3.5" aria-hidden /> : <Copy className="w-3.5 h-3.5" aria-hidden />}
-                {copied === qid ? 'Copied' : 'Copy'}
-              </button>
+              <Button tone="plain" onClick={() => void copy(qid, text)} className="mt-2">
+                {copied === qid ? <Check className="w-4 h-4" aria-hidden /> : <Copy className="w-4 h-4" aria-hidden />}
+                {copied === qid ? 'Copied' : 'Copy my text'}
+              </Button>
             </div>
           ))}
         </div>
         <button
           type="button"
           onClick={() => onDismiss?.(lineId)}
-          aria-label="Dismiss"
-          className={`shrink-0 -mr-1 -mt-0.5 p-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-amber-100 ${FOCUS_RING}`}
+          aria-label="Close this note"
+          className="shrink-0 -mr-2 -mt-2 inline-flex items-center justify-center size-11 rounded-[10px] text-gray-600 hover:text-gray-900 hover:bg-amber-100 tme-btn-focus"
         >
-          <X className="w-4 h-4" aria-hidden />
+          <X className="w-5 h-5" aria-hidden />
         </button>
       </div>
     </motion.div>
@@ -440,12 +418,19 @@ function LockedReplyNote({
 }
 
 /** Round 4 C: "Filled in by Anshad Muhammed, TME Services, on 08.10.2026" when the shown answer is TME's. */
-function FilledByNote({ answer, readOnly }: { answer: VatCustomsLineAnswer | undefined; readOnly: boolean }) {
+function FilledByNote({ answer, readOnly, compact = false }: { answer: VatCustomsLineAnswer | undefined; readOnly: boolean; compact?: boolean }) {
   const text = filledByLine(answer);
   if (!text) return null;
+  if (compact) {
+    return (
+      <p className="text-[13px] leading-snug text-gray-600 break-words">
+        {text}.{readOnly ? '' : ' You can change it.'}
+      </p>
+    );
+  }
   return (
-    <p className="flex items-center gap-1.5 text-[11px] leading-snug text-gray-500">
-      <Pencil className="w-3 h-3 shrink-0 text-gray-400" aria-hidden />
+    <p className="flex items-center gap-1.5 text-sm leading-snug text-gray-600">
+      <Pencil className="w-3.5 h-3.5 shrink-0 text-gray-500" aria-hidden />
       <span className="break-words">
         {text}.{readOnly ? '' : ' You can change it.'}
       </span>
@@ -460,18 +445,16 @@ export const DELIVERY_HELP =
 const EXCEL_HELP =
   'Prefer Excel? Download the list, fill in the yellow columns and upload it below. You do not need to do both.';
 
-const PRIMARY = TME_COLORS.primary;
-const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#243F7B]/40';
 
 // ------------------------------------------------------------------
 // Small hooks / helpers
 // ------------------------------------------------------------------
 
-/** True from 768 px: the table. Below: cards. */
+/** True from 1280 px (Tailwind xl): the table. Below: cards (redesign 22.10, was 768). */
 export function useIsWide(): boolean {
   const [wide, setWide] = useState(false);
   useEffect(() => {
-    const mq = window.matchMedia('(min-width: 768px)');
+    const mq = window.matchMedia('(min-width: 1280px)');
     const update = () => setWide(mq.matches);
     update();
     mq.addEventListener('change', update);
@@ -506,19 +489,19 @@ const FIELDS: FieldDef[] = [
   },
   {
     key: 'payment',
-    label: 'Paid / FOC',
+    label: 'Paid or free of charge (FOC)',
     options: VAT_CUSTOMS_PAYMENT_OPTIONS,
     textKey: 'paymentOther',
     needsText: (v) => v === 'other',
-    detail: () => ({ label: 'Paid / FOC: please explain', ...EXPLAIN }),
+    detail: () => ({ label: 'Paid or free of charge: please explain', ...EXPLAIN }),
   },
   {
     key: 'incoterm',
-    label: 'Incoterms',
+    label: 'Delivery terms (Incoterms)',
     options: VAT_CUSTOMS_INCOTERM_OPTIONS,
     textKey: 'incotermOther',
     needsText: (v) => v === 'other',
-    detail: () => ({ label: 'Incoterms: please explain', placeholder: 'As written on the supplier invoice' }),
+    detail: () => ({ label: 'Delivery terms: please explain', placeholder: 'As written on the supplier invoice' }),
   },
   {
     key: 'delivery',
@@ -594,34 +577,57 @@ function partGaps(part: VatCustomsAnswerPart, split: boolean): { missing: number
   return { missing, total };
 }
 
-type RowState = 'done' | 'started' | 'empty';
-
-function lineState(answer: VatCustomsLineAnswer | undefined): { state: RowState; text: string } {
+/**
+ * The one status of an import (22.10): the required answers still missing
+ * (all parts; the invoice no. of a split part). 0 = done. Documents are NOT
+ * counted: "Done" must agree with the "x of y answered" count and the "Still
+ * open" filter, and the Upload buttons already show what is missing.
+ */
+function lineStatus(answer: VatCustomsLineAnswer | undefined): { missing: number; text: string } {
   const parts = partsOf(answer);
-  if (isVatCustomsLineComplete(answer)) return { state: 'done', text: 'answered' };
-  if (!parts.some(hasAnyAnswer) && parts.length === 1) return { state: 'empty', text: 'not started' };
   let missing = 0;
-  let total = 0;
-  for (const p of parts) {
-    const g = partGaps(p, parts.length > 1);
-    missing += g.missing;
-    total += g.total;
+  if (!isVatCustomsLineComplete(answer)) {
+    for (const p of parts) missing += partGaps(p, parts.length > 1).missing;
+    missing = Math.max(1, missing);
   }
-  return {
-    state: 'started',
-    text: missing > 0 ? `${missing} of ${total} ${total === 1 ? 'answer' : 'answers'} missing` : 'not complete yet',
-  };
+  return { missing, text: missing === 0 ? 'done' : `${missing} to answer` };
 }
 
-const ACCENT: Record<RowState, string> = { done: '#34B37A', started: '#F0B54A', empty: 'transparent' };
+/** The Status cell / card chip: green "Done" or amber "N to answer" (a closed request: grey "Not complete"). */
+function StatusBadge({ missing, readOnly, plain = false }: { missing: number; readOnly: boolean; plain?: boolean }) {
+  if (plain) {
+    // Laptop table: dot + text, no pill (22.10 round 2).
+    const [dot, color, text] =
+      missing === 0
+        ? ['bg-green-600', 'text-green-700', 'Done']
+        : readOnly
+          ? ['bg-gray-400', 'text-gray-600', 'Not complete']
+          : ['bg-amber-500', 'text-amber-800', `${missing} to answer`];
+    return (
+      <span className={`inline-flex items-center gap-[7px] text-[13px] font-medium whitespace-nowrap tabular-nums ${color}`}>
+        <span className={`size-2 rounded-full shrink-0 ${dot}`} aria-hidden />
+        {text}
+      </span>
+    );
+  }
+  if (missing === 0) {
+    return (
+      <StatusChip tone="green" icon={<Check className="w-3.5 h-3.5" strokeWidth={3} aria-hidden />}>
+        Done
+      </StatusChip>
+    );
+  }
+  if (readOnly) return <StatusChip tone="grey">Not complete</StatusChip>;
+  return (
+    <StatusChip tone="amber" className="tabular-nums">
+      {missing} to answer
+    </StatusChip>
+  );
+}
 
 function partsOf(answer: VatCustomsLineAnswer | undefined): VatCustomsAnswerPart[] {
   const parts = answer?.parts ?? [];
   return parts.length > 0 ? parts : [{}];
-}
-
-function hasAnyAnswer(part: VatCustomsAnswerPart): boolean {
-  return FIELDS.some((f) => !!part[f.key]) || !!part.invoiceRef;
 }
 
 /** "For sale / stock / trading, Paid, CIF, Dubai Free Zone (FZ)" */
@@ -682,7 +688,7 @@ function TipBubble({ id, pos, width, text }: { id: string; pos: TipPos | null; w
       role="tooltip"
       className={
         pos
-          ? 'fixed z-50 pointer-events-none rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal leading-snug text-white shadow-lg whitespace-pre-line text-left normal-case tracking-normal'
+          ? 'fixed z-50 pointer-events-none rounded-lg bg-gray-900 px-3 py-2 text-sm font-normal leading-snug text-white shadow-lg whitespace-pre-line text-left normal-case tracking-normal'
           : 'sr-only'
       }
       style={pos ? { left: pos.x, top: pos.y, width, transform: `translate(-50%, ${pos.above ? '-100%' : '0'})` } : undefined}
@@ -717,9 +723,9 @@ export function InfoTip({ text, label, width = 280 }: { text: string; label: str
         onFocus={show}
         onBlur={hide}
         onClick={() => (pos ? hide() : show())}
-        className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-gray-400 hover:text-gray-700 ${FOCUS_RING}`}
+        className="inline-flex items-center justify-center size-11 -m-3 rounded-full text-gray-600 hover:text-tme-blue tme-btn-focus"
       >
-        <Info className="w-3.5 h-3.5" aria-hidden />
+        <Info className="w-[18px] h-[18px]" aria-hidden />
       </button>
       <TipBubble id={id} pos={pos} width={width} text={text} />
     </span>
@@ -733,7 +739,7 @@ interface MenuItem {
   onSelect: () => void;
 }
 
-function RowMenu({ label, items, disabled }: { label: string; items: MenuItem[]; disabled: boolean }) {
+function RowMenu({ label, items, disabled, compact = false }: { label: string; items: MenuItem[]; disabled: boolean; compact?: boolean }) {
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -802,16 +808,20 @@ function RowMenu({ label, items, disabled }: { label: string; items: MenuItem[];
         aria-label={label}
         disabled={disabled}
         onClick={() => (pos ? close() : open())}
-        className={`inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-40 ${FOCUS_RING} ${pos ? 'bg-gray-100 text-gray-700' : ''}`}
+        className={
+          compact
+            ? `inline-flex items-center justify-center size-8 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-50 tme-btn-focus ${pos ? 'bg-gray-100 text-gray-900' : ''}`
+            : `inline-flex items-center justify-center size-11 rounded-[10px] text-tme-blue hover:bg-[#eef2fa] disabled:opacity-50 tme-btn-focus ${pos ? 'bg-[#eef2fa]' : ''}`
+        }
       >
-        <MoreHorizontal className="w-4 h-4" aria-hidden />
+        <MoreHorizontal className={compact ? 'w-4 h-4' : 'w-5 h-5'} aria-hidden />
       </button>
       {pos && (
         <div
           ref={menu}
           role="menu"
           aria-label={label}
-          className="fixed z-50 w-64 rounded-xl border border-gray-200 bg-white p-1 shadow-lg"
+          className="fixed z-50 w-72 max-w-[calc(100vw-16px)] rounded-xl border border-gray-200 bg-white p-1 shadow-lg"
           style={{ top: pos.top, right: pos.right }}
         >
           {items.map((it) => (
@@ -823,12 +833,12 @@ function RowMenu({ label, items, disabled }: { label: string; items: MenuItem[];
                 close();
                 it.onSelect();
               }}
-              className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
+              className={`flex w-full items-start gap-2.5 rounded-lg px-3 text-left hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${compact ? 'min-h-10 py-2' : 'min-h-11 py-2.5'}`}
             >
-              <it.icon className="w-4 h-4 mt-0.5 shrink-0 text-gray-500" />
+              <it.icon className={`${compact ? 'w-4 h-4' : 'w-[18px] h-[18px]'} mt-0.5 shrink-0 text-tme-blue`} />
               <span className="min-w-0">
-                <span className="block text-[13px] font-medium text-gray-800">{it.label}</span>
-                {it.hint && <span className="block text-xs text-gray-500 leading-snug">{it.hint}</span>}
+                <span className={`block text-tme-blue ${compact ? 'text-sm font-medium' : 'text-[15px] font-semibold'}`}>{it.label}</span>
+                {it.hint && <span className={`block text-gray-600 leading-snug ${compact ? 'text-[13px]' : 'text-sm'}`}>{it.hint}</span>}
               </span>
             </button>
           ))}
@@ -871,7 +881,7 @@ const AnswerField = memo(function AnswerField({
   const selectId = `${idPrefix}-${def.key}`;
   const neededId = `${selectId}-needed`;
   const optional = !!def.optional?.(part);
-  const choiceMissing = hasAnyAnswer(part) && !value && !optional;
+  const choiceMissing = !value && !optional;
   const hasDetail = !!value && def.needsText(value);
   const short = value ? cellLabel(def, value, inTable) : '';
   // The written words show in the cell only where they ARE the answer (Other purpose, Other location).
@@ -895,13 +905,13 @@ const AnswerField = memo(function AnswerField({
   return (
     <div className="min-w-0">
       {showLabel && (
-        <label htmlFor={selectId} className="flex items-center gap-1 text-xs font-medium text-gray-600 mb-1">
+        <label htmlFor={selectId} className="flex flex-wrap items-center gap-x-1.5 text-[15px] font-semibold leading-snug text-tme-blue mb-1.5">
           {def.label}
-          {optional && <span className="font-normal text-gray-400">(optional)</span>}
+          {optional && <span className="font-normal text-gray-600">(optional)</span>}
           {def.key === 'delivery' && <InfoTip text={DELIVERY_HELP} label="What is the delivery place on the invoice?" />}
         </label>
       )}
-      <div className="relative">
+      <div className={inTable ? 'relative inline-flex -ml-[9px] max-w-[calc(100%+9px)] align-middle' : 'relative'}>
         <ChoiceSelect
           id={selectId}
           value={value}
@@ -914,7 +924,7 @@ const AnswerField = memo(function AnswerField({
           displayTitle={title}
           reserveRight={hasDetail}
           needed={choiceMissing}
-          placeholder={optional ? 'Optional' : 'Select'}
+          placeholder={optional ? 'Optional' : inTable ? 'Choose' : 'Select'}
           size={inTable ? 'table' : 'card'}
           sheetTitle={def.label}
           sheetSubtitle={context.charAt(0).toUpperCase() + context.slice(1)}
@@ -927,11 +937,11 @@ const AnswerField = memo(function AnswerField({
             data-detail-owner={idPrefix}
             title={text ? 'Edit what you wrote' : 'Write the details'}
             aria-label={`${text ? 'Edit' : 'Write'}: ${def.detail(value).label}, ${context}`}
-            className={`absolute top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-6 h-6 rounded-md text-gray-400 hover:text-[#243F7B] hover:bg-gray-100 disabled:opacity-40 ${FOCUS_RING} ${
-              inTable ? 'right-[26px]' : 'right-[30px]'
+            className={`absolute top-1/2 -translate-y-1/2 inline-flex items-center justify-center rounded-lg text-gray-600 hover:text-tme-blue hover:bg-gray-100 disabled:opacity-50 tme-btn-focus ${
+              inTable ? 'w-7 h-7 right-[28px]' : 'w-11 h-11 right-[36px]'
             }`}
           >
-            <Pencil className="w-3 h-3" aria-hidden />
+            <Pencil className={inTable ? 'w-3.5 h-3.5' : 'w-4 h-4'} aria-hidden />
           </button>
         )}
       </div>
@@ -961,22 +971,21 @@ function ReadOnlyAnswer({
   const value = part[def.key] ?? '';
   const text = (part[def.textKey] ?? '').trim();
   const optional = !!def.optional?.(part);
-  const short = value ? cellLabel(def, value, inTable) : '';
+  // Read-only (12.10 redesign 22.10): the full answer is written out (no tooltip-only text).
+  const full = value ? vatCustomsOptionLabel(def.options, value) : '';
   // The words show next to the choice where they ARE the answer; the others are under the row.
   const inline = !!text && def.needsText(value) && (def.key === 'purpose' || def.key === 'delivery');
-  const shown = inline ? `${short}: ${text}` : short;
-  const full = value ? vatCustomsOptionLabel(def.options, value) : '';
+  const shown = inline ? `${full.replace(/\s*\([^)]*\)\s*$/, '')}: ${text}` : full;
   const empty = optional ? 'Not needed' : 'Not answered';
   return (
     <div className="min-w-0">
-      {showLabel && <p className="text-xs font-medium text-gray-600 mb-1">{def.label}</p>}
+      {showLabel && <p className="text-[15px] font-semibold leading-snug text-tme-blue mb-1.5">{def.label}</p>}
       <p
         className={
           inTable
-            ? `flex items-center min-h-9 py-1.5 px-2.5 text-[13px] leading-snug break-words ${value ? 'text-gray-900' : 'text-gray-400'}`
-            : `flex items-center min-h-11 px-3 py-2 rounded-lg border border-gray-100 bg-gray-50 text-sm break-words ${value ? 'text-gray-900' : 'text-gray-400'}`
+            ? `flex items-center min-h-8 py-1 text-sm leading-snug break-words ${value ? 'text-gray-900' : 'text-gray-500'}`
+            : `flex items-center min-h-[46px] px-3.5 py-2 rounded-[10px] border-2 border-gray-100 bg-gray-50 text-base break-words ${value ? 'text-gray-900' : 'text-gray-600'}`
         }
-        title={inline ? `${full.replace(/\s*\([^)]*\)\s*$/, '')}: ${text}` : full || undefined}
       >
         <span className="sr-only">
           {def.label}, {context}:{' '}
@@ -1002,10 +1011,10 @@ function readOnlyDetails(part: VatCustomsAnswerPart): Array<{ label: string; tex
 
 function ReadOnlyDetails({ items }: { items: Array<{ label: string; text: string }> }) {
   return (
-    <div className="flex flex-wrap gap-x-6 gap-y-1.5 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2 text-[13px]">
+    <div className="flex flex-wrap gap-x-6 gap-y-1.5 rounded-[10px] border border-gray-200 bg-gray-50/80 px-3.5 py-2.5 text-[15px]">
       {items.map((d) => (
         <p key={d.label} className="min-w-0 break-words">
-          <span className="text-gray-500">{d.label}:</span> <span className="text-gray-900">{d.text}</span>
+          <span className="text-gray-600">{d.label}:</span> <span className="text-gray-900">{d.text}</span>
         </p>
       ))}
     </div>
@@ -1075,17 +1084,12 @@ function DetailField({
   return (
     <div className="flex-[1_1_320px] min-w-0 max-w-full">
       <div className="flex items-center gap-1.5 mb-1">
-        <label htmlFor={textId} className="text-xs font-medium text-gray-700">
+        <label htmlFor={textId} className="text-[15px] font-semibold leading-snug text-tme-blue">
           {label}
         </label>
-        {missing && (
-          <>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />
-            <span className="sr-only">needed</span>
-          </>
-        )}
+        {missing && <span className="sr-only">needed</span>}
         {near && (
-          <span className={`ml-auto text-[11px] tabular-nums ${text.length >= VAT_CUSTOMS_MAX_TEXT_CHARS ? 'text-amber-700' : 'text-gray-400'}`} aria-live="polite">
+          <span className={`ml-auto text-[13px] tabular-nums ${text.length >= VAT_CUSTOMS_MAX_TEXT_CHARS ? 'text-amber-800' : 'text-gray-600'}`} aria-live="polite">
             {text.length} / {VAT_CUSTOMS_MAX_TEXT_CHARS}
           </span>
         )}
@@ -1101,7 +1105,9 @@ function DetailField({
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         aria-label={`${label}, ${context}`}
-        className="block w-full resize-none overflow-hidden rounded-lg border border-gray-200 bg-white px-3 py-[7px] text-base md:text-[13px] leading-6 md:leading-5 text-gray-900 placeholder:text-gray-400 transition-colors hover:border-gray-300 focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20 disabled:bg-gray-50"
+        className={`block w-full min-h-[46px] resize-none overflow-hidden rounded-[10px] border-2 bg-white px-3.5 py-[9px] text-base leading-6 text-gray-900 placeholder:text-gray-500 transition-colors focus:outline-none focus:border-tme-blue disabled:bg-gray-50 ${
+          missing ? 'border-amber-400 hover:border-amber-500' : 'border-gray-200 hover:border-gray-300'
+        }`}
       />
     </div>
   );
@@ -1150,7 +1156,7 @@ function DetailStrip({
     } else onLeave();
   };
   return (
-    <div className="flex flex-wrap gap-x-4 gap-y-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5" onBlur={onBlur}>
+    <div className="flex flex-wrap gap-x-4 gap-y-3 rounded-[10px] border border-gray-200 bg-gray-50/80 p-3.5" onBlur={onBlur}>
       {defs.map((def) => (
         <DetailField key={def.key} def={def} part={part} onPart={onPart} disabled={disabled} idPrefix={idPrefix} context={context} />
       ))}
@@ -1266,26 +1272,15 @@ function lineMenuItems(
 // Pieces
 // ------------------------------------------------------------------
 
-/** "Done" after the No. of an answered import (muted green, text = readable without colour). */
-function DoneBadge() {
-  return (
-    <span className="inline-flex items-center h-[18px] px-1.5 rounded bg-emerald-50 text-[10.5px] font-semibold text-emerald-700 leading-none" aria-hidden>
-      Done
-    </span>
-  );
-}
-
-function QuestionBadge({ count, small = false }: { count: number; small?: boolean }) {
+/** The questions themselves show under the row / in the card; this chip only counts them. */
+function QuestionBadge({ count }: { count: number }) {
   if (count === 0) return null;
   return (
-    <span
-      className={`inline-flex items-center gap-0.5 ${small ? 'h-4 px-1' : 'h-5 px-1.5'} rounded-full bg-amber-50 border border-amber-200 text-[11px] font-semibold text-amber-800 tabular-nums leading-none`}
-      title={`TME has ${count} ${count === 1 ? 'question' : 'questions'} on this import`}
-    >
-      <MessageCircleQuestion className="w-3 h-3" aria-hidden />
+    <StatusChip tone="amber" icon={<MessageCircleQuestion className="w-3.5 h-3.5" aria-hidden />} className="tabular-nums">
       {count}
       <span className="sr-only">{count === 1 ? 'question' : 'questions'} from TME</span>
-    </span>
+      <span aria-hidden>{count === 1 ? ' question' : ' questions'}</span>
+    </StatusChip>
   );
 }
 
@@ -1297,6 +1292,7 @@ function DocPill({
   disabled,
   onAdd,
   readOnly = false,
+  big = false,
 }: {
   kind: 'boe' | 'invoice';
   state: 0 | 1 | 2;
@@ -1305,10 +1301,82 @@ function DocPill({
   disabled: boolean;
   onAdd: () => void;
   readOnly?: boolean;
+  /** Phone card: 44 px tap target. */
+  big?: boolean;
 }) {
   const label = kind === 'boe' ? 'BOE' : 'Invoice';
   const noun = kind === 'boe' ? 'BOE' : 'invoice';
-  const base = 'inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] font-semibold whitespace-nowrap transition-colors';
+  // The "uploaded" chip (StatusChip look); on a phone it is 44 px tall to tap.
+  const chip = `inline-flex items-center gap-1 rounded-full px-2.5 text-[13px] font-semibold leading-none whitespace-nowrap transition-colors ${
+    big ? 'min-h-11 px-3.5 text-sm' : 'h-7'
+  }`;
+  const green = 'bg-green-50 border border-green-200 text-green-800';
+  if (!big) {
+    // Laptop table (22.10 round 2): plain text, no boxes. Uploaded = green check + "BOE";
+    // missing = a "+ Add BOE" text link. 32 px hit area.
+    // 24 px tall to keep the row compact; the ::before layer makes the hit area 32 px.
+    const link =
+      "relative inline-flex items-center gap-[5px] h-6 text-[13px] font-medium leading-none whitespace-nowrap rounded tme-btn-focus before:absolute before:-inset-y-1 before:-inset-x-1 before:content-['']";
+    if (readOnly) {
+      const got = state === 2;
+      const tip = got ? (names ? `${label} received:\n${names}` : `${label} received by TME.`) : `No ${noun} received.`;
+      return (
+        <Tip text={tip}>
+          {(describedBy) => (
+            <span
+              tabIndex={0}
+              aria-describedby={describedBy}
+              aria-label={got ? `${label} uploaded, ${ctx}` : `No ${noun}, ${ctx}`}
+              className={`${link} ${got ? 'text-green-700' : 'text-gray-500'}`}
+            >
+              {got ? <Check className="w-3.5 h-3.5" strokeWidth={2.75} aria-hidden /> : <X className="w-3.5 h-3.5" aria-hidden />}
+              {got ? label : `No ${noun}`}
+            </span>
+          )}
+        </Tip>
+      );
+    }
+    if (state === 1) {
+      return (
+        <span className={`${link} text-gray-600`}>
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-tme-blue" aria-hidden />
+          Uploading
+        </span>
+      );
+    }
+    if (state === 0) {
+      return (
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={disabled}
+          aria-label={`Upload ${noun}, ${ctx}`}
+          className={`${link} text-tme-blue hover:underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline`}
+        >
+          <Plus className="w-3.5 h-3.5" strokeWidth={2.5} aria-hidden />
+          Add {noun}
+        </button>
+      );
+    }
+    const upTip = names ? `${label} uploaded:\n${names}\nClick to add another.` : `${label} received by TME. Click to add another.`;
+    return (
+      <Tip text={upTip}>
+        {(describedBy) => (
+          <button
+            type="button"
+            onClick={onAdd}
+            disabled={disabled}
+            aria-describedby={describedBy}
+            aria-label={`${label} uploaded. Add another ${noun}, ${ctx}`}
+            className={`${link} text-green-700 hover:underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            <Check className="w-3.5 h-3.5" strokeWidth={2.75} aria-hidden />
+            {label}
+          </button>
+        )}
+      </Tip>
+    );
+  }
   if (readOnly) {
     // Shows what came in; nothing to click (the tooltip lists the file names).
     const got = state === 2;
@@ -1319,13 +1387,11 @@ function DocPill({
           <span
             tabIndex={0}
             aria-describedby={describedBy}
-            aria-label={got ? `${label} received, ${ctx}` : `No ${noun}, ${ctx}`}
-            className={`${base} ${FOCUS_RING} ${
-              got ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'border border-dashed border-gray-200 bg-white text-gray-400'
-            }`}
+            aria-label={got ? `${label} uploaded, ${ctx}` : `No ${noun}, ${ctx}`}
+            className={`${chip} tme-btn-focus ${got ? green : 'border border-gray-200 bg-gray-50 text-gray-600'}`}
           >
-            {got ? <Check className="w-3 h-3" strokeWidth={3} aria-hidden /> : <X className="w-3 h-3" aria-hidden />}
-            {label}
+            {got ? <Check className="w-3.5 h-3.5" strokeWidth={3} aria-hidden /> : <X className="w-3.5 h-3.5" aria-hidden />}
+            {got ? `${label} uploaded` : `No ${noun}`}
           </span>
         )}
       </Tip>
@@ -1333,19 +1399,28 @@ function DocPill({
   }
   if (state === 1) {
     return (
-      <span className={`${base} border border-gray-200 bg-white text-gray-500`}>
-        <Loader2 className="w-3 h-3 animate-spin" style={{ color: PRIMARY }} aria-hidden />
-        {label}
-        <span className="sr-only">uploading</span>
+      <span className={`${chip} border border-gray-200 bg-white text-gray-600`}>
+        <Loader2 className="w-3.5 h-3.5 animate-spin text-tme-blue" aria-hidden />
+        Uploading {noun}
       </span>
     );
   }
-  const received = state === 2;
-  const tip = received
-    ? names
-      ? `${label} received:\n${names}\nClick to add another.`
-      : `${label} received by TME. Click to add another.`
-    : `No ${noun} yet. Click to upload the ${kind === 'boe' ? 'Bill of Entry' : 'supplier invoice'}.`;
+  if (state === 0) {
+    return (
+      <Button
+        tone="secondary"
+        size={big ? 'md' : 'sm'}
+        onClick={onAdd}
+        disabled={disabled}
+        aria-label={`Upload ${noun}, ${ctx}`}
+        className={big ? 'whitespace-nowrap' : 'px-2.5 gap-1.5 whitespace-nowrap'}
+      >
+        <Upload className="w-4 h-4" aria-hidden />
+        Upload {noun}
+      </Button>
+    );
+  }
+  const tip = names ? `${label} uploaded:\n${names}\nClick to add another.` : `${label} received by TME. Click to add another.`;
   return (
     <Tip text={tip}>
       {(describedBy) => (
@@ -1354,15 +1429,11 @@ function DocPill({
           onClick={onAdd}
           disabled={disabled}
           aria-describedby={describedBy}
-          aria-label={received ? `${label} received. Add another ${noun}, ${ctx}` : `Add ${noun}, ${ctx}`}
-          className={`${base} ${FOCUS_RING} disabled:opacity-50 disabled:cursor-not-allowed ${
-            received
-              ? 'bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100'
-              : 'border border-dashed border-gray-300 bg-white text-gray-500 hover:border-[#243F7B] hover:text-[#243F7B]'
-          }`}
+          aria-label={`${label} uploaded. Add another ${noun}, ${ctx}`}
+          className={`${chip} ${green} hover:bg-green-100 tme-btn-focus disabled:opacity-50 disabled:cursor-not-allowed`}
         >
-          {received ? <Check className="w-3 h-3" strokeWidth={3} aria-hidden /> : <Plus className="w-3 h-3" aria-hidden />}
-          {label}
+          <Check className="w-3.5 h-3.5" strokeWidth={3} aria-hidden />
+          {label} uploaded
         </button>
       )}
     </Tip>
@@ -1378,6 +1449,7 @@ function DocPills({
   onAddFile,
   disabled,
   readOnly = false,
+  big = false,
 }: {
   line: Pick<VatCustomsPageLine, 'id' | 'lineNo' | 'declarationNo'>;
   boe: 0 | 1 | 2;
@@ -1388,12 +1460,17 @@ function DocPills({
   onAddFile: OnAddFile;
   disabled: boolean;
   readOnly?: boolean;
+  /** Phone card: bigger pills. */
+  big?: boolean;
 }) {
   const ctx = lineContext(line, null);
+  const clip = big
+    ? 'inline-flex items-center gap-1 rounded-full bg-gray-100 font-semibold tabular-nums text-gray-700 min-h-11 px-3.5 text-sm'
+    : 'relative inline-flex items-center gap-1 h-6 rounded text-[13px] font-medium tabular-nums text-gray-600 hover:text-gray-900 before:absolute before:-inset-y-1 before:-inset-x-1 before:content-[\'\']';
   return (
-    <div className="flex items-center gap-1">
-      <DocPill kind="boe" state={boe} names={names.boe} ctx={ctx} disabled={disabled} readOnly={readOnly} onAdd={() => onAddFile(line.id, 'boe')} />
-      <DocPill kind="invoice" state={invoice} names={names.invoice} ctx={ctx} disabled={disabled} readOnly={readOnly} onAdd={() => onAddFile(line.id, 'invoice')} />
+    <div className={big ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap items-center gap-x-3 gap-y-1'}>
+      <DocPill kind="boe" state={boe} names={names.boe} ctx={ctx} disabled={disabled} readOnly={readOnly} big={big} onAdd={() => onAddFile(line.id, 'boe')} />
+      <DocPill kind="invoice" state={invoice} names={names.invoice} ctx={ctx} disabled={disabled} readOnly={readOnly} big={big} onAdd={() => onAddFile(line.id, 'invoice')} />
       {/* Other files: the "..." menu adds one; the clip shows once there are some. */}
       {other > 0 && readOnly && (
         <Tip text={`Other files:\n${names.other || `${other} received`}`}>
@@ -1402,9 +1479,9 @@ function DocPills({
               tabIndex={0}
               aria-describedby={describedBy}
               aria-label={`${other} other ${other === 1 ? 'file' : 'files'}, ${ctx}`}
-              className={`inline-flex items-center gap-0.5 h-6 px-1.5 rounded-full bg-gray-100 text-[11px] font-semibold tabular-nums text-gray-700 ${FOCUS_RING}`}
+              className={`${clip} tme-btn-focus`}
             >
-              <Paperclip className="w-3 h-3" aria-hidden />
+              <Paperclip className="w-3.5 h-3.5" aria-hidden />
               {other}
             </span>
           )}
@@ -1419,9 +1496,9 @@ function DocPills({
               disabled={disabled}
               aria-describedby={describedBy}
               aria-label={`Add another file, ${ctx} (${other} added)`}
-              className={`inline-flex items-center gap-0.5 h-6 px-1.5 rounded-full bg-gray-100 text-[11px] font-semibold tabular-nums text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-50 ${FOCUS_RING}`}
+              className={`${clip} transition-colors ${big ? 'hover:bg-gray-200' : ''} disabled:opacity-50 tme-btn-focus`}
             >
-              <Paperclip className="w-3 h-3" aria-hidden />
+              <Paperclip className="w-3.5 h-3.5" aria-hidden />
               {other}
             </button>
           )}
@@ -1435,10 +1512,10 @@ function DocPills({
  * Round 4 C: "Anshad Muhammed, TME Services, asked on 11.10.2026 (1 of 2):"
  * (no name: "TME Services asked on ..."; nothing known: "TME Services asks:").
  */
-function QuestionHead({ q, index, count }: { q: LineQuestion; index: number; count: number }) {
+function QuestionHead({ q, index, count, compact = false }: { q: LineQuestion; index: number; count: number; compact?: boolean }) {
   return (
     <>
-      <span className="block text-[12px] font-semibold mb-0.5" style={{ color: PRIMARY }}>
+      <span className={compact ? 'block text-[13px] font-semibold text-amber-800 mb-0.5' : 'block text-sm font-semibold text-tme-blue mb-0.5'}>
         {questionAskedLine(q)}
         {count > 1 ? ` (${index + 1} of ${count})` : ''}:
       </span>
@@ -1485,28 +1562,30 @@ function QuestionBoxes({
   const ctx = lineContext(line, null);
   if (readOnly) {
     const earlier = earlierReplies(questions, replies);
-    const box = `rounded-lg border p-2.5 ${sideBySide ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-start' : ''}`;
+    const box = sideBySide
+      ? 'rounded-lg bg-amber-50 px-3.5 py-2.5 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-5 items-start'
+      : 'rounded-[10px] border border-amber-200 bg-amber-50/60 p-3';
     const replyText = (text: string, meta: VatCustomsReplyMeta | undefined, qid: string) =>
       text ? (
-        <div className={`rounded-lg bg-white border border-gray-100 px-2.5 py-1.5 ${sideBySide ? '' : 'mt-2'}`}>
-          <p className="text-[13px] leading-snug break-words whitespace-pre-line text-gray-900">
-            <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply</span>
+        <div className={`rounded-[10px] bg-white border border-gray-200 px-3 py-2 ${sideBySide ? 'rounded-lg' : 'mt-2'}`}>
+          <p className={`leading-snug break-words whitespace-pre-line text-gray-900 ${sideBySide ? 'text-sm' : 'text-[15px]'}`}>
+            <span className="block text-[13px] font-medium text-gray-600 mb-0.5">Your reply</span>
             {text}
           </p>
           <ReplyWho meta={meta} sent={sent?.[qid] !== undefined} className="mt-1" />
           <ReadOnlyNotes notes={savedAnswer?.notes?.[qid]} savedUpdatedAt={savedAnswer?.updatedAt} />
         </div>
       ) : (
-        <p className={`text-[13px] text-gray-400 ${sideBySide ? 'py-1.5' : 'mt-2'}`}>No reply sent.</p>
+        <p className={`text-gray-600 ${sideBySide ? 'text-sm py-1.5' : 'text-[15px] mt-2'}`}>No reply sent.</p>
       );
     return (
       <div className="space-y-2">
         {questions.map((q, i) => (
-          <div key={q.id} className={box} style={{ backgroundColor: '#FBF8F2', borderColor: '#E7DBC5' }}>
+          <div key={q.id} className={box}>
             <div className="flex items-start gap-2 min-w-0">
-              <MessageCircleQuestion className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" aria-hidden />
-              <p className="text-[13px] leading-snug break-words min-w-0 whitespace-pre-line text-gray-800">
-                <QuestionHead q={q} index={i} count={questions.length} />
+              <MessageCircleQuestion className={`${sideBySide ? 'w-4 h-4' : 'w-[18px] h-[18px]'} shrink-0 mt-0.5 text-amber-700`} aria-hidden />
+              <p className={`leading-snug break-words min-w-0 whitespace-pre-line text-gray-900 ${sideBySide ? 'text-sm' : 'text-[15px]'}`}>
+                <QuestionHead q={q} index={i} count={questions.length} compact={sideBySide} />
                 {q.text}
               </p>
             </div>
@@ -1514,8 +1593,8 @@ function QuestionBoxes({
           </div>
         ))}
         {earlier.map(([qid, text]) => (
-          <div key={`e${qid}`} className="rounded-lg border border-gray-200 bg-gray-50/80 px-2.5 py-2 text-[13px] leading-snug break-words whitespace-pre-line">
-            <span className="block text-[11px] font-medium text-gray-500 mb-0.5">Your reply to an earlier TME question</span>
+          <div key={`e${qid}`} className="rounded-[10px] border border-gray-200 bg-gray-50/80 px-3 py-2.5 text-[15px] leading-snug break-words whitespace-pre-line">
+            <span className="block text-[13px] font-medium text-gray-600 mb-0.5">Your reply to an earlier TME question</span>
             <span className="text-gray-900">{text}</span>
             <ReplyWho meta={replyMeta?.[qid]} sent={sent?.[qid] !== undefined} className="mt-1" />
             <ReadOnlyNotes notes={savedAnswer?.notes?.[qid]} savedUpdatedAt={savedAnswer?.updatedAt} />
@@ -1532,13 +1611,16 @@ function QuestionBoxes({
         return (
           <div
             key={q.id}
-            className={`rounded-lg border p-2.5 ${sideBySide ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-start' : ''}`}
-            style={{ backgroundColor: '#FBF8F2', borderColor: '#E7DBC5' }}
+            className={
+              sideBySide
+                ? 'rounded-lg bg-amber-50 px-3.5 py-2.5 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-5 gap-y-1 items-start'
+                : 'rounded-[10px] border border-amber-200 bg-amber-50/60 p-3'
+            }
           >
             <div className="flex items-start gap-2 min-w-0">
-              <MessageCircleQuestion className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" aria-hidden />
-              <p id={textId} className="text-[13px] leading-snug break-words min-w-0 whitespace-pre-line text-gray-800">
-                <QuestionHead q={q} index={i} count={questions.length} />
+              <MessageCircleQuestion className={`${sideBySide ? 'w-4 h-4' : 'w-[18px] h-[18px]'} shrink-0 mt-0.5 text-amber-700`} aria-hidden />
+              <p id={textId} className={`leading-snug break-words min-w-0 whitespace-pre-line text-gray-900 ${sideBySide ? 'text-sm' : 'text-[15px]'}`}>
+                <QuestionHead q={q} index={i} count={questions.length} compact={sideBySide} />
                 {q.text}
               </p>
             </div>
@@ -1568,15 +1650,17 @@ function QuestionBoxes({
               disabled={disabled}
               maxLength={VAT_CUSTOMS_MAX_TEXT_CHARS}
               onChange={(e) => onReply(q.id, e.target.value)}
-              rows={sideBySide ? 2 : 3}
+              rows={sideBySide ? 1 : 3}
               placeholder="Your reply"
               aria-describedby={textId}
-              className={`w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-base md:text-[13px] leading-snug text-gray-900 placeholder:text-gray-400 resize-y focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20 disabled:bg-gray-50 ${
-                sideBySide ? '' : 'mt-2'
-              }`}
+              className={
+                sideBySide
+                  ? 'w-full min-h-[38px] rounded-lg border border-gray-300 bg-white px-3 py-[8px] text-sm leading-snug text-gray-900 placeholder:text-gray-500 resize-y transition-colors hover:border-gray-400 focus:outline-none focus:border-tme-blue focus:ring-2 focus:ring-tme-blue/20 disabled:bg-gray-50'
+                  : 'w-full min-h-[46px] rounded-[10px] border-2 border-gray-200 bg-white px-3.5 py-2.5 text-base leading-snug text-gray-900 placeholder:text-gray-500 resize-y transition-colors focus:outline-none focus:border-tme-blue disabled:bg-gray-50 mt-2'
+              }
             />
             {(replies?.[String(q.id)] ?? '').trim() && replyMeta?.[String(q.id)] ? (
-              <ReplyWho meta={replyMeta[String(q.id)]} sent={false} className={sideBySide ? 'col-start-2 -mt-2' : 'mt-1'} />
+              <ReplyWho meta={replyMeta[String(q.id)]} sent={false} className={sideBySide ? 'col-start-2' : 'mt-1'} />
             ) : null}
             </>
             )}
@@ -1605,22 +1689,33 @@ function InvoiceRefInput({
   onChange: (s: string) => void;
 }) {
   const missing = !value.trim();
+  const border = missing ? 'border-amber-400 hover:border-amber-500' : 'border-gray-200 hover:border-gray-300';
+  const shared = {
+    id,
+    value,
+    disabled,
+    maxLength: VAT_CUSTOMS_MAX_TEXT_CHARS,
+    placeholder: `Invoice ${index + 1} no.`,
+    'aria-label': `Invoice no., ${context}${missing ? ', needed' : ''}`,
+  };
   return (
-    <div className="relative flex-1 min-w-0">
-      <input
-        id={id}
-        type="text"
-        value={value}
-        disabled={disabled}
-        maxLength={VAT_CUSTOMS_MAX_TEXT_CHARS}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={`Invoice ${index + 1} no.`}
-        aria-label={`Invoice no., ${context}${missing ? ', needed' : ''}`}
-        className={`w-full rounded-lg border border-gray-200 bg-white text-gray-900 placeholder:text-gray-400 tabular-nums hover:border-gray-300 focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20 disabled:bg-gray-50 ${
-          inTable ? 'h-9 pl-2.5 pr-6 text-[13px]' : 'h-11 pl-3 pr-7 text-base'
-        }`}
-      />
-      {missing && <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />}
+    <div className="flex-1 min-w-0">
+      {inTable ? (
+        // Dense laptop table: one 32px line, as the rest of the row.
+        <input
+          {...shared}
+          type="text"
+          onChange={(e) => onChange(e.target.value)}
+          className={`w-full h-8 px-2.5 text-sm rounded-lg border bg-white text-gray-900 placeholder:text-gray-500 tabular-nums transition-colors focus:outline-none focus:border-tme-blue disabled:bg-gray-50 ${border}`}
+        />
+      ) : (
+        // Cards: text never cut (Damir 22.10), a long number wraps to a second line.
+        <AutoGrowText
+          {...shared}
+          onChange={(e) => onChange(e.target.value)}
+          className={`w-full min-h-[46px] rounded-[10px] border-2 bg-white px-3.5 py-[9px] text-base leading-6 text-gray-900 placeholder:text-gray-500 tabular-nums transition-colors focus:outline-none focus:border-tme-blue disabled:bg-gray-50 ${border}`}
+        />
+      )}
     </div>
   );
 }
@@ -1629,23 +1724,42 @@ function InvoiceRefInput({
 // Laptop: one <tbody> per import
 // ------------------------------------------------------------------
 
-// Columns: no. | BOE no. + date | Value | VAT | 4 answers | Documents | menu.
-// Fits at 1280 px without a sideways scroll (U12): 1220 of ~1230 px. The answer
-// columns fit their common labels on one line ("For sale / stock / trading",
-// "Will be paid", "Not stated", "UAE office / warehouse").
-const COL_WIDTHS = [68, 112, 96, 80, 208, 128, 122, 200, 166, 40];
-const COLS = COL_WIDTHS.length;
-const TABLE_MIN_W = COL_WIDTHS.reduce((a, b) => a + b, 0);
-const TD_BASE = 'py-2 align-top group-hover/row:bg-gray-50/60 transition-colors';
-const TD = `px-2 ${TD_BASE}`;
-/** Answer cells: a little less padding, so the labels fit on one line. */
-const ATD = `px-1.5 ${TD_BASE}`;
-/** The 3 px status bar on the left edge of every row of an import. */
-const EDGE = 'shadow-[inset_3px_0_0_var(--row-accent)]';
+// Columns: no. | BOE no. + date | Value | VAT | 4 answers | Documents | Status | menu.
+// The table shows from 1280 px only (useIsWide) and fits there without a sideways
+// scroll. Quiet fintech rows (22.10 round 2): the page uses the full screen width
+// (up to 1800 px) and the extra width goes to the two long answer columns: Delivery
+// place grows by steps, Purpose (the longest answers) takes all that is left.
+// Documents get room for one line from 1400 px; below that the two links stack.
+const COL_DEFS: Array<{ w: number | null; cls?: string }> = [
+  { w: 32 }, // No.: as narrow as the number
+  { w: 138 }, // BOE no. + date (13 digits, 14 px tabular)
+  { w: 108 }, // Value (up to 999,999.99 on one line)
+  { w: 92 }, // VAT
+  { w: null }, // Purpose: what is left
+  { w: 128 }, // Paid or free ("Will be paid")
+  { w: 120 }, // Delivery terms ("Not stated")
+  { w: 168, cls: 'w-[168px] min-[1400px]:w-[208px] min-[1600px]:w-[240px] min-[1800px]:w-[300px]' }, // Delivery place
+  { w: 116, cls: 'w-[116px] min-[1400px]:w-[200px]' }, // Documents
+  { w: 108 }, // Status ("4 to answer")
+  { w: 40 }, // menu
+];
+const COLS = COL_DEFS.length;
+/** Purpose gets at least this much at 1280 px. */
+const ANSWER_MIN_W = 160;
+const TABLE_MIN_W = COL_DEFS.reduce((a, c) => a + (c.w ?? ANSWER_MIN_W), 0);
+const TD_BASE = 'py-2 align-middle group-hover/row:bg-[#FAFBFD] transition-colors';
+const TD = `px-2.5 ${TD_BASE}`;
+/** Answer cells: the quiet trigger pulls 9 px left, so its text lines up with the header. */
+const ATD = `pl-3 pr-2 ${TD_BASE}`;
 const SUB_BG = 'bg-gray-50/50';
 const NUM = 'tabular-nums text-right whitespace-nowrap';
-/** A plain text cell, centred on the 36 px select line. */
-const LINE = 'flex items-center h-9';
+/** A plain text cell, centred on the 32 px answer line. */
+const LINE = 'flex items-center min-h-8';
+/** A quiet text button of the laptop table (toolbar, Add invoice, Download): blue text, wash on hover. */
+const QUIET_BTN =
+  'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] font-medium text-tme-blue whitespace-nowrap transition-colors hover:bg-[#EEF2FA] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent tme-btn-focus';
+/** Under-row notes / questions start where the BOE column starts. */
+const UNDER_PAD = 'pl-[42px] pr-4';
 
 interface LineProps {
   line: VatCustomsPageLine;
@@ -1700,7 +1814,7 @@ const LineRows = memo(function LineRows({
 }: LineProps) {
   const key = String(line.id);
   const { parts, setPart, split, removePart, setReply, setNote } = useLineActions(key, answer, onChange);
-  const status = lineState(answer);
+  const status = lineStatus(answer);
   const isSplit = parts.length > 1;
   const idPrefix = `l${line.id}`;
   const questions = line.questions ?? NO_QUESTIONS;
@@ -1729,7 +1843,7 @@ const LineRows = memo(function LineRows({
       const details = readOnlyDetails(part);
       return details.length > 0 ? (
         <tr>
-          <td className={`${TD} ${EDGE} ${bg} pt-0`} colSpan={4} />
+          <td className={`${TD} ${bg} pt-0`} colSpan={4} />
           <td className={`${ATD} ${bg} pt-0 pb-3 pr-3`} colSpan={COLS - 4}>
             <ReadOnlyDetails items={details} />
           </td>
@@ -1738,7 +1852,7 @@ const LineRows = memo(function LineRows({
     }
     return strips.shown(part, i) ? (
       <tr>
-        <td className={`${TD} ${EDGE} ${bg} pt-0`} colSpan={4} />
+        <td className={`${TD} ${bg} pt-0`} colSpan={4} />
         <td className={`${ATD} ${bg} pt-0 pb-3 pr-3`} colSpan={COLS - 4}>
           <DetailStrip
             part={part}
@@ -1754,52 +1868,51 @@ const LineRows = memo(function LineRows({
   };
 
   return (
-    <tbody
-      className="group/row [&>tr:last-child>td]:border-b [&>tr:last-child>td]:border-gray-100"
-      style={{ '--row-accent': ACCENT[status.state] } as React.CSSProperties}
-    >
+    <tbody className="group/row [&>tr:last-child>td]:border-b [&>tr:last-child>td]:border-gray-100">
       <tr>
-        <td className={`${TD} ${EDGE} pl-3.5`}>
-          <div className="flex items-center gap-1.5 h-9" title={`Import ${line.lineNo}: ${status.text}`}>
-            <span className="text-[13px] font-semibold tabular-nums text-gray-900" aria-hidden>
+        <td className={`${TD_BASE} pl-2 pr-0.5 text-right`}>
+          <div className={`${LINE} justify-end`}>
+            <span className="text-[13px] tabular-nums text-gray-600" aria-hidden>
               {line.lineNo}
             </span>
-            {status.state === 'done' && <DoneBadge />}
-            <span className="sr-only">
-              Import {line.lineNo}, {status.text}
-            </span>
+            <span className="sr-only">Import {line.lineNo}</span>
           </div>
         </td>
         <td className={TD}>
-          <div className="flex flex-col justify-center h-9 leading-tight">
-            <span className="text-[13px] font-medium tabular-nums text-gray-900 whitespace-nowrap">{line.declarationNo}</span>
-            <span className="flex items-center gap-1.5 text-[11px] text-gray-500 tabular-nums">
+          <div className="flex flex-col items-start justify-center min-h-8 leading-[1.3]">
+            <span className="text-sm tabular-nums text-gray-900 whitespace-nowrap">{line.declarationNo}</span>
+            <span className="flex items-center gap-2 text-[13px] text-gray-600 tabular-nums whitespace-nowrap">
               {formatPageDate(line.declarationDate)}
-              <QuestionBadge count={questions.length} small />
+              {questions.length > 0 && (
+                <span className="inline-flex items-center gap-1 font-medium text-amber-800">
+                  <MessageCircleQuestion className="w-3.5 h-3.5" aria-hidden />
+                  {questions.length}
+                  <span className="sr-only">{questions.length === 1 ? 'question' : 'questions'} from TME</span>
+                </span>
+              )}
             </span>
           </div>
         </td>
         <td className={TD}>
-          <div className={`${LINE} justify-end ${NUM} text-[13px] font-medium text-gray-900`}>{formatAmount(line.totalValue)}</div>
+          <div className={`${LINE} justify-end ${NUM} text-sm font-medium text-[#111827]`}>{formatAmount(line.totalValue)}</div>
         </td>
         <td className={TD}>
-          <div className={`${LINE} justify-end ${NUM} text-[13px] text-gray-500`}>{formatAmount(line.totalVat)}</div>
+          <div className={`${LINE} justify-end ${NUM} text-sm text-gray-700`}>{formatAmount(line.totalVat)}</div>
         </td>
         {isSplit ? (
           <td className={TD} colSpan={4}>
-            <div className="flex items-center gap-3 h-9 pl-2.5 text-[13px] text-gray-500">
-              <Scissors className="w-3.5 h-3.5 text-gray-400" aria-hidden />
+            <div className="flex items-center gap-3 min-h-8 pl-0.5 text-[13px] text-gray-600">
+              <Scissors className="w-4 h-4 text-gray-500" aria-hidden />
               <span>{readOnly ? `Split into ${parts.length} invoices, answered per invoice below.` : `Split into ${parts.length} invoices. Please answer per invoice below.`}</span>
               {!readOnly && parts.length < VAT_CUSTOMS_MAX_PARTS && (
                 <button
                   type="button"
                   onClick={split}
                   disabled={disabled}
-                  className={`inline-flex items-center gap-1 rounded-md px-1.5 h-7 text-[13px] font-medium hover:bg-[#243F7B]/5 disabled:opacity-50 ${FOCUS_RING}`}
-                  style={{ color: PRIMARY }}
                   aria-label={`Add invoice, ${ctx}`}
+                  className={`${QUIET_BTN} shrink-0`}
                 >
-                  <Plus className="w-3.5 h-3.5" aria-hidden />
+                  <Plus className="w-4 h-4" aria-hidden />
                   Add invoice
                 </button>
               )}
@@ -1813,14 +1926,19 @@ const LineRows = memo(function LineRows({
           ))
         )}
         <td className={TD}>
-          <div className="flex items-center h-9">
+          <div className="flex items-center min-h-8">
             <DocPills line={line} boe={boe} invoice={invoice} other={other} names={names} onAddFile={onAddFile} disabled={disabled} readOnly={readOnly} />
           </div>
         </td>
-        <td className={`${TD_BASE} pl-0.5 pr-2 text-right`}>
+        <td className={TD}>
+          <div className={LINE}>
+            <StatusBadge missing={status.missing} readOnly={readOnly} plain />
+          </div>
+        </td>
+        <td className={`${TD_BASE} pl-0 pr-2 text-right`}>
           {!readOnly && (
-            <div className="flex items-center justify-end h-9">
-              <RowMenu label={`More actions, ${ctx}`} items={lineMenuItems(line, parts.length, split, onAddFile)} disabled={disabled} />
+            <div className="flex items-center justify-end min-h-8">
+              <RowMenu label={`More actions, ${ctx}`} items={lineMenuItems(line, parts.length, split, onAddFile)} disabled={disabled} compact />
             </div>
           )}
         </td>
@@ -1830,14 +1948,14 @@ const LineRows = memo(function LineRows({
         parts.map((part, i) => (
           <React.Fragment key={i}>
             <tr>
-              <td className={`${TD} ${EDGE} ${SUB_BG}`} />
+              <td className={`${TD} ${SUB_BG}`} />
               <td className={`${TD} ${SUB_BG}`} colSpan={3}>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-gray-300 select-none w-3 shrink-0" aria-hidden>
+                  <span className="text-gray-400 select-none w-3 shrink-0" aria-hidden>
                     └
                   </span>
                   {readOnly ? (
-                    <span className={`${LINE} min-w-0 text-[13px] tabular-nums ${part.invoiceRef?.trim() ? 'text-gray-900' : 'text-gray-400'}`}>
+                    <span className={`${LINE} min-w-0 text-sm tabular-nums ${part.invoiceRef?.trim() ? 'text-gray-900' : 'text-gray-600'}`}>
                       <span className="truncate">
                         {part.invoiceRef?.trim() ? `Invoice ${part.invoiceRef.trim()}` : `Invoice ${i + 1}: no number`}
                       </span>
@@ -1857,11 +1975,10 @@ const LineRows = memo(function LineRows({
                         type="button"
                         onClick={() => removePart(i)}
                         disabled={disabled}
-                        className={`shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 ${FOCUS_RING}`}
-                        title="Remove this invoice"
+                        className="shrink-0 inline-flex items-center justify-center size-8 rounded-lg tme-btn-danger-ghost transition-colors disabled:opacity-50 tme-btn-focus"
                         aria-label={`Remove invoice ${i + 1}, ${ctx}`}
                       >
-                        <X className="w-4 h-4" />
+                        <X className="w-4 h-4" aria-hidden />
                       </button>
                     </>
                   )}
@@ -1872,11 +1989,14 @@ const LineRows = memo(function LineRows({
                   {field(def, part, i, lineContext(line, i))}
                 </td>
               ))}
+              <td className={`${TD} ${SUB_BG}`} />
               <td className={`${TD} ${SUB_BG}`} colSpan={2}>
                 {isVatCustomsPartComplete(part) && part.invoiceRef?.trim() ? (
-                  <span className={`${LINE} gap-1 text-xs font-medium text-emerald-700`}>
-                    <Check className="w-3.5 h-3.5" strokeWidth={3} aria-hidden />
-                    Answered
+                  <span className={LINE}>
+                    <span className="inline-flex items-center gap-[7px] text-[13px] font-medium text-green-700 whitespace-nowrap">
+                      <span className="size-2 rounded-full bg-green-600" aria-hidden />
+                      Answered
+                    </span>
                   </span>
                 ) : null}
               </td>
@@ -1886,29 +2006,28 @@ const LineRows = memo(function LineRows({
         ))}
       {conflict && !readOnly && (
         <tr>
-          <td className={`${TD} ${EDGE} pt-0 pb-2.5 pl-4 pr-3`} colSpan={COLS}>
+          <td className={`${TD_BASE} pt-0 pb-2.5 ${UNDER_PAD}`} colSpan={COLS}>
             <ConflictNote note={conflict} lineId={key} onUseMine={onUseMine} onKeepTheirs={onKeepTheirs} disabled={disabled} />
           </td>
         </tr>
       )}
       {lockedNote && !readOnly && (
         <tr>
-          <td className={`${TD} ${EDGE} pt-0 pb-2.5 pl-4 pr-3`} colSpan={COLS}>
+          <td className={`${TD_BASE} pt-0 pb-2.5 ${UNDER_PAD}`} colSpan={COLS}>
             <LockedReplyNote texts={lockedNote} lineId={key} onDismiss={onDismissLocked} />
           </td>
         </tr>
       )}
       {filledByLine(answer) && (
         <tr>
-          <td className={`${TD} ${EDGE} pt-0 pb-2`} colSpan={4} />
-          <td className={`${ATD} pt-0 pb-2 pr-3`} colSpan={COLS - 4}>
-            <FilledByNote answer={answer} readOnly={readOnly} />
+          <td className={`${TD_BASE} pt-0 pb-2.5 ${UNDER_PAD}`} colSpan={COLS}>
+            <FilledByNote answer={answer} readOnly={readOnly} compact />
           </td>
         </tr>
       )}
       {showQuestions && (
         <tr>
-          <td className={`${TD} ${EDGE} pt-0 pb-3 pl-4 pr-3`} colSpan={COLS}>
+          <td className={`${TD_BASE} pt-0.5 pb-3 ${UNDER_PAD}`} colSpan={COLS}>
             <QuestionBoxes
               line={line}
               questions={questions}
@@ -1959,7 +2078,7 @@ const LineCard = memo(function LineCard({
 }: LineProps) {
   const key = String(line.id);
   const { parts, setPart, split, removePart, setReply, setNote } = useLineActions(key, answer, onChange);
-  const status = lineState(answer);
+  const status = lineStatus(answer);
   const isSplit = parts.length > 1;
   const idPrefix = `c${line.id}`;
   const showQuestions = questionsOrReplies(line, answer, readOnly);
@@ -1967,7 +2086,6 @@ const LineCard = memo(function LineCard({
   const ctx = lineContext(line, null);
   const names = useMemo(() => ({ boe: boeNames, invoice: invoiceNames, other: otherNames }), [boeNames, invoiceNames, otherNames]);
   const [purpose, payment, incoterm, delivery] = FIELDS;
-  const missingShort = status.state === 'started' ? /^(\d+) of/.exec(status.text)?.[1] : undefined;
 
   const strips = useOpenStrips();
   const fieldsFor = (part: VatCustomsAnswerPart, i: number) => {
@@ -1986,13 +2104,13 @@ const LineCard = memo(function LineCard({
       const details = readOnlyDetails(part);
       return (
         <>
-          <div className="grid grid-cols-2 gap-x-2 gap-y-3">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-4">
+            <div className="sm:col-span-2">
               <ReadOnlyAnswer def={purpose} {...ro} />
             </div>
             <ReadOnlyAnswer def={payment} {...ro} />
             <ReadOnlyAnswer def={incoterm} {...ro} />
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <ReadOnlyAnswer def={delivery} {...ro} />
             </div>
           </div>
@@ -2006,13 +2124,13 @@ const LineCard = memo(function LineCard({
     }
     return (
       <>
-        <div className="grid grid-cols-2 gap-x-2 gap-y-3">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-4">
+          <div className="sm:col-span-2">
             <AnswerField def={purpose} {...common} />
           </div>
           <AnswerField def={payment} {...common} />
           <AnswerField def={incoterm} {...common} />
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <AnswerField def={delivery} {...common} />
           </div>
         </div>
@@ -2033,35 +2151,25 @@ const LineCard = memo(function LineCard({
   };
 
   return (
-    <li
-      className="rounded-xl border border-gray-200 bg-white p-3.5 pl-4"
-      style={{ boxShadow: `inset 3px 0 0 ${ACCENT[status.state]}, 0 1px 2px rgba(16,24,40,0.04)` }}
-    >
-      <div className="flex items-center gap-2">
-        <p className="text-sm font-semibold text-gray-900 tabular-nums">
+    <li className="border-b border-gray-200 last:border-b-0 px-4 py-4 sm:px-5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="text-base font-semibold text-gray-900 tabular-nums">
           Import {line.lineNo}
-          <span className="font-normal text-gray-500 text-xs"> · {formatPageDate(line.declarationDate)}</span>
-          <span className="sr-only">, {status.text}</span>
+          <span className="font-normal text-gray-600 text-sm"> · {formatPageDate(line.declarationDate)}</span>
         </p>
         <QuestionBadge count={questions.length} />
         <span className="ml-auto" />
-        {status.state === 'done' && <DoneBadge />}
-        {missingShort && (
-          <span className="inline-flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap" aria-hidden>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            {missingShort} missing
-          </span>
-        )}
+        <StatusBadge missing={status.missing} readOnly={readOnly} />
         {!readOnly && <RowMenu label={`More actions, ${ctx}`} items={lineMenuItems(line, parts.length, split, onAddFile)} disabled={disabled} />}
       </div>
-      <div className="mt-2 flex items-end justify-between gap-3">
+      <div className="mt-2 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
         <div className="min-w-0">
-          <p className="text-xs text-gray-500">BOE no.</p>
-          <p className="text-sm font-medium text-gray-900 tabular-nums break-all">{line.declarationNo}</p>
+          <p className="text-sm text-gray-600">Customs declaration (BOE) no.</p>
+          <p className="text-[15px] font-medium text-gray-900 tabular-nums break-all">{line.declarationNo}</p>
         </div>
-        <div className="text-right shrink-0">
-          <p className="text-sm font-medium text-gray-900 tabular-nums">AED {formatAmount(line.totalValue)}</p>
-          <p className="text-xs text-gray-500 tabular-nums">VAT AED {formatAmount(line.totalVat)}</p>
+        <div className="sm:text-right shrink-0">
+          <p className="text-[15px] font-medium text-gray-900 tabular-nums">AED {formatAmount(line.totalValue)}</p>
+          <p className="text-sm text-gray-600 tabular-nums">VAT AED {formatAmount(line.totalVat)}</p>
         </div>
       </div>
 
@@ -2097,20 +2205,20 @@ const LineCard = memo(function LineCard({
         </div>
       )}
 
-      <div className="mt-3 space-y-3">
+      <div className="mt-4 space-y-3">
         {parts.map((part, i) =>
           isSplit ? (
-            <div key={i} className="rounded-lg border border-gray-200 bg-gray-50/50 p-2.5">
+            <div key={i} className="rounded-[10px] border border-gray-200 bg-gray-50/50 p-3">
               {readOnly ? (
-                <p className="text-[13px] mb-2.5">
-                  <span className="text-xs font-medium text-gray-600">Invoice no.</span>{' '}
-                  <span className={`tabular-nums break-all ${part.invoiceRef?.trim() ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
+                <p className="text-[15px] mb-3">
+                  <span className="font-semibold text-tme-blue">Invoice no.</span>{' '}
+                  <span className={`tabular-nums break-all ${part.invoiceRef?.trim() ? 'text-gray-900 font-medium' : 'text-gray-600'}`}>
                     {part.invoiceRef?.trim() || 'not given'}
                   </span>
                 </p>
               ) : (
                 <>
-                  <label htmlFor={`${idPrefix}-p${i}-inv`} className="block text-xs font-medium text-gray-600 mb-1">
+                  <label htmlFor={`${idPrefix}-p${i}-inv`} className="block text-[15px] font-semibold leading-snug text-tme-blue mb-1.5">
                     Invoice no.
                   </label>
                   <div className="flex items-start gap-2 mb-3">
@@ -2123,15 +2231,9 @@ const LineCard = memo(function LineCard({
                       inTable={false}
                       onChange={(s) => setPart(i, { invoiceRef: s })}
                     />
-                    <button
-                      type="button"
-                      onClick={() => removePart(i)}
-                      disabled={disabled}
-                      aria-label={`Remove invoice ${i + 1}, ${ctx}`}
-                      className={`shrink-0 h-11 px-2.5 rounded-lg text-xs font-medium text-gray-500 hover:text-red-500 hover:bg-red-50 disabled:opacity-40 ${FOCUS_RING}`}
-                    >
+                    <Button tone="dangerGhost" onClick={() => removePart(i)} disabled={disabled} aria-label={`Remove invoice ${i + 1}, ${ctx}`} className="shrink-0">
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 </>
               )}
@@ -2142,23 +2244,17 @@ const LineCard = memo(function LineCard({
           )
         )}
         {!readOnly && isSplit && parts.length < VAT_CUSTOMS_MAX_PARTS && (
-          <button
-            type="button"
-            onClick={split}
-            disabled={disabled}
-            className={`inline-flex items-center gap-1 rounded-md h-8 px-1.5 text-[13px] font-medium disabled:opacity-50 ${FOCUS_RING}`}
-            style={{ color: PRIMARY }}
-          >
-            <Plus className="w-3.5 h-3.5" aria-hidden />
+          <Button tone="ghost" onClick={split} disabled={disabled} className="-ml-3">
+            <Plus className="w-4 h-4" aria-hidden />
             Add invoice
-          </button>
+          </Button>
         )}
         <FilledByNote answer={answer} readOnly={readOnly} />
       </div>
 
-      <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-gray-600">Documents</span>
-        <DocPills line={line} boe={boe} invoice={invoice} other={other} names={names} onAddFile={onAddFile} disabled={disabled} readOnly={readOnly} />
+      <div className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <span className="text-[15px] font-semibold text-tme-blue">Documents</span>
+        <DocPills line={line} boe={boe} invoice={invoice} other={other} names={names} onAddFile={onAddFile} disabled={disabled} readOnly={readOnly} big />
       </div>
     </li>
   );
@@ -2170,40 +2266,45 @@ const LineCard = memo(function LineCard({
 
 type Confirm = { kind: 'apply' } | { kind: 'defaults' } | null;
 
-/** "Saved 11:02" / "Saving…" / the error. `compact` = the header (short error, the full text in the table). */
+/**
+ * "Saved 11:02" / "Saving…" / the error. `compact` = the header (short error, the full text in the table).
+ * The text size comes from the parent (15px in the page band, 14px in the phone bar).
+ */
 export function SaveStatus({ save, onRetry, compact = false }: { save: SaveState; onRetry: () => void; compact?: boolean }) {
   if (save.status === 'saving') {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 whitespace-nowrap">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+      <span className="inline-flex items-center gap-1.5 text-gray-600 whitespace-nowrap">
+        <Loader2 className="w-4 h-4 animate-spin" aria-hidden />
         Saving…
       </span>
     );
   }
   if (save.status === 'saved') {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 whitespace-nowrap">
-        <Check className="w-3.5 h-3.5 text-emerald-600" strokeWidth={3} aria-hidden />
+      <span className="inline-flex items-center gap-1.5 text-gray-600 whitespace-nowrap">
+        <Check className="w-4 h-4 text-green-700" strokeWidth={3} aria-hidden />
         Saved {formatDubaiTime(save.at)}
       </span>
     );
   }
   if (save.status === 'error') {
     return (
-      <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs" style={{ color: TME_COLORS.error }}>
-        <AlertTriangle className="w-3.5 h-3.5" aria-hidden />
+      <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 font-medium text-tme-red">
+        <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden />
         {compact ? 'Not saved yet' : save.message}
-        <button type="button" onClick={onRetry} className={`inline-flex items-center gap-1 font-semibold underline underline-offset-2 rounded ${FOCUS_RING}`}>
-          <RotateCcw className="w-3 h-3" aria-hidden />
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex items-center gap-1 min-h-10 px-1 font-semibold underline underline-offset-2 rounded tme-btn-focus"
+        >
+          <RotateCcw className="w-3.5 h-3.5" aria-hidden />
           Try again
         </button>
       </span>
     );
   }
-  return <span className="text-xs text-gray-500 whitespace-nowrap">Auto-save on</span>;
+  return <span className="text-gray-600 whitespace-nowrap">Answers save automatically</span>;
 }
-
-const GHOST_BTN = `inline-flex items-center justify-center gap-1.5 h-8 px-2 sm:px-2.5 rounded-lg border border-gray-200 bg-white text-xs sm:text-[13px] font-medium text-gray-700 shadow-[0_1px_1px_rgba(16,24,40,0.03)] transition-colors hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white ${FOCUS_RING}`;
 
 // ------------------------------------------------------------------
 // The section
@@ -2371,36 +2472,42 @@ function CustomsTableBody(props: Omit<CustomsTableProps, 'peopleNames'>) {
   };
 
   const headers: Array<[string, string]> = [
-    ['No.', 'pl-3.5'],
-    ['BOE no. / date', ''],
+    ['No.', 'text-right !pl-1 !pr-0.5'],
+    ['BOE no. and date', ''],
     ['Value (AED)', 'text-right'],
     ['VAT (AED)', 'text-right'],
-    ['Purpose', 'pl-4'],
-    ['Paid / FOC', 'pl-4'],
-    ['Incoterms', 'pl-4'],
-    ['Delivery place', 'pl-4'],
+    ['Purpose', '!pl-3'],
+    ['Paid or free', '!pl-3'],
+    ['Delivery terms', '!pl-3'],
+    ['Delivery place', '!pl-3'],
     ['Documents', ''],
+    ['Status', ''],
     ['', ''],
   ];
 
+  const fillHint =
+    !readOnly && emptyCount > 0 && sources.length === 0
+      ? 'Tip: answer one import completely, then use "Copy to empty rows" to give the empty ones the same answers.'
+      : null;
+
   return (
-    <section
-      className="md:rounded-xl md:border md:border-gray-200 md:bg-white md:shadow-[0_1px_3px_rgba(16,24,40,0.05)]"
-      aria-labelledby="vat-imports-title"
-    >
-      {/* Phone: only this slim line sticks (progress + save state), so the
-          client always sees "Saved". Laptop: the page header shows both. */}
-      <div className="md:hidden sticky top-0 z-20 -mx-4 bg-white/95 backdrop-blur px-4 py-2.5 border-y border-gray-200">
-        <div className="flex items-center gap-3">
-          <div className="h-1.5 w-16 rounded-full bg-gray-100 overflow-hidden shrink-0" aria-hidden>
-            <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: answered === total ? TME_COLORS.success : PRIMARY }} />
+    <div>
+      {/* Phone / tablet (cards): only this slim line sticks (progress + save state), so the
+          client always sees "Saved". Wide screens: the page band shows both. */}
+      <div className="xl:hidden sticky top-0 z-20 -mx-4 sm:-mx-10 mb-3 bg-white/95 backdrop-blur px-4 sm:px-10 py-2.5 border-y border-gray-200">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <div className="h-1.5 w-16 rounded-full bg-tme-line overflow-hidden shrink-0" aria-hidden>
+            <div
+              className={`h-full rounded-full transition-all ${answered === total ? 'bg-green-600' : 'bg-tme-blue'}`}
+              style={{ width: `${pct}%` }}
+            />
           </div>
-          <p className="text-[13px] font-semibold whitespace-nowrap tabular-nums" style={{ color: PRIMARY }}>
+          <p className="font-semibold whitespace-nowrap tabular-nums text-tme-blue">
             {answered} of {total} answered
           </p>
           {readOnly ? (
-            <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap">
-              <Lock className="w-3.5 h-3.5" aria-hidden />
+            <span className="ml-auto inline-flex items-center gap-1.5 text-gray-600 whitespace-nowrap">
+              <Lock className="w-4 h-4" aria-hidden />
               Closed
             </span>
           ) : (
@@ -2411,191 +2518,250 @@ function CustomsTableBody(props: Omit<CustomsTableProps, 'peopleNames'>) {
         </div>
       </div>
 
-      {/* Title + toolbar: one line on a laptop. */}
-      <div className="md:px-4 pt-3.5 pb-3 flex flex-wrap items-center gap-x-3 gap-y-2.5">
-        <div className="flex items-baseline gap-2 min-w-0 mr-1">
-          <h2 id="vat-imports-title" className="text-[15px] font-semibold" style={{ color: PRIMARY }}>
-            Your imports
-          </h2>
-          {sentAt && <span className="hidden lg:inline text-xs text-gray-500 whitespace-nowrap">Last sent to TME: {formatDubaiDateTime(sentAt)}</span>}
-        </div>
+      {/* No overflow-hidden here: the table header sticks to the page while scrolling. */}
+      <section className="bg-white border border-gray-200 rounded-[14px]" aria-labelledby="vat-imports-title">
+        <GrainGradient
+          color="#3B82F6"
+          seed="tme-staff-card-vat-imports"
+          grainOpacity={0.35}
+          className={`px-5 border-b border-gray-200 rounded-t-[14px] ${wide ? 'py-3.5' : 'py-3'}`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 min-h-6">
+            <h2 id="vat-imports-title" className={`font-semibold leading-snug text-tme-blue ${wide ? 'text-base' : 'text-[17px]'}`}>
+              Your imports
+            </h2>
+            <span className={`font-medium text-gray-600 tabular-nums ${wide ? 'text-[13px]' : 'text-[15px]'}`}>
+              {readOnly
+                ? `${answered} of ${total} answered`
+                : openCount > 0
+                  ? `${openCount} of ${total} still ${openCount === 1 ? 'needs' : 'need'} your answers`
+                  : `All ${total} answered`}
+            </span>
+          </div>
+        </GrainGradient>
 
-        <div className="inline-flex items-center rounded-lg bg-gray-100 p-0.5" role="group" aria-label="Show imports">
-          {segments.map((s) => {
-            const active = filter === s.key;
-            return (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => pickFilter(s.key)}
-                aria-pressed={active}
-                className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[13px] font-medium whitespace-nowrap transition-colors ${FOCUS_RING} ${
-                  active ? 'bg-white shadow-[0_1px_2px_rgba(16,24,40,0.08)]' : 'text-gray-600 hover:text-gray-900'
-                }`}
-                style={active ? { color: PRIMARY } : undefined}
-              >
-                {s.amber && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />}
-                {s.label}
-                <span
-                  className={`min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full text-[11px] font-semibold tabular-nums ${
-                    s.amber ? 'bg-amber-100 text-amber-800' : active ? 'bg-[#243F7B]/10' : 'bg-gray-200/70 text-gray-600'
+        {/* Filter + toolbar */}
+        <div className={wide ? 'px-5 py-3 flex flex-wrap items-center gap-x-3 gap-y-2' : 'px-4 sm:px-5 pt-4 pb-3 flex flex-wrap items-center gap-x-3 gap-y-3'}>
+          <div
+            className={wide ? 'inline-flex items-center gap-0.5 rounded-[9px] bg-gray-100 p-[3px]' : 'inline-flex flex-wrap items-center gap-1 rounded-[10px] bg-gray-100 p-1'}
+            role="group"
+            aria-label="Show imports"
+          >
+            {segments.map((s) => {
+              const active = filter === s.key;
+              if (wide) {
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => pickFilter(s.key)}
+                    aria-pressed={active}
+                    className={`inline-flex items-center gap-1.5 h-[30px] px-3 rounded-[7px] text-[13px] font-medium whitespace-nowrap transition-colors tme-btn-focus ${
+                      active ? 'bg-white text-gray-900 shadow-[0_1px_2px_rgba(15,23,42,0.08)]' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {s.label}
+                    <span className={`text-xs font-medium tabular-nums ${s.amber ? 'text-amber-700' : 'text-gray-500'}`}>{s.count}</span>
+                  </button>
+                );
+              }
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => pickFilter(s.key)}
+                  aria-pressed={active}
+                  className={`inline-flex items-center gap-1.5 min-h-10 px-3 rounded-lg text-sm font-semibold whitespace-nowrap transition-colors tme-btn-focus ${
+                    active ? 'bg-white text-tme-blue shadow-[0_1px_2px_rgba(16,24,40,0.08)]' : 'text-gray-700 hover:text-gray-900'
                   }`}
                 >
-                  {s.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 md:ml-auto">
-          {!readOnly && (
-            <button
-              type="button"
-              onClick={() => setConfirm(confirm?.kind === 'apply' ? null : { kind: 'apply' })}
-              disabled={disabled || sources.length === 0 || emptyCount === 0}
-              aria-expanded={confirm?.kind === 'apply'}
-              className={GHOST_BTN}
-              title={
-                sources.length === 0
-                  ? 'Answer one import first, then copy it to the empty ones.'
-                  : emptyCount === 0
-                    ? 'Every import already has answers.'
-                    : 'Copy one import’s answers to every import that is still empty.'
-              }
-            >
-              <CopyCheck className="w-3.5 h-3.5 text-gray-500" aria-hidden />
-              Copy to empty rows
-            </button>
-          )}
-          {defaults && !readOnly && (
-            <button
-              type="button"
-              onClick={() => setConfirm(confirm?.kind === 'defaults' ? null : { kind: 'defaults' })}
-              disabled={disabled || emptyCount === 0}
-              aria-expanded={confirm?.kind === 'defaults'}
-              className={GHOST_BTN}
-              title={emptyCount === 0 ? 'Every import already has answers.' : 'Use your usual answers from the last VAT filing.'}
-            >
-              <History className="w-3.5 h-3.5 text-gray-500" aria-hidden />
-              Same as last quarter
-            </button>
-          )}
-          {hasExcel && (
-            <span className="inline-flex items-center gap-0.5">
-              {excelHref ? (
-                <a href={excelHref} className={GHOST_BTN}>
-                  <Download className="w-3.5 h-3.5 text-gray-500" aria-hidden />
-                  Download Excel
-                </a>
-              ) : (
-                <button type="button" disabled className={GHOST_BTN} title="Demo: no file to download">
-                  <Download className="w-3.5 h-3.5 text-gray-500" aria-hidden />
-                  Download Excel
+                  {s.label}
+                  <span
+                    className={`min-w-6 h-6 px-1.5 inline-flex items-center justify-center rounded-full text-[13px] font-semibold tabular-nums ${
+                      s.amber ? 'bg-amber-100 text-amber-800' : active ? 'bg-tme-blue/10 text-tme-blue' : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    {s.count}
+                  </span>
                 </button>
-              )}
-              {!readOnly && <InfoTip text={EXCEL_HELP} label="About the Excel list" />}
-            </span>
-          )}
-        </div>
-      </div>
+              );
+            })}
+          </div>
 
-      {!readOnly && (notice || confirm || save.status === 'error') && (
-        <div className="md:px-4 pb-3 space-y-2">
-          {save.status === 'error' && (
-            <div className="hidden md:flex rounded-lg px-3 py-2 items-center gap-2 text-[13px]" style={{ backgroundColor: 'rgba(239,68,68,0.06)' }}>
-              <SaveStatus save={save} onRetry={onRetrySave} />
-            </div>
-          )}
-          {notice && (
-            <div className="rounded-lg px-3 py-2 flex items-start gap-2 text-[13px]" style={{ backgroundColor: 'rgba(36,63,123,0.05)', color: PRIMARY }} role="status">
-              <Info className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
-              <span className="flex-1 min-w-0">{notice}</span>
-              <button type="button" onClick={onDismissNotice} className={`shrink-0 p-0.5 rounded text-gray-500 hover:bg-gray-100 ${FOCUS_RING}`} aria-label="Close this note">
-                <X className="w-4 h-4" />
+          <div className={wide ? 'flex items-center gap-1 ml-auto -mr-2.5' : 'flex flex-wrap items-center gap-2 w-full sm:w-auto sm:ml-auto'}>
+            {!readOnly && wide && (
+              <button
+                type="button"
+                className={QUIET_BTN}
+                onClick={() => setConfirm(confirm?.kind === 'apply' ? null : { kind: 'apply' })}
+                disabled={disabled || sources.length === 0 || emptyCount === 0}
+                aria-expanded={confirm?.kind === 'apply'}
+                title={
+                  sources.length === 0
+                    ? 'Answer one import first, then copy it to the empty ones.'
+                    : emptyCount === 0
+                      ? 'Every import already has answers.'
+                      : 'Copy one import’s answers to every import that is still empty.'
+                }
+              >
+                <CopyCheck className="w-4 h-4" aria-hidden />
+                Copy to empty rows
               </button>
-            </div>
+            )}
+            {defaults && !readOnly && wide && (
+              <button
+                type="button"
+                className={QUIET_BTN}
+                onClick={() => setConfirm(confirm?.kind === 'defaults' ? null : { kind: 'defaults' })}
+                disabled={disabled || emptyCount === 0}
+                aria-expanded={confirm?.kind === 'defaults'}
+                title={emptyCount === 0 ? 'Every import already has answers.' : 'Use your usual answers from the last VAT filing.'}
+              >
+                <History className="w-4 h-4" aria-hidden />
+                Same as last quarter
+              </button>
+            )}
+            {!readOnly && !wide && (
+              <Button
+                tone="plain"
+                size="sm"
+                onClick={() => setConfirm(confirm?.kind === 'apply' ? null : { kind: 'apply' })}
+                disabled={disabled || sources.length === 0 || emptyCount === 0}
+                aria-expanded={confirm?.kind === 'apply'}
+                fullWidthOnMobile
+                title={
+                  sources.length === 0
+                    ? 'Answer one import first, then copy it to the empty ones.'
+                    : emptyCount === 0
+                      ? 'Every import already has answers.'
+                      : 'Copy one import’s answers to every import that is still empty.'
+                }
+              >
+                <CopyCheck className="w-4 h-4" aria-hidden />
+                Copy to empty rows
+              </Button>
+            )}
+            {defaults && !readOnly && !wide && (
+              <Button
+                tone="plain"
+                size="sm"
+                onClick={() => setConfirm(confirm?.kind === 'defaults' ? null : { kind: 'defaults' })}
+                disabled={disabled || emptyCount === 0}
+                aria-expanded={confirm?.kind === 'defaults'}
+                fullWidthOnMobile
+                title={emptyCount === 0 ? 'Every import already has answers.' : 'Use your usual answers from the last VAT filing.'}
+              >
+                <History className="w-4 h-4" aria-hidden />
+                Same as last quarter
+              </Button>
+            )}
+          </div>
+          {sentAt && (
+            <p className={`w-full text-gray-600 tabular-nums ${wide ? 'text-[13px]' : 'text-sm'}`}>Last sent to TME: {formatDubaiDateTime(sentAt)}</p>
           )}
-          {confirm && (
-            <div className="rounded-lg border p-3" style={{ borderColor: 'rgba(36,63,123,0.25)', backgroundColor: 'rgba(36,63,123,0.03)' }}>
-              {confirm.kind === 'apply' && activeSource ? (
-                <>
-                  <p className="text-[13px] text-gray-700">
-                    Copy the answers of{' '}
-                    {sources.length > 1 ? (
-                      <span className="inline-block w-72 max-w-full align-middle">
-                        <ChoiceSelect
-                          id="vat-copy-source"
-                          value={String(activeSource.id)}
-                          options={sources.map((l) => ({ value: String(l.id), label: `Import ${l.lineNo}`, sub: `BOE ${l.declarationNo}` }))}
-                          onChange={(v) => v && setSourceId(v)}
-                          ariaLabel="Copy the answers of"
-                          display={`Import ${activeSource.lineNo} (BOE ${activeSource.declarationNo})`}
-                          size="inline"
-                          clearable={false}
-                          sheetTitle="Copy the answers of"
-                        />
-                      </span>
-                    ) : (
-                      <strong>
-                        Import {activeSource.lineNo} (BOE {activeSource.declarationNo})
-                      </strong>
-                    )}{' '}
-                    to the <strong>{emptyCount}</strong> empty {emptyCount === 1 ? 'row' : 'rows'}:{' '}
-                    <span className="text-gray-900 font-medium">{describePart(copyableAnswer(answers[String(activeSource.id)]?.parts?.[0]))}</span>
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Rows you already started stay as they are. You can still change any row afterwards.</p>
-                  <div className="flex flex-wrap gap-2 mt-2.5">
-                    <button type="button" onClick={doApply} className={`h-8 px-3 rounded-lg font-semibold text-white text-[13px] ${FOCUS_RING}`} style={{ backgroundColor: PRIMARY }}>
-                      Copy to {emptyCount} empty {emptyCount === 1 ? 'row' : 'rows'}
-                    </button>
-                    <button type="button" onClick={() => setConfirm(null)} className={`h-8 px-3 rounded-lg font-medium text-[13px] text-gray-600 hover:bg-gray-100 ${FOCUS_RING}`}>
-                      Cancel
-                    </button>
-                  </div>
-                </>
-              ) : confirm.kind === 'defaults' && defaults ? (
-                <>
-                  <p className="text-[13px] text-gray-700">
-                    Use your usual answers from the last VAT filing:{' '}
-                    <span className="font-medium" style={{ color: PRIMARY }}>
-                      {defaultsText}
-                    </span>
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    This fills the {emptyCount} empty {emptyCount === 1 ? 'row' : 'rows'}. Rows you already started stay as they are. You can
-                    still change any row afterwards.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-2.5">
-                    <button type="button" onClick={doDefaults} className={`h-8 px-3 rounded-lg font-semibold text-white text-[13px] ${FOCUS_RING}`} style={{ backgroundColor: PRIMARY }}>
-                      Fill {emptyCount} empty {emptyCount === 1 ? 'row' : 'rows'}
-                    </button>
-                    <button type="button" onClick={() => setConfirm(null)} className={`h-8 px-3 rounded-lg font-medium text-[13px] text-gray-600 hover:bg-gray-100 ${FOCUS_RING}`}>
-                      Cancel
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          )}
+          {fillHint && <p className={`w-full text-gray-600 ${wide ? 'text-[13px]' : 'text-sm'}`}>{fillHint}</p>}
         </div>
-      )}
 
-      {visibleLines.length === 0 ? (
-        <p className="md:border-t border-gray-100 p-6 text-center max-md:rounded-xl max-md:border max-md:bg-white text-[13px] text-gray-600">
-          {filter === 'open' ? 'Every import is answered.' : 'No open questions from TME.'}{' '}
-          <button type="button" onClick={() => pickFilter('all')} className={`font-semibold underline underline-offset-2 rounded ${FOCUS_RING}`} style={{ color: PRIMARY }}>
-            Show all imports
-          </button>
-        </p>
-      ) : wide ? (
-        // Below 1280 px the table may scroll sideways; from 1280 px it fits and
-        // uses the page scroll (no scroll box inside the page) with a sticky header.
-        <div className="overflow-x-auto xl:overflow-visible">
-          <table className="w-full text-[13px] border-separate border-spacing-0 table-fixed" style={{ minWidth: TABLE_MIN_W }}>
+        {!readOnly && (notice || confirm || save.status === 'error') && (
+          <div className="px-4 sm:px-5 pb-4 space-y-2">
+            {save.status === 'error' && (
+              <div className="hidden xl:flex rounded-[10px] border border-red-200 bg-red-50 px-3.5 py-2 items-center gap-2 text-[15px]">
+                <SaveStatus save={save} onRetry={onRetrySave} />
+              </div>
+            )}
+            {notice && (
+              <div className="rounded-[10px] border border-blue-100 bg-[#eef2fa] pl-3.5 pr-1 py-1 flex items-center gap-2 text-[15px] text-tme-blue" role="status">
+                <Info className="w-[18px] h-[18px] shrink-0" aria-hidden />
+                <span className="flex-1 min-w-0 py-2">{notice}</span>
+                <button
+                  type="button"
+                  onClick={onDismissNotice}
+                  className="shrink-0 inline-flex items-center justify-center size-11 rounded-[10px] text-gray-600 hover:text-gray-900 hover:bg-white/70 tme-btn-focus"
+                  aria-label="Close this note"
+                >
+                  <X className="w-5 h-5" aria-hidden />
+                </button>
+              </div>
+            )}
+            {confirm && (
+              <div className="rounded-[10px] border border-tme-line bg-[#F8FAFD] p-4">
+                {confirm.kind === 'apply' && activeSource ? (
+                  <>
+                    <p className="text-[15px] leading-relaxed text-gray-700">
+                      Copy the answers of{' '}
+                      {sources.length > 1 ? (
+                        <span className="inline-block w-80 max-w-full align-middle">
+                          <ChoiceSelect
+                            id="vat-copy-source"
+                            value={String(activeSource.id)}
+                            options={sources.map((l) => ({ value: String(l.id), label: `Import ${l.lineNo}`, sub: `BOE ${l.declarationNo}` }))}
+                            onChange={(v) => v && setSourceId(v)}
+                            ariaLabel="Copy the answers of"
+                            display={`Import ${activeSource.lineNo} (BOE ${activeSource.declarationNo})`}
+                            size="inline"
+                            clearable={false}
+                            sheetTitle="Copy the answers of"
+                          />
+                        </span>
+                      ) : (
+                        <strong>
+                          Import {activeSource.lineNo} (BOE {activeSource.declarationNo})
+                        </strong>
+                      )}{' '}
+                      to the <strong>{emptyCount}</strong> empty {emptyCount === 1 ? 'row' : 'rows'}:{' '}
+                      <span className="text-gray-900 font-medium">{describePart(copyableAnswer(answers[String(activeSource.id)]?.parts?.[0]))}</span>
+                    </p>
+                    <p className="text-sm text-gray-600 mt-1.5">Rows you already started stay as they are. You can still change any row afterwards.</p>
+                    <div className="flex flex-col-reverse gap-2 mt-3 sm:flex-row">
+                      <Button tone="plain" onClick={() => setConfirm(null)} fullWidthOnMobile>
+                        Cancel
+                      </Button>
+                      <Button tone="primary" onClick={doApply} fullWidthOnMobile>
+                        Copy to {emptyCount} empty {emptyCount === 1 ? 'row' : 'rows'}
+                      </Button>
+                    </div>
+                  </>
+                ) : confirm.kind === 'defaults' && defaults ? (
+                  <>
+                    <p className="text-[15px] leading-relaxed text-gray-700">
+                      Use your usual answers from the last VAT filing: <span className="font-medium text-tme-blue">{defaultsText}</span>
+                    </p>
+                    <p className="text-sm text-gray-600 mt-1.5">
+                      This fills the {emptyCount} empty {emptyCount === 1 ? 'row' : 'rows'}. Rows you already started stay as they are. You can
+                      still change any row afterwards.
+                    </p>
+                    <div className="flex flex-col-reverse gap-2 mt-3 sm:flex-row">
+                      <Button tone="plain" onClick={() => setConfirm(null)} fullWidthOnMobile>
+                        Cancel
+                      </Button>
+                      <Button tone="primary" onClick={doDefaults} fullWidthOnMobile>
+                        Fill {emptyCount} empty {emptyCount === 1 ? 'row' : 'rows'}
+                      </Button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
+
+        {visibleLines.length === 0 ? (
+          <div className="border-t border-gray-200 px-5 py-6 text-center text-[15px] text-gray-700">
+            <p>{filter === 'open' ? 'Every import is answered.' : 'No open questions from TME.'}</p>
+            <Button tone="ghost" onClick={() => pickFilter('all')} className="mt-1">
+              Show all imports
+            </Button>
+          </div>
+        ) : wide ? (
+          // From 1280 px only (useIsWide): the table fits without a sideways scroll and
+          // uses the page scroll (no scroll box inside the page) with a sticky header.
+          <table
+            className="w-full text-sm border-separate border-spacing-0 table-fixed [&>tbody:last-child>tr:last-child>td]:border-b-0 [&>tbody:last-child>tr:last-child>td:first-child]:rounded-bl-[13px] [&>tbody:last-child>tr:last-child>td:last-child]:rounded-br-[13px]"
+            style={{ minWidth: TABLE_MIN_W }}
+          >
             <colgroup>
-              {COL_WIDTHS.map((w, i) => (
-                <col key={i} style={{ width: w }} />
+              {COL_DEFS.map((c, i) => (
+                <col key={i} className={c.cls} style={c.w ? { width: c.cls ? undefined : c.w } : undefined} />
               ))}
             </colgroup>
             <thead>
@@ -2604,12 +2770,12 @@ function CustomsTableBody(props: Omit<CustomsTableProps, 'peopleNames'>) {
                   <th
                     key={i}
                     scope="col"
-                    className={`sticky top-0 xl:top-[var(--vat-top,0px)] z-10 bg-gray-50 px-2 h-9 text-[11px] font-semibold uppercase tracking-wide text-gray-500 border-y border-gray-200 whitespace-nowrap ${cls} ${
+                    className={`sticky top-0 z-10 h-10 bg-[#F9FAFB] px-2.5 align-middle text-[12.5px] font-medium leading-tight whitespace-nowrap overflow-hidden text-ellipsis text-gray-600 border-y border-gray-200 ${cls} ${
                       cls.includes('text-right') ? '' : 'text-left'
                     }`}
                   >
                     {label === 'Delivery place' ? (
-                      <span className="inline-flex items-center gap-1">
+                      <span className="inline-flex items-center gap-1.5">
                         {label}
                         <InfoTip text={DELIVERY_HELP} label="What is the delivery place on the invoice?" />
                       </span>
@@ -2626,17 +2792,44 @@ function CustomsTableBody(props: Omit<CustomsTableProps, 'peopleNames'>) {
               <LineRows key={line.id} {...rowProps(line)} />
             ))}
           </table>
-        </div>
-      ) : (
-        <ul className="space-y-2.5">
-          {visibleLines.map((line) => (
-            <LineCard key={line.id} {...rowProps(line)} />
-          ))}
-        </ul>
-      )}
-      {wide && visibleLines.length > 0 && (
-        <p className="xl:hidden px-4 py-2 text-[11px] text-gray-400">Scroll sideways in the table to see all columns.</p>
-      )}
-    </section>
+        ) : (
+          <ul className="border-t border-gray-200">
+            {visibleLines.map((line) => (
+              <LineCard key={line.id} {...rowProps(line)} />
+            ))}
+          </ul>
+        )}
+
+        {/* Download Excel: at the bottom of the list (22.10), the help as plain text (no tooltip-only info). */}
+        {hasExcel && (
+          <div className="border-t border-gray-200 px-4 sm:px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+            {wide ? (
+              excelHref ? (
+                <a href={excelHref} className={`${QUIET_BTN} -ml-2.5`}>
+                  <Download className="w-4 h-4" aria-hidden />
+                  Download as Excel
+                </a>
+              ) : (
+                <button type="button" disabled className={`${QUIET_BTN} -ml-2.5`}>
+                  <Download className="w-4 h-4" aria-hidden />
+                  Download as Excel (not in the demo)
+                </button>
+              )
+            ) : excelHref ? (
+              <ButtonLink href={excelHref} tone="ghost" size="sm" className="-ml-2">
+                <Download className="w-4 h-4" aria-hidden />
+                Download Excel
+              </ButtonLink>
+            ) : (
+              <Button tone="ghost" size="sm" disabled className="-ml-2">
+                <Download className="w-4 h-4" aria-hidden />
+                Download Excel (not in the demo)
+              </Button>
+            )}
+            {!readOnly && <p className={`text-gray-600 ${wide ? 'text-[13px]' : 'text-sm'}`}>{EXCEL_HELP}</p>}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

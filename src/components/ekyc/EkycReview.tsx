@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { AlertCircle, FileText, Pencil } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
+import { Button, GrainGradient } from '@/components/ui';
 import {
   EKYC_DOCUMENT_SLOTS,
   ekycSplitLines,
@@ -51,12 +51,12 @@ function Answer({
 }) {
   if (field.kind !== 'signature' && isBlank(value)) {
     return missing ? (
-      <span className="inline-flex items-center gap-1 font-medium text-red-600">
+      <span className="inline-flex items-center gap-1 font-medium text-tme-red">
         <AlertCircle className="h-4 w-4 shrink-0" />
         <Bi text={EKYC_UI.missingAnswer} variant="inline" />
       </span>
     ) : (
-      <Bi text={EKYC_UI.notAnswered} className="text-gray-400" />
+      <Bi text={EKYC_UI.notAnswered} className="text-gray-600" />
     );
   }
   const list = options ?? field.options;
@@ -96,12 +96,12 @@ function Answer({
         // eslint-disable-next-line @next/next/no-img-element -- a data URL, nothing to optimise
         <img src={value} alt={field.label.en} className="h-16 max-w-[220px] rounded border border-gray-200 bg-white object-contain" />
       ) : missing ? (
-        <span className="inline-flex items-center gap-1 font-medium text-red-600">
+        <span className="inline-flex items-center gap-1 font-medium text-tme-red">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <Bi text={EKYC_UI.missingAnswer} variant="inline" />
         </span>
       ) : (
-        <Bi text={EKYC_UI.notAnswered} className="text-gray-400" />
+        <Bi text={EKYC_UI.notAnswered} className="text-gray-600" />
       );
     default:
       return <span className="whitespace-pre-line break-words">{String(value)}</span>;
@@ -110,11 +110,11 @@ function Answer({
 
 function Row({ label, children }: { label: EkycText; children: React.ReactNode }) {
   return (
-    <dl className="py-2.5 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-6">
+    <dl className="py-2.5 sm:py-2 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-6">
       <dt>
         <BiLabel text={label} size="sm" />
       </dt>
-      <dd className="mt-1 text-sm text-gray-900 sm:mt-0">{children}</dd>
+      <dd className="mt-1 text-[15px] text-gray-900 sm:mt-0 sm:text-sm">{children}</dd>
     </dl>
   );
 }
@@ -159,7 +159,7 @@ export function EkycReview({
             list.forEach((row, rowIndex) => {
               rows.push(
                 <div key={`${id}-${rowIndex}`} className="py-2.5">
-                  <div className="text-[15px] font-semibold" style={{ color: TME_COLORS.primary }}>
+                  <div className="text-[15px] font-semibold text-tme-blue sm:text-sm">
                     <BiTitle text={ekycRowHeading(group.rowLabel, rowIndex + 1)} size="section" />
                   </div>
                   <div className="divide-y divide-gray-100">
@@ -184,9 +184,9 @@ export function EkycReview({
             const groupError = groupErrors?.[group.id];
             if (groupError) {
               rows.push(
-                <div key={`${id}-error`} className="flex items-start gap-1.5 py-2.5 text-sm font-medium text-red-600">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <Bi text={groupError} deClassName="!text-red-500" />
+                <div key={`${id}-error`} className="flex items-start gap-1.5 py-2.5 text-sm font-medium text-tme-red sm:text-[13px]">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <Bi text={groupError} deClassName="!text-tme-red" />
                 </div>
               );
             }
@@ -212,16 +212,16 @@ export function EkycReview({
               <Row key={def.slot} label={def.label}>
                 {doc ? (
                   <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <FileText className="h-4 w-4 shrink-0 text-gray-400" />
-                    <span className="truncate">{doc.filename}</span>
+                    <FileText className="h-4 w-4 shrink-0 text-gray-500" aria-hidden="true" />
+                    <span className="min-w-0 break-all">{doc.filename}</span>
                   </span>
                 ) : errorPaths.has(`documents.${def.slot}`) ? (
-                  <span className="inline-flex items-center gap-1 font-medium text-red-600">
+                  <span className="inline-flex items-center gap-1 font-medium text-tme-red">
                     <AlertCircle className="h-4 w-4 shrink-0" />
                     <Bi text={EKYC_UI.missingAnswer} variant="inline" />
                   </span>
                 ) : (
-                  <Bi text={EKYC_UI.noFile} className="text-gray-400" />
+                  <Bi text={EKYC_UI.noFile} className="text-gray-600" />
                 )}
               </Row>
             );
@@ -231,28 +231,33 @@ export function EkycReview({
         return (
           <section
             key={step.id}
-            className="rounded-xl border bg-white px-4 py-3 sm:px-5"
-            style={{ borderColor: problem ? '#fecaca' : TME_COLORS.border }}
+            className={`overflow-hidden rounded-[14px] border bg-white ${problem ? 'border-red-300' : 'border-gray-200'}`}
             aria-labelledby={`ekyc-review-${step.id}`}
           >
-            <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-2.5">
-              <h3 id={`ekyc-review-${step.id}`} className="text-base font-semibold" style={{ color: TME_COLORS.primary }}>
-                <BiTitle text={step.title} size="section" />
-              </h3>
-              {onChange && (
-                <button
-                  type="button"
-                  onClick={() => onChange(index)}
-                  className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium underline-offset-2 hover:underline"
-                  style={{ color: TME_COLORS.primary }}
-                  aria-label={`${EKYC_UI.change.en}: ${step.title.en}${bilingual && step.title.de ? ` / ${step.title.de}` : ''}`}
-                >
-                  <Pencil className="h-3.5 w-3.5 shrink-0" />
-                  <Bi text={EKYC_UI.change} variant="inline" />
-                </button>
-              )}
-            </div>
-            <div className="divide-y divide-gray-100">{rows}</div>
+            <GrainGradient
+              color="#3B82F6"
+              seed={`ekyc-review-${step.id}`}
+              grainOpacity={0.35}
+              className="border-b border-gray-200 py-1.5 pl-4 pr-1.5 sm:pl-5"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h3 id={`ekyc-review-${step.id}`} className="py-1.5 text-[17px] font-semibold text-tme-blue sm:py-1 sm:text-[15px]">
+                  <BiTitle text={step.title} size="section" />
+                </h3>
+                {onChange && (
+                  <Button
+                    tone="ghost"
+                    onClick={() => onChange(index)}
+                    className="shrink-0"
+                    aria-label={`${EKYC_UI.change.en}: ${step.title.en}${bilingual && step.title.de ? ` / ${step.title.de}` : ''}`}
+                  >
+                    <Pencil className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <Bi text={EKYC_UI.change} variant="inline" />
+                  </Button>
+                )}
+              </div>
+            </GrainGradient>
+            <div className="divide-y divide-gray-100 px-4 py-1 sm:px-5">{rows}</div>
           </section>
         );
       })}

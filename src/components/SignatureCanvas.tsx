@@ -2,8 +2,8 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
-import { TME_COLORS } from '@/lib/constants';
 import Image from 'next/image';
+import { Button } from '@/components/ui/Button';
 
 /**
  * Screen texts of the pad. Every one is optional; a missing one keeps the
@@ -187,18 +187,17 @@ export function SignaturePad({
     <div className="w-full">
       <label
         id={labelId}
-        className="block text-sm font-medium mb-2"
-        style={{ color: TME_COLORS.primary }}
+        className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1"
       >
         {label}
-        <span className="text-red-500 ml-1">*</span>
+        <span className="text-tme-red ml-1" aria-hidden>*</span>
       </label>
 
       <div
         ref={containerRef}
         style={{
-          border: `2px solid ${isEmpty && !isLocked ? '#e5e7eb' : TME_COLORS.primary}`,
-          borderRadius: '8px',
+          border: `2px solid ${isEmpty && !isLocked ? '#e5e7eb' : '#243F7B'}`,
+          borderRadius: '10px',
           overflow: 'hidden',
           backgroundColor: disabled ? '#f5f5f5' : '#ffffff',
           transition: 'border-color 0.2s',
@@ -248,62 +247,32 @@ export function SignaturePad({
         )}
       </div>
 
-      <div className="flex justify-between items-center mt-2">
-        <span className="text-sm text-gray-500">
+      <div className="flex flex-wrap justify-between items-center gap-x-3 gap-y-1 mt-2">
+        <span className="text-sm sm:text-[13px] text-gray-600">
           {isLocked ? (
             tSaved
           ) : (
             <>
               {tDraw}{' '}
               {showUndoHint && canUndo && (
-                <span className="text-gray-400">{isTouchDevice ? '• Tap Undo' : '• ⌘Z to undo'}</span>
+                <span className="text-gray-600">{isTouchDevice ? '• Tap Undo' : '• ⌘Z to undo'}</span>
               )}
             </>
           )}
         </span>
-        <div className="flex gap-2">
+        <div className="flex gap-2 ml-auto">
           {isLocked ? (
-            <button
-              type="button"
-              onClick={handleEdit}
-              disabled={disabled}
-              className="px-3 py-1.5 text-sm rounded border transition-colors"
-              style={{
-                color: disabled ? '#999' : TME_COLORS.primary,
-                borderColor: disabled ? '#ddd' : TME_COLORS.primary,
-                cursor: disabled ? 'not-allowed' : 'pointer',
-              }}
-            >
+            <Button tone="ghost" onClick={handleEdit} disabled={disabled}>
               {tEdit}
-            </button>
+            </Button>
           ) : (
-            <button
-              type="button"
-              onClick={handleUndo}
-              disabled={disabled || !canUndo}
-              className="px-3 py-1.5 text-sm rounded border transition-colors"
-              style={{
-                color: disabled || !canUndo ? '#999' : '#666',
-                borderColor: disabled || !canUndo ? '#ddd' : '#ccc',
-                cursor: disabled || !canUndo ? 'not-allowed' : 'pointer',
-              }}
-            >
+            <Button tone="ghost" onClick={handleUndo} disabled={disabled || !canUndo}>
               {tUndo}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            onClick={handleClear}
-            disabled={disabled || (isEmpty && !isLocked)}
-            className="px-3 py-1.5 text-sm rounded border transition-colors"
-            style={{
-              color: disabled || (isEmpty && !isLocked) ? '#999' : TME_COLORS.primary,
-              borderColor: disabled || (isEmpty && !isLocked) ? '#ddd' : TME_COLORS.primary,
-              cursor: disabled || (isEmpty && !isLocked) ? 'not-allowed' : 'pointer',
-            }}
-          >
+          <Button tone="plain" onClick={handleClear} disabled={disabled || (isEmpty && !isLocked)}>
             {tClear}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

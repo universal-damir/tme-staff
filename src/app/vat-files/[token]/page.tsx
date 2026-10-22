@@ -19,7 +19,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
+import { Button, ButtonLink, Card, ClientPageHeader, PageBody, StatusChip } from '@/components/ui';
 import { requestJson, failureMessage, type RequestFailure } from '@/lib/request-outcome';
 import { reportClientFailure } from '@/lib/client-error-log';
 import { uploadFileToRoute } from '@/lib/upload-client';
@@ -162,63 +162,40 @@ function conflictWho(c: Pick<VatFilesPageConflict, 'by' | 'byName'>): string {
   return c.byName || c.by || 'Someone else';
 }
 
-// Shell and Header live at module scope: defined inside the page they would
-// remount on every keystroke and the comment box would lose focus.
+// Shell and the header pieces live at module scope: defined inside the page they
+// would remount on every keystroke and the comment box would lose focus.
 
-/** The small centred card for loading, errors, closed and "thank you". */
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 bg-[#F6F7F9]">
-      <div className="w-full max-w-2xl bg-white rounded-xl border border-gray-200 shadow-[0_1px_3px_rgba(16,24,40,0.05)] p-5 sm:p-8">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function TitleBlock({
-  data,
-  large = false,
-  onNotYou,
-}: {
-  data: VatFilesPagePayload | null;
-  large?: boolean;
-  /** Round 4 B: shown with the confirmed address ("Not you?"). */
-  onNotYou?: () => void;
-}) {
-  // The client knows its own name; the TME client code means nothing to them.
-  const company = data?.companyName ?? '';
+/** "VAT filing Jun - Aug 2026" (the client knows its own name; the TME client code means nothing to them). */
+function pageTitle(data: VatFilesPagePayload | null): string {
   const period = clientPeriodLabel(data?.periodLabel);
+  return data ? `VAT filing${period ? ` ${period}` : ''}` : 'VAT filing documents';
+}
+
+/** Round 4 B: "Confirmed as Name (address) · Not you?" under the title. */
+function ConfirmedAs({ data, onNotYou }: { data: VatFilesPagePayload | null; onNotYou?: () => void }) {
+  if (!data?.viewerEmail) return null;
   return (
-    <div className="min-w-0">
-      <div className="text-[11px] font-semibold tracking-[0.08em] uppercase" style={{ color: TME_COLORS.secondary }}>
-        TME Services
-      </div>
-      <h1 className={`${large ? 'text-2xl' : 'text-lg sm:text-xl'} font-semibold tracking-tight leading-tight`} style={{ color: TME_COLORS.primary }}>
-        VAT filing{period ? ` ${period}` : ''}
-      </h1>
-      {company && <p className="text-[13px] text-gray-500 break-words leading-snug">{company}</p>}
-      {data?.viewerEmail && (
-        <p className="text-[11px] text-gray-500 leading-snug mt-0.5 break-all">
-          Confirmed as {vatFilesNamedEmail(data.viewerEmail, data.peopleNames)}
-          {onNotYou && (
-            <>
-              {' · '}
-              <button type="button" onClick={onNotYou} className={`font-medium underline-offset-2 hover:underline rounded ${FOCUS}`} style={{ color: TME_COLORS.primary }}>
-                Not you?
-              </button>
-            </>
-          )}
-        </p>
+    <p className="flex flex-wrap items-center gap-x-1 text-[15px] leading-snug text-gray-600 break-all -mt-2 sm:text-sm">
+      <span>Confirmed as {vatFilesNamedEmail(data.viewerEmail, data.peopleNames)}</span>
+      {onNotYou && (
+        <Button tone="ghost" size="sm" onClick={onNotYou} className="-ml-1">
+          Not you?
+        </Button>
       )}
-    </div>
+    </p>
   );
 }
 
-function Header({ data }: { data: VatFilesPagePayload | null }) {
+/** The page frame for loading, errors, closed and "thank you": the cloud band + one card. */
+function Shell({ data, children }: { data: VatFilesPagePayload | null; children: React.ReactNode }) {
   return (
-    <div className="mb-6">
-      <TitleBlock data={data} large />
+    <div className="min-h-screen bg-tme-page">
+      <ClientPageHeader eyebrow="VAT files" title={pageTitle(data)} subtitle={data?.companyName || undefined}>
+        <ConfirmedAs data={data} />
+      </ClientPageHeader>
+      <PageBody>
+        <Card>{children}</Card>
+      </PageBody>
     </div>
   );
 }
@@ -229,14 +206,14 @@ function ProgressRing({ value, total }: { value: number; total: number }) {
   const c = 2 * Math.PI * r;
   const p = total > 0 ? value / total : 0;
   return (
-    <svg width="32" height="32" viewBox="0 0 32 32" className="-rotate-90 shrink-0" aria-hidden>
-      <circle cx="16" cy="16" r={r} fill="none" stroke="#E5E7EB" strokeWidth="3.5" />
+    <svg width="36" height="36" viewBox="0 0 32 32" className="-rotate-90 shrink-0" aria-hidden>
+      <circle cx="16" cy="16" r={r} fill="none" stroke="#CBD5E5" strokeWidth="3.5" />
       <circle
         cx="16"
         cy="16"
         r={r}
         fill="none"
-        stroke={value === total && total > 0 ? TME_COLORS.success : TME_COLORS.primary}
+        stroke={value === total && total > 0 ? '#15803D' : '#243F7B'}
         strokeWidth="3.5"
         strokeLinecap="round"
         strokeDasharray={c}
@@ -246,9 +223,6 @@ function ProgressRing({ value, total }: { value: number; total: number }) {
     </svg>
   );
 }
-
-const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[#243F7B]/50';
-const CARD = 'rounded-xl border border-gray-200 bg-white shadow-[0_1px_3px_rgba(16,24,40,0.05)]';
 
 function Message({
   icon,
@@ -260,32 +234,29 @@ function Message({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center py-10 text-center">
+    <div className="flex flex-col items-center py-8 text-center">
       {icon}
-      <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-        {title}
-      </h2>
-      <div className="text-gray-600 max-w-md">{children}</div>
+      <h2 className="text-[22px] font-semibold leading-tight mb-2 text-tme-blue sm:text-lg">{title}</h2>
+      <div className="text-base leading-relaxed text-gray-600 max-w-md sm:text-[15px]">{children}</div>
     </div>
   );
 }
 
 function FileList({ files, withDate = false }: { files: VatFilesReceivedFile[]; withDate?: boolean }) {
   return (
-    <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+    <ul className="divide-y divide-gray-100 rounded-[10px] border border-gray-200">
       {files.map((f, i) => {
         const when = withDate ? formatDubaiDateTime(f.uploadedAt) : '';
         return (
-          <li key={`${f.name}-${i}`} className="flex items-center gap-2.5 px-3 py-2">
-            <FileText className="w-4 h-4 shrink-0 text-gray-400" aria-hidden />
+          <li key={`${f.name}-${i}`} className="flex items-start gap-3 px-3.5 py-2.5">
+            <FileText className="w-[18px] h-[18px] shrink-0 mt-0.5 text-tme-blue" aria-hidden />
             <span className="flex-1 min-w-0">
-              <span className="block text-[13px] text-gray-800 truncate" title={f.name}>
-                {f.name}
+              <span className="block text-[15px] text-gray-900 break-all sm:text-sm">{f.name}</span>
+              <span className="block text-sm text-gray-600 tabular-nums sm:text-[13px]">
+                {when ? `Sent ${when} · ` : ''}
+                {formatBytes(f.size)}
               </span>
-              {when && <span className="block sm:hidden text-[11px] text-gray-500 tabular-nums">Sent {when}</span>}
             </span>
-            {when && <span className="hidden sm:inline text-xs text-gray-500 shrink-0 tabular-nums">Sent {when}</span>}
-            <span className="text-xs text-gray-500 shrink-0 tabular-nums">{formatBytes(f.size)}</span>
           </li>
         );
       })}
@@ -296,43 +267,36 @@ function FileList({ files, withDate = false }: { files: VatFilesReceivedFile[]; 
 /** The grey notice on top of a closed request. */
 function ClosedNotice() {
   return (
-    <div className={`${CARD} px-4 py-3 flex items-start gap-3 bg-gray-50`} role="status">
-      <span className="w-8 h-8 shrink-0 rounded-full bg-gray-200/70 flex items-center justify-center" aria-hidden>
-        <Lock className="w-4 h-4 text-gray-600" />
+    <div className="rounded-[14px] border border-gray-200 bg-white px-4 py-4 sm:px-5 flex items-start gap-3" role="status">
+      <span className="w-10 h-10 shrink-0 rounded-full bg-gray-100 flex items-center justify-center" aria-hidden>
+        <Lock className="w-5 h-5 text-gray-600" />
       </span>
-      <div className="min-w-0 text-[13px] leading-snug">
+      <div className="min-w-0 text-[15px] leading-snug sm:text-sm">
         <p className="font-semibold text-gray-900">This request is closed. You can still see what you sent.</p>
-        <p className="text-gray-600 mt-0.5">If you need to send us something else for this VAT filing, please reply to our email.</p>
+        <p className="text-gray-600 mt-1">If you need to send us something else for this VAT filing, please reply to our email.</p>
       </div>
     </div>
   );
 }
 
-/** One plain sentence for a failed upload. */
 /** Round 5: "Benedikt Klingler changed the table at 17:10." + Reload (never reloads by itself). */
 function ChangeBanner({ text, closed, onReload }: { text: string; closed: boolean; onReload: () => void }) {
   return (
     <div
-      className="rounded-xl px-3.5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-white shadow-[0_4px_14px_rgba(36,63,123,0.25)]"
-      style={{ backgroundColor: TME_COLORS.primary }}
+      className="rounded-[14px] bg-tme-blue px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[15px] text-white sm:text-sm shadow-[0_8px_24px_rgba(36,63,123,0.3)]"
       role="status"
       aria-live="polite"
     >
-      <RefreshCw className="w-4 h-4 shrink-0" aria-hidden />
+      <RefreshCw className="w-5 h-5 shrink-0" aria-hidden />
       <p className="flex-1 min-w-[12rem] leading-snug">
         <span className="font-semibold">{text}</span>{' '}
-        <span className="text-white/85">
+        <span className="text-white/90">
           {closed ? 'Reload to see what TME has.' : 'Reload to see the latest version. What you typed is kept.'}
         </span>
       </p>
-      <button
-        type="button"
-        onClick={onReload}
-        className={`shrink-0 h-8 px-3.5 rounded-lg bg-white text-[13px] font-semibold transition-colors hover:bg-white/90 ${FOCUS}`}
-        style={{ color: TME_COLORS.primary }}
-      >
-        Reload
-      </button>
+      <Button tone="plain" onClick={onReload} className="w-full sm:w-auto">
+        Reload the page
+      </Button>
     </div>
   );
 }
@@ -375,9 +339,6 @@ export default function VatFilesPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
   const busy = useRef(false);
-  /** The sticky header's height: the table header sticks right under it. */
-  const barRef = useRef<HTMLElement>(null);
-  const [barH, setBarH] = useState(0);
 
   // ---------- Customs table state ----------
   // `answers` drives the table; `answersRef` is the same map for the save
@@ -937,14 +898,6 @@ export default function VatFilesPage() {
     };
   }, []);
 
-  useEffect(() => {
-    const el = barRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setBarH(el.offsetHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [state]);
-
   // ---------- Add files ----------
   const addFiles = useCallback(
     (list: FileList | File[] | null, target?: { lineId: number; docKind: VatCustomsDocKind } | null) => {
@@ -1401,13 +1354,12 @@ export default function VatFilesPage() {
 
   // ---------- States ----------
   if (state === 'code') {
-    const period = clientPeriodLabel(data?.periodLabel);
     return (
       <CodeGate
         token={token}
         addresses={gate}
         demo={demo}
-        title={data ? `VAT filing${period ? ` ${period}` : ''}` : null}
+        title={data ? pageTitle(data) : null}
         onConfirmed={onCodeConfirmed}
       />
     );
@@ -1415,9 +1367,9 @@ export default function VatFilesPage() {
 
   if (state === 'loading') {
     return (
-      <Shell>
-        <div className="flex flex-col items-center py-16 text-gray-500">
-          <Loader2 className="w-8 h-8 animate-spin mb-3" style={{ color: TME_COLORS.primary }} />
+      <Shell data={null}>
+        <div className="flex flex-col items-center py-14 text-base text-gray-600 sm:text-sm" role="status">
+          <Loader2 className="w-8 h-8 animate-spin mb-3 text-tme-blue" aria-hidden />
           Loading…
         </div>
       </Shell>
@@ -1426,11 +1378,8 @@ export default function VatFilesPage() {
 
   if (state === 'error') {
     return (
-      <Shell>
-        <Message
-          icon={<XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />}
-          title="We could not open this page"
-        >
+      <Shell data={null}>
+        <Message icon={<XCircle className="w-12 h-12 mb-4 text-tme-red" aria-hidden />} title="We could not open this page">
           <p>{loadError}</p>
         </Message>
       </Shell>
@@ -1439,11 +1388,8 @@ export default function VatFilesPage() {
 
   if (state === 'expired') {
     return (
-      <Shell>
-        <Message
-          icon={<XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />}
-          title="This link has expired"
-        >
+      <Shell data={null}>
+        <Message icon={<XCircle className="w-12 h-12 mb-4 text-tme-red" aria-hidden />} title="This link has expired">
           <p>
             Please use the link from our latest email, or reply to that email and we will send you a new
             one.
@@ -1455,11 +1401,8 @@ export default function VatFilesPage() {
 
   if (state === 'not_found') {
     return (
-      <Shell>
-        <Message
-          icon={<XCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.error }} />}
-          title="This link isn’t valid"
-        >
+      <Shell data={null}>
+        <Message icon={<XCircle className="w-12 h-12 mb-4 text-tme-red" aria-hidden />} title="This link isn’t valid">
           <p>
             The link may be incorrect or no longer in use. Please use the link from our latest
             email, or reply to that email.
@@ -1472,12 +1415,8 @@ export default function VatFilesPage() {
   // A 'closed' answer without data (a row in an unknown state): the lock card only.
   if (state === 'closed' && !data) {
     return (
-      <Shell>
-        <Header data={data} />
-        <Message
-          icon={<Lock className="w-12 h-12 mb-4" style={{ color: TME_COLORS.secondary }} />}
-          title="This request is closed"
-        >
+      <Shell data={data}>
+        <Message icon={<Lock className="w-12 h-12 mb-4 text-gray-600" aria-hidden />} title="This request is closed">
           <p>
             We no longer need files through this link. If you want to send us something for this
             VAT filing, please reply to our email instead.
@@ -1498,40 +1437,30 @@ export default function VatFilesPage() {
           ? 'Thank you, we received your answers'
           : 'Thank you, we received your files';
     return (
-      <Shell>
-        <Header data={data} />
-        <div className="flex flex-col items-center pt-4 pb-6 text-center">
-          <CheckCircle className="w-12 h-12 mb-4" style={{ color: TME_COLORS.success }} />
-          <h2 className="text-xl font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
-            {title}
-          </h2>
-          <p className="text-gray-600 max-w-md">
-            Our VAT team will check them and contact you if anything is missing.
-          </p>
+      <Shell data={data}>
+        <div className="flex flex-col items-center pt-2 pb-6 text-center" role="status">
+          <CheckCircle className="w-12 h-12 mb-4 text-green-700" aria-hidden />
+          <h2 className="text-[22px] font-semibold leading-tight mb-2 text-tme-blue sm:text-lg">{title}</h2>
+          <p className="text-base text-gray-600 max-w-md sm:text-[15px]">Our VAT team will check them and contact you if anything is missing.</p>
           {hasTable && (
-            <p className="text-gray-600 max-w-md mt-3 text-sm">
-              You answered <strong>{answeredCount} of {total}</strong> {total === 1 ? 'import' : 'imports'}.
+            <p className="text-base text-gray-600 max-w-md mt-3 sm:text-[15px]">
+              You answered <strong className="text-gray-900">{answeredCount} of {total}</strong> {total === 1 ? 'import' : 'imports'}.
               {openCount > 0 && ' You can come back to this link any time to finish the rest.'}
             </p>
           )}
         </div>
         {sentFiles.length > 0 && (
           <div className="mb-6">
-            <p className="text-sm font-medium mb-2" style={{ color: TME_COLORS.primary }}>
+            <p className="text-[15px] font-semibold mb-2 text-tme-blue sm:text-sm">
               Received now ({sentFiles.length} {sentFiles.length === 1 ? 'file' : 'files'})
             </p>
             <FileList files={sentFiles} />
           </div>
         )}
-        <button
-          type="button"
-          onClick={sendMore}
-          className="w-full py-3 rounded-lg font-semibold border-2 transition-colors flex items-center justify-center gap-2"
-          style={{ borderColor: TME_COLORS.primary, color: TME_COLORS.primary }}
-        >
-          <Plus className="w-4 h-4" />
+        <Button tone="secondary" onClick={sendMore} className="w-full">
+          <Plus className="w-4 h-4" aria-hidden />
           {hasTable ? 'Back to your imports' : 'Send more files'}
-        </button>
+        </Button>
       </Shell>
     );
   }
@@ -1541,7 +1470,9 @@ export default function VatFilesPage() {
   const deadline = formatDeadline(data?.deadline);
   const received = data?.files ?? [];
   const isCustoms = data?.kind === 'customs';
-  const maxW = hasTable ? 'max-w-[1320px]' : 'max-w-3xl';
+  // The table view is wider; the header band and the body share the same column.
+  // xl:px-6 / 2xl:px-8: the table uses the full screen width (22.10 round 2), capped at 1800 px.
+  const maxW = hasTable ? 'max-w-[1800px] xl:px-6 2xl:px-8' : 'max-w-[880px]';
 
   let sendLabel: string;
   if (sending) sendLabel = 'Sending…';
@@ -1552,195 +1483,161 @@ export default function VatFilesPage() {
   else sendLabel = 'Send';
 
   const sendButton = (where: 'top' | 'bottom') => (
-    <button
-      type="button"
+    <Button
+      tone="primary"
       onClick={handleSend}
       disabled={!canSend}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg font-semibold text-white whitespace-nowrap shadow-[0_1px_2px_rgba(16,24,40,0.12)] transition-all hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100 ${FOCUS} ${
-        where === 'top' ? 'h-9 px-3.5 text-[13px]' : 'h-10 px-5 text-sm w-full sm:w-auto'
-      }`}
-      style={{ backgroundColor: TME_COLORS.primary }}
+      busy={sending || uploading}
+      fullWidthOnMobile={where === 'bottom'}
+      className="whitespace-nowrap"
     >
-      {sending || uploading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> : <Send className="w-3.5 h-3.5" aria-hidden />}
+      {!(sending || uploading) && <Send className="w-4 h-4" aria-hidden />}
       {sendLabel}
-    </button>
+    </Button>
   );
 
   const errorBanner = sendError && (
-    <div className="text-[13px] rounded-lg px-3 py-2.5 flex items-start gap-2" style={{ backgroundColor: 'rgba(239,68,68,0.07)', color: TME_COLORS.error }} role="alert">
-      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
-      {sendError}
+    <div
+      className="rounded-[10px] border border-red-200 bg-red-50 px-3.5 py-3 flex items-start gap-2 text-[15px] font-medium leading-snug text-tme-red sm:text-[13px]"
+      role="alert"
+    >
+      <AlertTriangle className="w-[18px] h-[18px] shrink-0 mt-0.5" aria-hidden />
+      <span>{sendError}</span>
     </div>
   );
 
   const pendingOk = items.filter((i) => i.status !== 'failed');
   const pendingFailed = items.filter((i) => i.status === 'failed');
+  const showChange = !readOnly && !!changeNote;
 
   return (
-    <div className="min-h-screen bg-[#F6F7F9]" style={{ '--vat-top': `${barH}px` } as React.CSSProperties}>
-      {/* Header: title left, summary card right (deadline, progress, saved, Send). Sticks on a laptop. */}
-      <header ref={barRef} className="md:sticky top-0 z-30 border-b border-gray-200 bg-white/90 backdrop-blur-md">
-        <div className={`mx-auto ${maxW} px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-3`}>
-          <TitleBlock data={data} onNotYou={notYou} />
-          <div className="w-full md:w-auto md:ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gray-200 bg-white pl-3.5 pr-1.5 py-1.5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+    // Bottom room while the change note is up, so it never covers the Send button.
+    <div className={`min-h-screen bg-tme-page ${showChange ? 'pb-48 sm:pb-32' : ''}`}>
+      <ClientPageHeader eyebrow="VAT files" title={pageTitle(data)} subtitle={data?.companyName || undefined} maxWidth={maxW}>
+        <ConfirmedAs data={data} onNotYou={notYou} />
+        {(deadline || hasTable || readOnly) && (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-[15px] leading-snug sm:text-sm">
             {deadline && (
-              <div className="flex items-center gap-2">
-                <CalendarClock className="w-4 h-4 shrink-0" style={{ color: TME_COLORS.secondary }} aria-hidden />
-                <div className="leading-tight">
-                  <p className="text-[11px] text-gray-500">{readOnly ? 'Deadline' : 'Please send by'}</p>
-                  <p className="text-[13px] font-semibold tabular-nums text-gray-900">{deadline}</p>
-                </div>
+              <div className="flex items-center gap-2.5">
+                <CalendarClock className="w-5 h-5 shrink-0 text-tme-blue sm:w-4 sm:h-4" aria-hidden />
+                <p className="text-gray-700">
+                  {readOnly ? 'Deadline' : 'Please send by'}{' '}
+                  <span className="font-semibold tabular-nums text-gray-900">{deadline}</span>
+                </p>
               </div>
             )}
             {hasTable && (
-              <>
-                <span className="hidden md:block w-px h-7 bg-gray-200" aria-hidden />
-                <div className="hidden md:flex items-center gap-2">
-                  <ProgressRing value={answeredCount} total={total} />
-                  <div className="leading-tight">
-                    <p className="text-[13px] font-semibold tabular-nums text-gray-900">
-                      {answeredCount} of {total}
-                    </p>
-                    <p className="text-[11px] text-gray-500">answered</p>
-                  </div>
-                </div>
-                {!readOnly && (
-                  <>
-                    <span className="hidden md:block w-px h-7 bg-gray-200" aria-hidden />
-                    <div className="hidden md:block min-w-[88px]" aria-live="polite">
-                      <SaveStatus save={save} onRetry={retrySave} compact />
-                    </div>
-                  </>
-                )}
-              </>
+              <div className="flex items-center gap-2.5">
+                <ProgressRing value={answeredCount} total={total} />
+                <p className="text-gray-700">
+                  <span className="font-semibold tabular-nums text-gray-900">
+                    {answeredCount} of {total}
+                  </span>{' '}
+                  {total === 1 ? 'import' : 'imports'} answered
+                </p>
+              </div>
             )}
-            <div className="ml-auto">
-              {readOnly ? (
-                <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-gray-100 text-[13px] font-semibold text-gray-600 whitespace-nowrap">
-                  <Lock className="w-3.5 h-3.5" aria-hidden />
-                  Closed
-                </span>
-              ) : (
-                sendButton('top')
-              )}
-            </div>
+            {hasTable && !readOnly && (
+              <div className="min-w-0" aria-live="polite">
+                <SaveStatus save={save} onRetry={retrySave} compact />
+              </div>
+            )}
+            {readOnly ? (
+              <StatusChip tone="grey" icon={<Lock className="w-3.5 h-3.5" aria-hidden />}>
+                Closed
+              </StatusChip>
+            ) : hasTable ? (
+              <div className="w-full sm:w-auto sm:ml-auto">{sendButton('top')}</div>
+            ) : null}
           </div>
-        </div>
-        {/* Round 5: someone else changed the table (laptop: under the sticky header). */}
-        <AnimatePresence initial={false}>
-          {!readOnly && changeNote && (
+        )}
+      </ClientPageHeader>
+
+      {/* Round 5: someone else changed the table: a note at the bottom of the screen. */}
+      <AnimatePresence>
+        {showChange && changeNote && (
+          <div className="fixed inset-x-3 bottom-3 z-40 flex justify-center pointer-events-none">
             <motion.div
               key="change-note"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 24, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="hidden md:block overflow-hidden"
+              className="w-full max-w-[760px] pointer-events-auto"
             >
-              <div className={`mx-auto ${maxW} px-4 sm:px-6 pb-3`}>
-                <ChangeBanner text={changeNote.text} closed={changeNote.closed} onReload={reloadForChange} />
-              </div>
+              <ChangeBanner text={changeNote.text} closed={changeNote.closed} onReload={reloadForChange} />
             </motion.div>
-          )}
-        </AnimatePresence>
-      </header>
-      {/* Phone: the same note at the bottom of the screen (the header does not stick there). */}
-      <AnimatePresence>
-        {!readOnly && changeNote && (
-          <motion.div
-            key="change-note-phone"
-            initial={{ y: 24, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 24, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="md:hidden fixed inset-x-3 bottom-3 z-40"
-          >
-            <ChangeBanner text={changeNote.text} closed={changeNote.closed} onReload={reloadForChange} />
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
-      <main className={`mx-auto ${maxW} px-4 sm:px-6 py-4 sm:py-5 space-y-4`}>
+      <PageBody maxWidth={maxW}>
         {readOnly && <ClosedNotice />}
         {errorBanner}
 
         {/* What we need */}
-        <section className={`${CARD} px-4 py-3.5`} aria-labelledby="vat-need-title">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 mb-2.5">
-            <h2 id="vat-need-title" className="text-[13px] font-semibold" style={{ color: TME_COLORS.primary }}>
-              {readOnly ? 'What we asked for' : 'What we need'}
-            </h2>
-            {!readOnly && (
-              <p className="text-xs text-gray-500">
-                {hasTable
-                  ? 'A few details and the documents for each import in the FTA list below.'
-                  : isCustoms
-                    ? 'The documents for the imports on the FTA import list. Please upload them here and press Send.'
-                    : 'The documents below. Please upload them here and press Send.'}{' '}
-                Your files go only to the TME VAT team.
-              </p>
-            )}
-          </div>
+        <Card
+          title={readOnly ? 'What we asked for' : 'What we need'}
+          seed="vat-need"
+          description={
+            readOnly
+              ? undefined
+              : `${
+                  hasTable
+                    ? 'A few details and the documents for each import in the FTA list below.'
+                    : isCustoms
+                      ? 'The documents for the imports on the FTA import list. Please upload them here and press Send.'
+                      : 'The documents below. Please upload them here and press Send.'
+                } Your files go only to the TME VAT team.`
+          }
+        >
           {(data?.requestedItems.length ?? 0) > 0 && (
-            <ol className={hasTable ? 'grid gap-y-2 md:flex md:gap-x-8' : 'space-y-1.5'}>
+            <ol className={hasTable ? 'grid gap-y-2.5 lg:flex lg:gap-x-8' : 'space-y-2.5'}>
               {data?.requestedItems.map((item, i) => (
                 <li
                   key={i}
-                  className={`flex gap-2.5 text-[13px] text-gray-700 leading-snug ${hasTable ? 'md:flex-auto md:min-w-0' : ''}`}
+                  className={`flex gap-3 text-[15px] text-gray-800 leading-snug sm:gap-2.5 sm:text-sm ${hasTable ? 'lg:flex-auto lg:min-w-0' : ''}`}
                 >
-                  <span
-                    className="w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-[11px] font-semibold tabular-nums"
-                    style={{ backgroundColor: 'rgba(36,63,123,0.08)', color: TME_COLORS.primary }}
-                  >
+                  <span className="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[13px] font-semibold tabular-nums bg-tme-blue/10 text-tme-blue sm:w-5 sm:h-5 sm:text-xs">
                     {i + 1}
                   </span>
-                  <span className="pt-px break-words min-w-0 whitespace-pre-line">{item}</span>
+                  <span className="pt-0.5 break-words min-w-0 whitespace-pre-line sm:pt-0">{item}</span>
                 </li>
               ))}
             </ol>
           )}
 
           {data?.hasCustomsList && !hasTable && (
-            <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-x-4 gap-y-2">
               {demo ? (
-                <button
-                  type="button"
-                  disabled
-                  className="inline-flex h-9 px-3.5 rounded-lg text-[13px] font-semibold text-white items-center justify-center gap-2 opacity-60 cursor-not-allowed"
-                  style={{ backgroundColor: TME_COLORS.primary }}
-                  title="Demo: no file to download"
-                >
-                  <Download className="w-4 h-4" />
-                  Download the FTA import list
-                </button>
+                <Button tone="secondary" disabled fullWidthOnMobile>
+                  <Download className="w-4 h-4" aria-hidden />
+                  Download the FTA import list (not in the demo)
+                </Button>
               ) : (
-                <a
-                  href={`/api/vat-files/${token}/customs-list`}
-                  className={`inline-flex h-9 px-3.5 rounded-lg text-[13px] font-semibold text-white items-center justify-center gap-2 ${FOCUS}`}
-                  style={{ backgroundColor: TME_COLORS.primary }}
-                >
-                  <Download className="w-4 h-4" />
+                <ButtonLink href={`/api/vat-files/${token}/customs-list`} tone="secondary" fullWidthOnMobile>
+                  <Download className="w-4 h-4" aria-hidden />
                   Download the FTA import list
-                </a>
+                </ButtonLink>
               )}
               {!readOnly && (
-                <p className="text-xs text-gray-500">Fill in the yellow columns and upload the list again together with your documents.</p>
+                <p className="text-sm text-gray-600 sm:text-[13px]">Fill in the yellow columns and upload the list again together with your documents.</p>
               )}
             </div>
           )}
 
           {!readOnly && received.length > 0 && (
-            <details className="mt-3 pt-3 border-t border-gray-100 group">
-              <summary className={`text-[13px] font-medium cursor-pointer rounded inline-flex items-center gap-1.5 ${FOCUS}`} style={{ color: TME_COLORS.primary }}>
-                <CheckCircle className="w-4 h-4" style={{ color: TME_COLORS.success }} aria-hidden />
+            <details className="mt-4 pt-3 border-t border-gray-100 group">
+              <summary className="min-h-11 text-[15px] font-semibold cursor-pointer sm:min-h-9 sm:text-sm sm:font-medium rounded inline-flex items-center gap-2 text-tme-blue tme-btn-focus">
+                <CheckCircle className="w-[18px] h-[18px] text-green-700 sm:w-4 sm:h-4" aria-hidden />
                 Already received: {received.length} {received.length === 1 ? 'file' : 'files'}
               </summary>
-              <div className="mt-2.5">
+              <div className="mt-2">
                 <FileList files={received} />
               </div>
             </details>
           )}
-        </section>
+        </Card>
 
         {hasTable && (
           <CustomsTable
@@ -1787,47 +1684,40 @@ export default function VatFilesPage() {
 
         {/* Closed: what was sent, names only (no downloads), and the comment. */}
         {readOnly && (
-          <section className={`${CARD} p-4`} aria-labelledby="vat-sent-title">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 mb-2">
-              <h2 id="vat-sent-title" className="text-[13px] font-semibold" style={{ color: TME_COLORS.primary }}>
-                Files you sent
-                {received.length > 0 && <span className="font-normal text-gray-500"> ({received.length})</span>}
-              </h2>
-              {data?.customsAnswersSentAt && (
-                <p className="lg:hidden text-xs text-gray-500 tabular-nums">Answers last sent: {formatDubaiDateTime(data.customsAnswersSentAt)}</p>
-              )}
-            </div>
+          <Card
+            title={`Files you sent${received.length > 0 ? ` (${received.length})` : ''}`}
+            seed="vat-sent"
+          >
+            {data?.customsAnswersSentAt && !hasTable && (
+              <p className="mb-3 text-sm text-gray-600 tabular-nums sm:text-[13px]">Answers last sent: {formatDubaiDateTime(data.customsAnswersSentAt)}</p>
+            )}
             {received.length > 0 ? (
               <FileList files={received} withDate />
             ) : (
-              <p className="text-[13px] text-gray-500">No files were sent through this link.</p>
+              <p className="text-[15px] text-gray-600 sm:text-sm">No files were sent through this link.</p>
             )}
             {data?.clientComment && (
-              <div className="mt-4">
-                <p className="text-[13px] font-semibold mb-1.5" style={{ color: TME_COLORS.primary }}>
-                  Your comment
-                </p>
-                <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[13px] text-gray-800 whitespace-pre-line break-words">
+              <div className="mt-5">
+                <p className="text-[15px] font-semibold mb-1.5 text-tme-blue sm:text-sm sm:font-medium">Your comment</p>
+                <p className="rounded-[10px] border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-[15px] text-gray-800 whitespace-pre-line break-words sm:text-sm">
                   {data.clientComment}
                 </p>
               </div>
             )}
-          </section>
+          </Card>
         )}
 
         {/* Files, comment, Send */}
         {!readOnly && (
-          <section className={`${CARD} p-4`} aria-labelledby="vat-files-title">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 mb-2">
-              <h2 id="vat-files-title" className="text-[13px] font-semibold" style={{ color: TME_COLORS.primary }}>
-                {hasTable ? 'Other files' : 'Your files'}
-              </h2>
-              {hasTable && (
-                <p className="text-xs text-gray-500">
-                  Anything that does not belong to one import, or several documents at once. Files you add on a row above are listed here too.
-                </p>
-              )}
-            </div>
+          <Card
+            title={hasTable ? 'Other files' : 'Your files'}
+            seed="vat-files"
+            description={
+              hasTable
+                ? 'Anything that does not belong to one import, or several documents at once. Files you add on a row above are listed here too.'
+                : undefined
+            }
+          >
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
@@ -1842,24 +1732,19 @@ export default function VatFilesPage() {
                 addFiles(e.dataTransfer.files);
               }}
               disabled={sending}
-              className={`w-full border border-dashed rounded-lg transition-colors disabled:opacity-60 hover:bg-gray-50 ${FOCUS} ${
+              className={`w-full border-2 border-dashed rounded-[10px] transition-colors disabled:opacity-60 hover:bg-gray-50 tme-btn-focus ${
+                dragging ? 'border-tme-blue bg-tme-blue/[0.04]' : 'border-gray-300'
+              } ${
                 hasTable
-                  ? 'min-h-12 px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-left'
-                  : 'py-7 px-4 flex flex-col items-center justify-center gap-1.5'
+                  ? 'min-h-14 px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-left sm:min-h-12 sm:py-2.5'
+                  : 'py-8 px-4 flex flex-col items-center justify-center gap-2 sm:py-6'
               }`}
-              style={{
-                borderColor: dragging ? TME_COLORS.primary : '#D1D5DB',
-                backgroundColor: dragging ? 'rgba(36,63,123,0.04)' : undefined,
-              }}
             >
-              <UploadCloud className={hasTable ? 'w-[18px] h-[18px] shrink-0' : 'w-6 h-6'} style={{ color: TME_COLORS.primary }} aria-hidden />
-              <span className="text-[13px] text-gray-700 font-medium">
-                Drop files or{' '}
-                <span className="underline underline-offset-2" style={{ color: TME_COLORS.primary }}>
-                  browse
-                </span>
+              <UploadCloud className={`text-tme-blue ${hasTable ? 'w-5 h-5 shrink-0 sm:w-[18px] sm:h-[18px]' : 'w-7 h-7 sm:w-6 sm:h-6'}`} aria-hidden />
+              <span className="text-[15px] text-gray-800 font-medium sm:text-sm">
+                Drop files here or <span className="underline underline-offset-2 text-tme-blue">choose files</span>
               </span>
-              <span className={`text-xs text-gray-500 ${hasTable ? 'sm:ml-auto' : 'text-center'}`}>
+              <span className={`text-sm text-gray-600 sm:text-[13px] ${hasTable ? 'sm:ml-auto' : 'text-center'}`}>
                 PDF, Excel, Word, CSV, images or emails. Up to {MAX_MB} MB each.
               </span>
             </button>
@@ -1873,66 +1758,59 @@ export default function VatFilesPage() {
             />
 
             {pendingOk.length > 0 && (
-              <ul className="mt-2.5 flex flex-wrap gap-1.5" aria-label="Files to send">
+              <ul className="mt-3 divide-y divide-gray-100 rounded-[10px] border border-gray-200" aria-label="Files to send">
                 {pendingOk.map((item) => (
-                  <li
-                    key={item.id}
-                    className="inline-flex items-center gap-1.5 h-7 max-w-full pl-2 pr-0.5 rounded-full border border-gray-200 bg-gray-50 text-xs"
-                  >
+                  <li key={item.id} className="flex items-center gap-3 pl-3.5 pr-1 py-1.5 min-h-12 sm:min-h-10 sm:py-1">
                     {item.status === 'done' ? (
-                      <CheckCircle className="w-3.5 h-3.5 shrink-0" style={{ color: TME_COLORS.success }} aria-hidden />
+                      <CheckCircle className="w-[18px] h-[18px] shrink-0 text-green-700" aria-hidden />
                     ) : (
                       <Loader2
-                        className={`w-3.5 h-3.5 shrink-0 ${item.status === 'uploading' ? 'animate-spin' : ''}`}
-                        style={{ color: TME_COLORS.primary }}
+                        className={`w-[18px] h-[18px] shrink-0 text-tme-blue ${item.status === 'uploading' ? 'animate-spin' : ''}`}
                         aria-hidden
                       />
                     )}
-                    <span className="truncate min-w-0 max-w-[220px] text-gray-800" title={item.file.name}>
-                      {item.file.name}
-                    </span>
-                    {item.lineId && item.docKind && (
-                      <span className="shrink-0 rounded-full bg-white border border-gray-200 px-1.5 text-[11px] text-gray-600 whitespace-nowrap">
-                        Import {lineNoById.get(item.lineId) ?? ''} · {DOC_KIND_LABEL[item.docKind]}
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[15px] text-gray-900 break-all sm:text-sm">{item.file.name}</span>
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600 tabular-nums sm:text-[13px]">
+                        {item.lineId && item.docKind && (
+                          <span className="font-medium text-tme-blue">
+                            Import {lineNoById.get(item.lineId) ?? ''} · {DOC_KIND_LABEL[item.docKind]}
+                          </span>
+                        )}
+                        <span>
+                          {item.status === 'queued' ? 'Waiting…' : item.status === 'uploading' ? 'Uploading…' : formatBytes(item.file.size)}
+                        </span>
                       </span>
-                    )}
-                    <span className="shrink-0 text-gray-400 tabular-nums whitespace-nowrap">
-                      {item.status === 'queued' ? 'Waiting…' : item.status === 'uploading' ? 'Uploading…' : formatBytes(item.file.size)}
                     </span>
                     <button
                       type="button"
                       onClick={() => removeItem(item)}
                       disabled={item.status === 'uploading' || sending}
                       aria-label={`Remove ${item.file.name}`}
-                      title="Remove this file"
-                      className={`shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${FOCUS}`}
+                      className="shrink-0 inline-flex items-center justify-center size-11 rounded-[10px] sm:size-9 sm:rounded-lg tme-btn-danger-ghost transition-colors disabled:opacity-50 disabled:cursor-not-allowed tme-btn-focus"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-5 h-5 sm:w-4 sm:h-4" aria-hidden />
                     </button>
                   </li>
                 ))}
               </ul>
             )}
             {pendingFailed.length > 0 && (
-              <ul className="mt-2.5 space-y-1.5">
+              <ul className="mt-3 space-y-2">
                 {pendingFailed.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-start gap-2 rounded-lg px-3 py-2 border text-xs"
-                    style={{ backgroundColor: 'rgba(239,68,68,0.05)', borderColor: 'rgba(239,68,68,0.25)' }}
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: TME_COLORS.error }} aria-hidden />
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-gray-800 truncate">
+                  <li key={item.id} className="flex items-start gap-2.5 rounded-[10px] border border-red-200 bg-red-50 pl-3.5 pr-1 py-1.5">
+                    <AlertTriangle className="w-[18px] h-[18px] shrink-0 mt-2.5 text-tme-red sm:w-4 sm:h-4 sm:mt-2" aria-hidden />
+                    <span className="flex-1 min-w-0 py-2 text-sm sm:py-1.5 sm:text-[13px]">
+                      <span className="block text-[15px] text-gray-900 break-all sm:text-sm">
                         {item.file.name}
                         {item.lineId && item.docKind && (
-                          <span className="text-gray-500">
+                          <span className="text-gray-600">
                             {' '}
                             · Import {lineNoById.get(item.lineId) ?? ''} · {DOC_KIND_LABEL[item.docKind]}
                           </span>
                         )}
                       </span>
-                      <span className="block mt-0.5" style={{ color: TME_COLORS.error }}>
+                      <span className="block mt-0.5 font-medium text-tme-red" role="alert">
                         {item.error}
                       </span>
                     </span>
@@ -1941,34 +1819,33 @@ export default function VatFilesPage() {
                       onClick={() => removeItem(item)}
                       disabled={sending}
                       aria-label={`Remove ${item.file.name}`}
-                      title="Remove this file"
-                      className={`shrink-0 p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40 ${FOCUS}`}
+                      className="shrink-0 inline-flex items-center justify-center size-11 rounded-[10px] sm:size-9 sm:rounded-lg tme-btn-danger-ghost transition-colors disabled:opacity-50 tme-btn-focus"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-[18px] h-[18px] sm:w-4 sm:h-4" aria-hidden />
                     </button>
                   </li>
                 ))}
               </ul>
             )}
 
-            <div className="mt-4">
-              <label htmlFor="vat-files-comment" className="block text-[13px] font-semibold mb-1.5" style={{ color: TME_COLORS.primary }}>
-                Comment <span className="font-normal text-gray-500">(optional)</span>
+            <div className="mt-5">
+              <label htmlFor="vat-files-comment" className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium">
+                Comment <span className="font-normal text-gray-600">(optional)</span>
               </label>
               <textarea
                 id="vat-files-comment"
                 value={comment}
                 onChange={(e) => setComment(e.target.value.slice(0, VAT_FILES_MAX_COMMENT))}
-                rows={2}
+                rows={3}
                 placeholder={hasTable ? 'Anything we should know about these imports?' : 'Anything we should know about these files?'}
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-base sm:text-[13px] text-gray-900 placeholder:text-gray-400 transition-colors focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20"
+                className="w-full min-h-[46px] px-3.5 py-2.5 rounded-[10px] border-2 border-gray-200 bg-white text-base text-gray-900 placeholder:text-gray-500 transition-colors focus:outline-none focus:border-tme-blue sm:min-h-10 sm:px-3 sm:py-2 sm:rounded-lg sm:border sm:border-gray-300 sm:text-sm sm:focus:ring-2 sm:focus:ring-tme-blue/15"
               />
             </div>
 
-            <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+            <div className="mt-5 pt-5 border-t border-gray-100 space-y-3">
               {errorBanner}
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex-1 min-w-0 text-[13px] text-gray-600 space-y-0.5">
+                <div className="flex-1 min-w-0 text-[15px] leading-snug text-gray-700 space-y-1 sm:text-sm">
                   {hasTable && openCount > 0 && (
                     <p>
                       {openCount} {openCount === 1 ? 'import still needs answers' : 'imports still need answers'}. You can send now and finish
@@ -1976,19 +1853,19 @@ export default function VatFilesPage() {
                     </p>
                   )}
                   {hasTable && !unsent && done.length === 0 && data?.customsAnswersSentAt && (
-                    <p className="text-xs text-gray-500">
+                    <p className="text-sm text-gray-600 sm:text-[13px]">
                       Your answers are already with TME. Any change you make is sent with the next Send. Replies to TME questions cannot be
                       changed after Send.
                     </p>
                   )}
-                  {demo && <p className="text-xs text-gray-400">Demo page: nothing is saved.</p>}
+                  {demo && <p className="text-sm text-gray-600 sm:text-[13px]">Demo page: nothing is saved.</p>}
                 </div>
                 {sendButton('bottom')}
               </div>
             </div>
-          </section>
+          </Card>
         )}
-      </main>
+      </PageBody>
     </div>
   );
 }

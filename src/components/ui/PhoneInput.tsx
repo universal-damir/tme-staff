@@ -28,7 +28,7 @@ const getExpectedLength = (countryCode: Country): { min: number; max: number } =
   return { min: 7, max: 15 };
 };
 import en from 'react-phone-number-input/locale/en';
-import { TME_COLORS, INPUT_HEIGHT } from '@/lib/constants';
+import { FieldError } from './FormBits';
 import { ChevronDown, Search } from 'lucide-react';
 
 // Get country name from locale
@@ -105,7 +105,6 @@ export function PhoneInput({
   );
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [focused, setFocused] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isMounted, setIsMounted] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
@@ -294,23 +293,20 @@ export function PhoneInput({
   return (
     <div className="w-full phone-dropdown-container" ref={containerRef}>
       {label && (
-        <label
-          className="block text-sm font-medium mb-1"
-          style={{ color: TME_COLORS.primary }}
-        >
+        <label htmlFor={inputId} className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {required && (
+            <span className="text-tme-red ml-1" aria-hidden>
+              *
+            </span>
+          )}
         </label>
       )}
 
       <div
-        className={`flex items-center rounded-lg border-2 transition-all duration-200 overflow-hidden ${
-          error || invalid ? 'border-red-500' : focused ? '' : 'border-gray-200'
+        className={`flex items-center h-[46px] rounded-[10px] border-2 bg-white transition-[color,border-color,box-shadow] duration-200 overflow-hidden sm:h-10 sm:rounded-lg sm:border sm:focus-within:ring-[3px] ${
+          error || invalid ? 'border-tme-red sm:focus-within:ring-tme-red/15' : 'border-gray-200 sm:border-gray-300 focus-within:border-tme-blue sm:focus-within:border-tme-blue sm:focus-within:ring-tme-blue/15'
         }`}
-        style={{
-          height: INPUT_HEIGHT,
-          borderColor: error || invalid ? undefined : focused ? TME_COLORS.primary : undefined,
-        }}
       >
         {/* Country Selector */}
         <button
@@ -320,15 +316,15 @@ export function PhoneInput({
           aria-haspopup="listbox"
           aria-expanded={isOpen}
           aria-label={currentCountry ? `${currentCountry.name} +${currentCountry.callingCode}` : undefined}
-          className={`flex items-center gap-1 px-3 h-full border-r border-gray-200 bg-gray-50 ${
-            isLocked || disabled ? 'cursor-default' : 'cursor-pointer hover:bg-gray-100'
+          className={`flex items-center gap-1.5 px-3 sm:px-2.5 h-full border-r border-gray-200 bg-gray-50 focus:outline-none focus-visible:bg-blue-50 ${
+            isLocked || disabled ? 'cursor-default' : 'cursor-pointer hover:bg-blue-50'
           }`}
-          style={{ minWidth: isLocked ? 'auto' : '90px' }}
+          style={{ minWidth: isLocked ? 'auto' : '96px' }}
         >
-          <span className="text-base">{getFlagEmoji(selectedCountry)}</span>
-          <span className="text-sm text-gray-700">+{currentCountry?.callingCode}</span>
+          <span className="text-lg" aria-hidden>{getFlagEmoji(selectedCountry)}</span>
+          <span className="text-base sm:text-sm text-gray-900">+{currentCountry?.callingCode}</span>
           {!isLocked && !disabled && (
-            <ChevronDown className="w-4 h-4 text-gray-400 ml-auto" />
+            <ChevronDown className="w-4 h-4 text-tme-blue ml-auto" aria-hidden />
           )}
         </button>
 
@@ -344,29 +340,26 @@ export function PhoneInput({
           aria-invalid={error || invalid ? true : undefined}
           value={inputValue}
           onChange={handleInputChange}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           placeholder={placeholder || 'Enter phone number'}
           disabled={disabled}
-          className="flex-1 h-full px-3 outline-none text-sm bg-transparent"
-          style={{ fontFamily: 'Inter, sans-serif' }}
+          className="flex-1 min-w-0 h-full px-3.5 sm:px-3 outline-none text-base md:text-sm text-gray-900 bg-transparent placeholder:text-gray-500"
         />
       </div>
 
       {/* Error message */}
-      {error && <p className="mt-1 text-sm text-red-500">{error}</p>}
+      <FieldError>{error}</FieldError>
 
       {/* Validation feedback */}
       {!error && showValidation && validationState === 'too_short' && (
-        <p className="mt-1 text-sm text-amber-600">
+        <p className="mt-1.5 text-sm text-amber-800 sm:mt-1 sm:text-[13px]">
           Enter at least {expectedLength.min} digits
         </p>
       )}
       {!error && showValidation && validationState === 'invalid' && (
-        <p className="mt-1 text-sm text-amber-600">Invalid phone number</p>
+        <p className="mt-1.5 text-sm text-amber-800 sm:mt-1 sm:text-[13px]">Invalid phone number</p>
       )}
       {!error && showValidation && validationState === 'valid' && (
-        <p className="mt-1 text-sm text-green-600">Valid number</p>
+        <p className="mt-1.5 text-sm text-green-800 sm:mt-1 sm:text-[13px]">Valid number</p>
       )}
 
       {/* Country Dropdown Portal */}
@@ -374,7 +367,7 @@ export function PhoneInput({
         isOpen &&
         createPortal(
           <div
-            className="phone-dropdown-portal fixed z-[9999] bg-white rounded-lg shadow-xl border border-gray-200"
+            className="phone-dropdown-portal fixed z-[9999] bg-white rounded-[10px] shadow-xl border-2 border-tme-blue overflow-hidden"
             style={{
               top: dropdownPosition.top,
               left: dropdownPosition.left,
@@ -385,41 +378,42 @@ export function PhoneInput({
             {/* Search */}
             <div className="p-2 border-b border-gray-100">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" aria-hidden />
                 <input
                   ref={searchInputRef}
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                                     placeholder={searchPlaceholder || 'Search country...'}
-                  className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500"
-                  style={{ fontFamily: 'Inter, sans-serif' }}
+                  className="w-full h-11 pl-9 pr-3 text-base border-2 border-gray-200 rounded-[10px] focus:outline-none focus:border-tme-blue sm:h-9 sm:border sm:border-gray-300 sm:rounded-lg md:text-sm sm:focus:border-tme-blue"
                 />
               </div>
             </div>
 
             {/* Country List */}
-            <div className="overflow-y-auto" style={{ maxHeight: '240px' }}>
+            <div className="overflow-y-auto overscroll-contain" role="listbox" style={{ maxHeight: '240px' }}>
               <AnimatePresence>
                 {filteredCountries.map((country) => (
                   <motion.button
                     key={country.code}
                     type="button"
                     onClick={() => handleCountrySelect(country.code)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50 transition-colors ${
-                      selectedCountry === country.code ? 'bg-blue-50' : ''
+                    role="option"
+                    aria-selected={selectedCountry === country.code}
+                    className={`w-full min-h-11 sm:min-h-9 flex items-center gap-3 px-3.5 sm:px-3 py-2 sm:py-1.5 text-left hover:bg-blue-50 transition-colors ${
+                      selectedCountry === country.code ? 'bg-blue-100' : ''
                     }`}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                   >
-                    <span className="text-lg">{getFlagEmoji(country.code)}</span>
-                    <span className="flex-1 text-sm text-gray-900">{country.name}</span>
-                    <span className="text-sm text-gray-500">+{country.callingCode}</span>
+                    <span className="text-lg" aria-hidden>{getFlagEmoji(country.code)}</span>
+                    <span className="flex-1 text-[15px] sm:text-sm text-gray-900">{country.name}</span>
+                    <span className="text-[15px] sm:text-[13px] text-gray-600">+{country.callingCode}</span>
                   </motion.button>
                 ))}
                 {filteredCountries.length === 0 && (
-                  <div className="px-3 py-4 text-sm text-gray-500 text-center">
+                  <div className="px-3 py-4 text-[15px] sm:text-sm text-gray-600 text-center">
                     {noOptionsText || 'No countries found'}
                   </div>
                 )}

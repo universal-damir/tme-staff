@@ -2,8 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, X, Check, RotateCcw } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
 import { useIsMobile } from '@/lib/useIsMobile';
+import { Button } from '@/components/ui/Button';
 import PerspT from 'perspective-transform';
 
 const HANDLE_SIZE = 28;
@@ -399,28 +399,24 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col select-none"
+      className="fixed inset-0 z-50 flex flex-col select-none bg-[#f5f5f5]"
       style={{
-        backgroundColor: TME_COLORS.background,
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
         WebkitUserSelect: 'none',
         WebkitTouchCallout: 'none',
       }}
     >
-      <div
-        className="flex items-center justify-between p-3"
-        style={{ color: TME_COLORS.primary }}
-      >
+      <div className="flex items-center justify-between gap-2 px-1.5 py-1 text-tme-blue border-b border-gray-200 bg-white">
         <button
           type="button"
           onClick={onCancel}
-          className="p-2 -m-2"
+          className="size-11 inline-flex items-center justify-center rounded-full hover:bg-blue-50 tme-btn-focus"
           aria-label="Cancel"
         >
-          <X className="w-5 h-5" />
+          <X className="w-5 h-5" aria-hidden />
         </button>
-        <span className="text-sm font-medium">
+        <span className="text-[15px] font-semibold text-center">
           {mode === 'preview' ? 'Preview' : 'Drag corners to passport edges'}
         </span>
         {mode === 'edit' || mode === 'processing' ? (
@@ -428,21 +424,18 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
             type="button"
             onClick={handleReset}
             disabled={!corners}
-            className="p-2 -m-2 disabled:opacity-30"
+            className="size-11 inline-flex items-center justify-center rounded-full hover:bg-blue-50 disabled:opacity-40 tme-btn-focus"
             aria-label="Reset corners"
           >
-            <RotateCcw className="w-5 h-5" />
+            <RotateCcw className="w-5 h-5" aria-hidden />
           </button>
         ) : (
-          <span className="w-5 h-5 inline-block" />
+          <span className="size-11 inline-block" aria-hidden />
         )}
       </div>
 
       {mode === 'edit' && (
-        <div
-          className="px-4 pb-2 text-xs text-center"
-          style={{ color: TME_COLORS.primary, opacity: 0.7 }}
-        >
+        <div className="px-4 py-2 text-sm text-center text-gray-700">
           Tip: press the passport flat against a surface for sharpest results.
         </div>
       )}
@@ -476,8 +469,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
         {!imgSize && !errMsg && mode !== 'preview' && (
           <div
-            className="absolute inset-0 flex items-center justify-center text-sm"
-            style={{ color: TME_COLORS.primary }}
+            className="absolute inset-0 flex items-center justify-center text-sm text-tme-blue"
           >
             <Loader2 className="w-6 h-6 animate-spin mr-2" />
             Loading…
@@ -485,7 +477,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         )}
 
         {errMsg && mode !== 'preview' && (
-          <div className="absolute inset-0 flex items-center justify-center text-red-600 text-sm px-6 text-center">
+          <div className="absolute inset-0 flex items-center justify-center text-tme-red text-[15px] font-medium px-6 text-center" role="alert">
             {errMsg}
           </div>
         )}
@@ -550,8 +542,7 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
 
         {mode === 'processing' && (
           <div
-            className="absolute inset-0 flex items-center justify-center text-sm"
-            style={{ backgroundColor: 'rgba(245,245,245,0.85)', color: TME_COLORS.primary }}
+            className="absolute inset-0 flex items-center justify-center text-sm text-tme-blue bg-[rgba(245,245,245,0.85)]"
           >
             <Loader2 className="w-6 h-6 animate-spin mr-2" />
             Flattening…
@@ -559,66 +550,37 @@ export function DocumentScanner({ file, onConfirm, onCancel }: DocumentScannerPr
         )}
       </div>
 
-      <div className="p-3 flex flex-col gap-2">
+      <div className="p-3 flex flex-col gap-2 border-t border-gray-200 bg-white">
         {mode === 'preview' ? (
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleAdjust}
-              className="flex-1 py-3 rounded-lg font-medium border"
-              style={{
-                backgroundColor: '#FFFFFF',
-                color: TME_COLORS.primary,
-                borderColor: TME_COLORS.border,
-              }}
-            >
+            <Button tone="plain" className="flex-1" onClick={handleAdjust}>
               Adjust
-            </button>
-            <button
-              type="button"
-              onClick={handleApprove}
-              className="flex-1 py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2"
-              style={{ backgroundColor: TME_COLORS.primary }}
-            >
-              <Check className="w-4 h-4" />
+            </Button>
+            <Button tone="primary" className="flex-1" onClick={handleApprove}>
+              <Check className="w-4 h-4" aria-hidden />
               Upload
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="flex-1 py-3 rounded-lg font-medium border"
-              style={{
-                backgroundColor: '#FFFFFF',
-                color: TME_COLORS.primary,
-                borderColor: TME_COLORS.border,
-              }}
-            >
+            <Button tone="plain" className="flex-1" onClick={onCancel}>
               Cancel
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              tone="primary"
+              className="flex-1"
               onClick={handleConfirm}
               disabled={!corners || mode === 'processing'}
-              className="flex-1 py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2 disabled:opacity-40"
-              style={{ backgroundColor: TME_COLORS.primary }}
             >
-              <Check className="w-4 h-4" />
+              <Check className="w-4 h-4" aria-hidden />
               Use scan
-            </button>
+            </Button>
           </div>
         )}
         {(errMsg || !imgSize) && mode !== 'preview' && (
-          <button
-            type="button"
-            onClick={handleUseOriginal}
-            className="w-full py-2 text-sm underline"
-            style={{ color: TME_COLORS.primary, opacity: 0.8 }}
-          >
+          <Button tone="ghost" className="w-full" onClick={handleUseOriginal}>
             Use original photo (skip scan)
-          </button>
+          </Button>
         )}
       </div>
     </div>

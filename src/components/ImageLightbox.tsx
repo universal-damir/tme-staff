@@ -2,7 +2,6 @@
 
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
 
 interface ImageLightboxProps {
   src: string;
@@ -32,7 +31,7 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{
-        backgroundColor: TME_COLORS.background,
+        backgroundColor: '#F4F6F9',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
@@ -44,11 +43,11 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
       <button
         type="button"
         onClick={onClose}
-        className="absolute top-3 right-3 p-2"
-        style={{ color: TME_COLORS.primary }}
+        className="absolute right-3 size-11 sm:size-9 inline-flex items-center justify-center rounded-full bg-white border border-gray-200 shadow-sm text-tme-blue hover:bg-blue-50 transition-colors tme-btn-focus z-10"
+        style={{ top: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
         aria-label="Close preview"
       >
-        <X className="w-6 h-6" />
+        <X className="w-6 h-6" aria-hidden />
       </button>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img

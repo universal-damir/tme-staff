@@ -206,9 +206,11 @@ describe('label and help: four levels', () => {
     // Four different looks.
     expect(new Set([en.className, de.className, helpEn.className, helpDe.className]).size).toBe(4);
     expect(EKYC_TYPE.labelEn).toContain('text-[15px]');
-    expect(EKYC_TYPE.labelDe).toContain('text-[13px]');
-    expect(EKYC_TYPE.helpEn).toContain('text-[13px]');
-    expect(EKYC_TYPE.helpDe).toContain('italic');
+    // Readability (22.10.2026): German and help lines at least 14px, gray-600, never italic.
+    expect(EKYC_TYPE.labelDe).toContain('text-sm');
+    expect(EKYC_TYPE.helpEn).toContain('text-sm');
+    expect(EKYC_TYPE.helpDe).toContain('text-gray-600');
+    expect(EKYC_TYPE.helpDe).not.toContain('italic');
     // The help is its own element with an info icon, outside the label.
     const help = document.getElementById('ekyc-f-hint') as HTMLElement;
     expect(help.querySelector('svg')).toBeTruthy();
@@ -226,7 +228,7 @@ describe('label and help: four levels', () => {
 });
 
 describe('lines: one box per activity', () => {
-  const boxes = () => Array.from(document.querySelectorAll<HTMLInputElement>('input[id^="ekyc-f"]'));
+  const boxes = () => Array.from(document.querySelectorAll<HTMLTextAreaElement>('textarea[id^="ekyc-f"]'));
 
   it('the stored text splits into boxes; empty lines are dropped', () => {
     expect(ekycLinesFromValue('Trading\n\nConsulting')).toEqual(['Trading', 'Consulting']);

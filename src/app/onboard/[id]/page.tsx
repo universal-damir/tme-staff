@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { TME_COLORS } from '@/lib/constants';
 import { FormProgress } from '@/components/FormProgress';
 import { EmployerForm } from '@/components/EmployerForm';
 import { EmployerRecallStatus } from '@/components/EmployerRecallStatus';
@@ -15,7 +14,8 @@ import type {
   EmployeeFormData,
   EmployerStatusView,
 } from '@/types';
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Lock, Info } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, AlertCircle, Lock, Info } from 'lucide-react';
+import { Card, ClientPageHeader, PageBody } from '@/components/ui';
 import { RECALLED_MESSAGE } from '@/lib/submit-validation';
 import { sponsorshipTypeFromSponsor } from '@/lib/staff-form-logic';
 import {
@@ -64,24 +64,68 @@ function RedirectTimer() {
   return (
     <a
       href="https://tme-services.com"
-      className="inline-block mt-4 text-sm hover:underline"
-      style={{ color: TME_COLORS.primary }}
+      className="inline-flex items-center min-h-11 mt-2 text-[15px] font-medium text-tme-blue underline-offset-2 hover:underline sm:text-sm sm:min-h-9"
     >
       Redirecting to TME Services in {seconds > 0 ? seconds : 0}s...
     </a>
   );
 }
 
+type StatusTone = 'red' | 'amber' | 'green';
+
+const STATUS_ICON_BG: Record<StatusTone, string> = {
+  red: 'bg-red-100 text-tme-red',
+  amber: 'bg-amber-100 text-amber-700',
+  green: 'bg-green-100 text-green-700',
+};
+
+/**
+ * One layout for every end / problem state of the link (invalid, expired,
+ * cancelled, done ...): cloud header with the title, one white card with the
+ * icon and the explanation.
+ */
+function StatusScreen({
+  title,
+  icon: Icon,
+  tone,
+  children,
+}: {
+  title: string;
+  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  tone: StatusTone;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen bg-tme-page">
+      <ClientPageHeader title={title} />
+      <PageBody>
+        <Card>
+          <div className="flex items-start gap-4">
+            <div className={`w-12 h-12 rounded-full shrink-0 flex items-center justify-center ${STATUS_ICON_BG[tone]}`}>
+              <Icon className="w-6 h-6" aria-hidden />
+            </div>
+            <div className="pt-2.5 text-base leading-normal text-gray-700 sm:text-sm">{children}</div>
+          </div>
+        </Card>
+      </PageBody>
+    </div>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen bg-tme-page flex items-center justify-center p-4">
+      <div className="text-center" role="status">
+        <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-tme-blue" aria-hidden />
+        <p className="text-base text-gray-600 sm:text-sm">Loading your form...</p>
+      </div>
+    </div>
+  );
+}
+
 export default function OnboardingPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4" style={{ color: TME_COLORS.primary }} />
-          <p className="text-gray-600">Loading your form...</p>
-        </div>
-      </div>
-    }>
+    <Suspense fallback={<LoadingScreen />}>
       <OnboardingPageInner />
     </Suspense>
   );
@@ -394,88 +438,54 @@ function OnboardingPageInner() {
 
   // Loading state
   if (pageState === 'loading') {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="text-center">
-          <Loader2
-            className="w-12 h-12 animate-spin mx-auto mb-4"
-            style={{ color: TME_COLORS.primary }}
-          />
-          <p className="text-gray-600">Loading your form...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   // Not found state
   if (pageState === 'not_found') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-red-100 mx-auto mb-6 flex items-center justify-center">
-            <XCircle className="w-8 h-8 text-red-500" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Link Invalid</h1>
-          <p className="text-gray-600">
-            This link is invalid or has expired. If you believe this is an error,
-            please contact your HR representative.
-          </p>
-        </div>
-      </div>
+      <StatusScreen title="Link invalid" icon={XCircle} tone="red">
+        <p>
+          This link is invalid or has expired. If you believe this is an error,
+          please contact your HR representative.
+        </p>
+      </StatusScreen>
     );
   }
 
   // Cancelled state
   if (pageState === 'cancelled') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-yellow-100 mx-auto mb-6 flex items-center justify-center">
-            <AlertTriangle className="w-8 h-8 text-yellow-500" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Form Cancelled</h1>
-          <p className="text-gray-600">
-            This form has been cancelled. Please contact your HR
-            representative for more information.
-          </p>
-        </div>
-      </div>
+      <StatusScreen title="Form cancelled" icon={AlertTriangle} tone="amber">
+        <p>
+          This form has been cancelled. Please contact your HR
+          representative for more information.
+        </p>
+      </StatusScreen>
     );
   }
 
   // Expired state — link past 14-day window
   if (pageState === 'expired') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-yellow-100 mx-auto mb-6 flex items-center justify-center">
-            <AlertTriangle className="w-8 h-8 text-yellow-500" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Link Expired</h1>
-          <p className="text-gray-600">
-            This onboarding link has expired. Please ask your HR
-            representative to send you a new one.
-          </p>
-        </div>
-      </div>
+      <StatusScreen title="Link expired" icon={AlertTriangle} tone="amber">
+        <p>
+          This onboarding link has expired. Please ask your HR
+          representative to send you a new one.
+        </p>
+      </StatusScreen>
     );
   }
 
   // Already complete state
   if (pageState === 'already_complete') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-green-100 mx-auto mb-6 flex items-center justify-center">
-            <CheckCircle className="w-8 h-8 text-green-500" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Already Completed</h1>
-          <p className="text-gray-600">
-            This form has already been submitted. Thank you for completing
-            the process.
-          </p>
-        </div>
-      </div>
+      <StatusScreen title="Already completed" icon={CheckCircle} tone="green">
+        <p>
+          This form has already been submitted. Thank you for completing
+          the process.
+        </p>
+      </StatusScreen>
     );
   }
 
@@ -499,81 +509,57 @@ function OnboardingPageInner() {
   // Employee opened a link the employer has withdrawn to make a correction
   if (pageState === 'recalled') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-yellow-100 mx-auto mb-6 flex items-center justify-center">
-            <AlertTriangle className="w-8 h-8 text-yellow-500" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Form withdrawn</h1>
-          <p className="text-gray-600">{RECALLED_MESSAGE}</p>
-        </div>
-      </div>
+      <StatusScreen title="Form withdrawn" icon={AlertTriangle} tone="amber">
+        <p>{RECALLED_MESSAGE}</p>
+      </StatusScreen>
     );
   }
 
   // Token required state (employee access without valid token)
   if (pageState === 'token_required') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-yellow-100 mx-auto mb-6 flex items-center justify-center">
-            <Lock className="w-8 h-8 text-yellow-500" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Authentication Required</h1>
-          <p className="text-gray-600">
-            Please use the link sent to your email to access this form.
-            If you haven&apos;t received the email, please contact your HR representative.
-          </p>
-        </div>
-      </div>
+      <StatusScreen title="Email link needed" icon={Lock} tone="amber">
+        <p>
+          Please use the link sent to your email to access this form.
+          If you haven&apos;t received the email, please contact your HR representative.
+        </p>
+      </StatusScreen>
     );
   }
 
   // Success state — auto-redirect to TME website after 5 seconds
   if (pageState === 'success') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="w-20 h-20 rounded-full bg-green-100 mx-auto mb-6 flex items-center justify-center">
-            <CheckCircle className="w-10 h-10 text-green-500" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">Thank You!</h1>
-          <p className="text-gray-600 mb-6">
-            {submission?.onboarding_type === 'document_request'
-              ? 'Your documents have been submitted successfully.'
-              : submission?.onboarding_type === 'dependent_document_request'
-              ? "The dependent's documents have been submitted successfully."
-              : submission?.onboarding_type === 'dependent_renewal'
-              ? 'The renewal details have been submitted successfully. TME Services will review them and get in touch.'
-              : submission?.onboarding_type === 'dependent'
-              ? 'The dependent details have been submitted successfully. TME Services will review them and get in touch.'
-              : submission?.is_same_person
-              ? 'Your form has been submitted successfully.'
-              : !isPartnerInvestorTrack && pageState === 'success' && submission?.current_step === 'employer'
-              ? (employeeNotified === false
-                  ? 'The employer section has been completed. TME Services will send the employee their link.'
-                  : 'The employer section has been completed. An email has been sent to the employee to complete their section.')
-              : 'Your form has been submitted successfully.'}
-          </p>
-          <p className="text-sm text-gray-400">You will be redirected shortly...</p>
-          <RedirectTimer />
-        </div>
-      </div>
+      <StatusScreen title="Thank you" icon={CheckCircle} tone="green">
+        <p className="mb-3">
+          {submission?.onboarding_type === 'document_request'
+            ? 'Your documents have been submitted successfully.'
+            : submission?.onboarding_type === 'dependent_document_request'
+            ? "The dependent's documents have been submitted successfully."
+            : submission?.onboarding_type === 'dependent_renewal'
+            ? 'The renewal details have been submitted successfully. TME Services will review them and get in touch.'
+            : submission?.onboarding_type === 'dependent'
+            ? 'The dependent details have been submitted successfully. TME Services will review them and get in touch.'
+            : submission?.is_same_person
+            ? 'Your form has been submitted successfully.'
+            : !isPartnerInvestorTrack && pageState === 'success' && submission?.current_step === 'employer'
+            ? (employeeNotified === false
+                ? 'The employer section has been completed. TME Services will send the employee their link.'
+                : 'The employer section has been completed. An email has been sent to the employee to complete their section.')
+            : 'Your form has been submitted successfully.'}
+        </p>
+        <p className="text-[15px] text-gray-600 sm:text-sm">You will be redirected shortly...</p>
+        <RedirectTimer />
+      </StatusScreen>
     );
   }
 
   // Error state
   if (pageState === 'error') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-red-100 mx-auto mb-6 flex items-center justify-center">
-            <XCircle className="w-8 h-8 text-red-500" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Something Went Wrong</h1>
-          <p className="text-gray-600">{error || 'An unexpected error occurred.'}</p>
-        </div>
-      </div>
+      <StatusScreen title="Something went wrong" icon={XCircle} tone="red">
+        <p>{error || 'An unexpected error occurred.'}</p>
+      </StatusScreen>
     );
   }
 
@@ -602,10 +588,18 @@ function OnboardingPageInner() {
   // sponsor, which can still say Company on a dependent-visa holder.
   const isEmploymentIdRenewal = submission.prefill_employer_data?.renewal_kind === 'labour_card';
   const isShowingEmployer = pageState === 'employer' || (pageState === 'combined' && !showEmployeeSection);
-  // Widen the page only for the renewal employer step, where Salary Contract +
-  // Payroll render side-by-side. Other steps (employee form, success states)
-  // stay at the narrower default width.
-  const containerWidthClass = isRenewal && isShowingEmployer ? 'max-w-6xl' : 'max-w-3xl';
+  // Area name above the title in the header band. Document requests and
+  // dependent flows are their own areas; otherwise it names the part of the
+  // form on screen (employer part, or the employee / applicant part).
+  const headerEyebrow = isDocumentRequest
+    ? 'Document request'
+    : isDependent
+    ? 'Dependent visa'
+    : isShowingEmployer
+    ? 'Employer details'
+    : isPartnerInvestorTrack
+    ? 'Partner / Investor visa'
+    : 'Employee onboarding';
 
   // Sponsor flows are ABOUT the dependent but ADDRESSED to the sponsor, so the
   // header names the dependent and the sub-line names the sponsor. The portal
@@ -630,43 +624,37 @@ function OnboardingPageInner() {
     ? dependentPrefill.dependent_type.toLowerCase()
     : 'dependent';
 
-  return (
-    <main className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className={`${containerWidthClass} mx-auto`}>
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1
-            className="text-2xl md:text-3xl font-bold mb-2"
-            style={{ color: TME_COLORS.primary }}
-          >
-            {isDependentDocumentRequest
-              ? `Document Upload for ${dependentName}`
-              : isDocumentRequest
-              ? `Document Re-Upload${submission.staff_name ? ` for ${submission.staff_name}` : ''}`
-              : isDependentRenewal ? 'Dependent Visa Renewal'
-              : isDependent ? 'Dependent Onboarding'
-              : isPartnerInvestorTrack
-              ? (isRenewal ? 'Partner / Investor Visa Renewal' : 'Partner / Investor Visa Application')
-              : isRenewal
-              ? (headerSponsorshipType === 'company' && !isEmploymentIdRenewal
-                  ? 'Staff Visa Renewal'
-                  : 'Staff Employment ID Renewal')
-              : submission.onboarding_type === 'cancel_copy'
-              ? 'Confirm Staff Details'
-              : 'Staff Onboarding'}
-          </h1>
-          {isDependentDocumentRequest ? (
-            <p className="text-gray-600">
-              You are uploading these documents for your {dependentRelationship}
-              {sponsorName ? <> as their sponsor (<span className="font-medium">{sponsorName}</span>)</> : null}.
-            </p>
-          ) : !isDocumentRequest && submission.staff_name ? (
-            <p className="text-gray-600">
-              <span className="font-medium">{submission.staff_name}</span>
-            </p>
-          ) : null}
-        </div>
+  const headerTitle = isDependentDocumentRequest
+    ? `Document Upload for ${dependentName}`
+    : isDocumentRequest
+    ? `Document Re-Upload${submission.staff_name ? ` for ${submission.staff_name}` : ''}`
+    : isDependentRenewal ? 'Dependent Visa Renewal'
+    : isDependent ? 'Dependent Onboarding'
+    : isPartnerInvestorTrack
+    ? (isRenewal ? 'Partner / Investor Visa Renewal' : 'Partner / Investor Visa Application')
+    : isRenewal
+    ? (headerSponsorshipType === 'company' && !isEmploymentIdRenewal
+        ? 'Staff Visa Renewal'
+        : 'Staff Employment ID Renewal')
+    : submission.onboarding_type === 'cancel_copy'
+    ? 'Confirm Staff Details'
+    : 'Staff Onboarding';
 
+  const headerSubtitle = isDependentDocumentRequest ? (
+    <>
+      You are uploading these documents for your {dependentRelationship}
+      {sponsorName ? <> as their sponsor (<span className="font-medium text-gray-700">{sponsorName}</span>)</> : null}.
+    </>
+  ) : !isDocumentRequest && submission.staff_name ? (
+    <span className="font-medium text-gray-700">{submission.staff_name}</span>
+  ) : undefined;
+
+  return (
+    <div className="min-h-screen bg-tme-page">
+      {/* Header band. Never sticky and never a `progress` bar here: the
+          employee and dependent forms bring their own sticky step bar, and
+          only one sticky element may sit at the top. */}
+      <ClientPageHeader eyebrow={headerEyebrow} title={headerTitle} subtitle={headerSubtitle}>
         {/* Progress — the employer/employee step bar makes no sense for a
             document re-request (single upload step, no signature), a
             dependent registration (single-stage form with its own step bar),
@@ -677,87 +665,85 @@ function OnboardingPageInner() {
             isSamePerson={submission.is_same_person}
           />
         )}
+      </ClientPageHeader>
 
-        {/* Forms */}
-        <div className="space-y-8">
-          {/* Employer Form - Show in employer state or combined mode before employee */}
-          {pageState === 'employer' && submission.employer_recalled && (
-            <div
-              className="p-4 rounded-lg flex items-start gap-3 border-2"
-              style={{ backgroundColor: '#F3F5FA', borderColor: TME_COLORS.primary }}
-            >
-              <Info className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: TME_COLORS.primary }} />
-              <p className="text-sm" style={{ color: TME_COLORS.primary }}>
-                You took this form back to correct it. Your previous answers are filled in. Check
-                them, make your changes and sign again. We will then send{' '}
-                {(submission.staff_name ?? '').trim() || 'the employee'} a new email with a new link.
-              </p>
-            </div>
-          )}
-          {(pageState === 'employer' || (pageState === 'combined' && !showEmployeeSection)) && (
-            <EmployerForm
-              submission={submission}
-              onSubmit={handleEmployerSubmit}
-              isSubmitting={isSubmitting}
-              isRenewal={isRenewal}
-              employerToken={employerToken}
-            />
-          )}
+      <PageBody>
+        {/* Employer Form - Show in employer state or combined mode before employee */}
+        {pageState === 'employer' && submission.employer_recalled && (
+          <div className="p-4 rounded-[14px] flex items-start gap-3 border border-tme-line bg-[#F3F5FA]">
+            <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-tme-blue" aria-hidden />
+            <p className="text-[15px] leading-normal text-tme-blue sm:text-sm">
+              You took this form back to correct it. Your previous answers are filled in. Check
+              them, make your changes and sign again. We will then send{' '}
+              {(submission.staff_name ?? '').trim() || 'the employee'} a new email with a new link.
+            </p>
+          </div>
+        )}
+        {isShowingEmployer && (
+          <EmployerForm
+            submission={submission}
+            onSubmit={handleEmployerSubmit}
+            isSubmitting={isSubmitting}
+            isRenewal={isRenewal}
+            employerToken={employerToken}
+          />
+        )}
 
-          {/* Employee Form - Show in employee state or combined mode after employer */}
-          {(pageState === 'employee' || (pageState === 'combined' && showEmployeeSection)) && (
-            <EmployeeForm
-              submission={submission}
-              onSubmit={handleEmployeeSubmit}
-              isSubmitting={isSubmitting}
-              reuseEmployerSignature={submission.is_same_person}
-            />
-          )}
+        {/* Employee Form - Show in employee state or combined mode after employer */}
+        {(pageState === 'employee' || (pageState === 'combined' && showEmployeeSection)) && (
+          <EmployeeForm
+            submission={submission}
+            onSubmit={handleEmployeeSubmit}
+            isSubmitting={isSubmitting}
+            reuseEmployerSignature={submission.is_same_person}
+          />
+        )}
 
-          {/* Document Re-Request — only the requested document slots */}
-          {pageState === 'document_request' && (
-            <DocumentRequestForm
-              submission={submission}
-              onSubmitted={() => setPageState('success')}
-            />
-          )}
+        {/* Document Re-Request — only the requested document slots */}
+        {pageState === 'document_request' && (
+          <DocumentRequestForm
+            submission={submission}
+            onSubmitted={() => setPageState('success')}
+          />
+        )}
 
-          {/* Dependent Onboarding — sponsor fills in one form for their
-              dependent (own steps + signature, submits itself). */}
-          {pageState === 'dependent' && (
-            <DependentForm
-              submission={submission}
-              onSubmitted={() => setPageState('success')}
-            />
-          )}
+        {/* Dependent Onboarding — sponsor fills in one form for their
+            dependent (own steps + signature, submits itself). */}
+        {pageState === 'dependent' && (
+          <DependentForm
+            submission={submission}
+            onSubmitted={() => setPageState('success')}
+          />
+        )}
 
-          {/* Error banner — rendered at the bottom of the form area so it
-              sits just under the Submit button. A top-of-page banner would
-              be off-screen after the user scrolled through the form, leaving
-              failed submits looking like "nothing happened". */}
-          {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          )}
-        </div>
+        {/* Error banner — rendered right under the form so it sits just
+            below the Submit button. A top-of-page banner would be off-screen
+            after the user scrolled through the form, leaving failed submits
+            looking like "nothing happened". */}
+        {error && (
+          <div
+            role="alert"
+            className="p-4 bg-red-50 border-2 border-red-200 rounded-[10px] flex items-start gap-2"
+          >
+            <AlertCircle className="w-5 h-5 text-tme-red flex-shrink-0 mt-px" aria-hidden />
+            <p className="text-[15px] font-medium leading-snug text-tme-red sm:text-[13px]">{error}</p>
+          </div>
+        )}
 
         {/* Footer */}
-        <div className="mt-12 text-center text-sm text-gray-400">
+        <footer className="pt-6 text-center text-sm text-gray-600 sm:text-[13px]">
           <p>TME Services - {isPartnerInvestorTrack ? `Visa ${isRenewal ? 'Renewal' : 'Application'}` : `Staff ${isDocumentRequest ? 'Document' : isDependent ? 'Dependent' : isRenewal ? 'Renewal' : 'Onboarding'}`} Portal</p>
           <p className="mt-1">
             Need help?{' '}
             <a
               href="mailto:portal@tme-services.com"
-              className="underline"
-              style={{ color: TME_COLORS.primary }}
+              className="inline-flex items-center min-h-11 font-medium text-tme-blue underline underline-offset-2 sm:min-h-9"
             >
               Contact us
             </a>
           </p>
-        </div>
-      </div>
-    </main>
+        </footer>
+      </PageBody>
+    </div>
   );
 }

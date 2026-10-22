@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { TME_COLORS } from '@/lib/constants';
 import {
   FormSection,
   StepNavButtons,
   StepProgress,
   InfoNote,
+  WarningNote,
 } from './chrome';
 import { StepActivities } from './StepActivities';
 import { StepNames, type AiNameIssue } from './StepNames';
@@ -30,7 +30,7 @@ import { validateCompanyName } from '@/lib/company-setup-name-validation';
 import { requestJson, failureMessage, FAILURE_MESSAGES } from '@/lib/request-outcome';
 import { uploadFileToRoute } from '@/lib/upload-client';
 import type { UploadResult } from '@/lib/supabase';
-import { Input, PhoneInput } from '@/components/ui';
+import { Button, FormFooter, Input, PageBody, PhoneInput } from '@/components/ui';
 import {
   COMPANY_SETUP_NAME_OPTIONS_REQUIRED,
   COMPANY_SETUP_MAX_GENERAL_MANAGERS,
@@ -50,6 +50,7 @@ import {
   Briefcase,
   Building2,
   CheckCircle,
+  ChevronLeft,
   ClipboardList,
   FileText,
   Landmark,
@@ -102,6 +103,8 @@ interface CompanySetupFormProps {
    * of leaving the client typing into a form that can never be saved.
    */
   onClosed: (reason: CompanySetupClosedReason) => void;
+  /** Tailwind max-width class of the page column (same as the page header). */
+  maxWidth?: string;
 }
 
 export function CompanySetupForm({
@@ -111,6 +114,7 @@ export function CompanySetupForm({
   savedDocuments,
   onSubmitted,
   onClosed,
+  maxWidth = 'max-w-5xl',
 }: CompanySetupFormProps) {
   const [draft, setDraft] = useState<CompanySetupDraft>(() => buildDraft(prefill, savedData));
   const [documents, setDocuments] = useState<CompanySetupDocuments>(savedDocuments ?? {});
@@ -577,37 +581,38 @@ export function CompanySetupForm({
   const firstName = contact.name.trim().split(/\s+/)[0] ?? '';
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <>
       <StepProgress
         currentStep={currentStep}
         viewingStep={viewingStep}
         stepLabels={STEP_LABELS}
         onStepClick={goToStep}
+        maxWidth={maxWidth}
+        saveState={
+          saveState === 'saving' ? (
+            <span role="status">Saving…</span>
+          ) : saveState === 'saved' ? (
+            <span role="status" className="inline-flex items-center gap-1.5">
+              <CheckCircle className="w-4 h-4 text-green-600" aria-hidden /> Saved
+            </span>
+          ) : saveState === 'error' ? (
+            <span role="status" className="inline-flex items-center gap-1.5 text-amber-800">
+              <AlertCircle className="w-4 h-4 shrink-0" aria-hidden />
+              {saveMessage ?? 'Not saved, retrying'}
+            </span>
+          ) : undefined
+        }
       />
 
-      <div className="flex justify-end -mt-1 mb-1 pr-1 min-h-4">
-        {saveState === 'saving' && <span className="text-xs text-gray-400">Saving…</span>}
-        {saveState === 'saved' && (
-          <span className="text-xs text-gray-400 flex items-center gap-1">
-            <CheckCircle className="w-3 h-3 text-green-500" /> Saved
-          </span>
-        )}
-        {saveState === 'error' && (
-          <span className="text-xs text-amber-700 flex items-center gap-1 text-right">
-            <AlertCircle className="w-3 h-3 flex-shrink-0" />
-            {saveMessage ?? 'Not saved, retrying'}
-          </span>
-        )}
-      </div>
+      <PageBody maxWidth={maxWidth}>
 
       {viewingStep === 1 && (
         <FormSection
           title="Welcome"
-          icon={<Building2 className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-          stepNumber={1}
+          icon={<Building2 className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <div className="space-y-5">
-            <p className="text-sm text-gray-600 leading-relaxed">
+            <p className="text-base text-gray-700 leading-relaxed sm:text-sm">
               {firstName ? `Dear ${firstName}, welcome` : 'Welcome'} to the TME Services company
               setup form for your IFZA (International Free Zone Authority) company. This form
               collects all details we need to submit to the authority as part of the
@@ -615,11 +620,11 @@ export function CompanySetupForm({
               automatically.
             </p>
 
-            <div className="rounded-xl border border-gray-100 p-4">
-              <p className="text-sm font-semibold mb-1" style={{ color: TME_COLORS.primary }}>
+            <div className="rounded-[10px] border border-gray-200 p-4">
+              <p className="text-[15px] font-semibold mb-1 text-tme-blue sm:text-sm">
                 Your contact details
               </p>
-              <p className="text-xs text-gray-500 mb-3">
+              <p className="text-sm text-gray-600 mb-3 sm:text-[13px]">
                 These are the details we have for you. Please correct them if anything is wrong.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -647,9 +652,9 @@ export function CompanySetupForm({
                 />
               </div>
               {!contactOk && (
-                <p className="text-xs text-amber-700 mt-2">
+                <WarningNote className="mt-3">
                   Please enter your name and a valid email address to continue.
-                </p>
+                </WarningNote>
               )}
             </div>
 
@@ -660,7 +665,7 @@ export function CompanySetupForm({
             )}
 
             <div>
-              <p className="text-sm font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+              <p className="text-[15px] font-semibold mb-2 text-tme-blue sm:text-sm">
                 What you will need for each shareholder and company officer (manager, director and
                 secretary)
               </p>
@@ -672,10 +677,7 @@ export function CompanySetupForm({
                   'Emirates ID and UAE visa copies, if the person currently holds or previously held them.',
                 ].map((item, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-                    <CheckCircle
-                      className="w-4 h-4 mt-0.5 flex-shrink-0"
-                      style={{ color: TME_COLORS.primary }}
-                    />
+                    <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-tme-blue" aria-hidden />
                     <span>{item}</span>
                   </li>
                 ))}
@@ -694,8 +696,7 @@ export function CompanySetupForm({
       {viewingStep === 2 && (
         <FormSection
           title="Business Activities"
-          icon={<Briefcase className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-          stepNumber={2}
+          icon={<Briefcase className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <StepActivities company={draft.company} onChange={updateCompany} />
           <StepNavButtons
@@ -709,8 +710,7 @@ export function CompanySetupForm({
       {viewingStep === 3 && (
         <FormSection
           title="Company Names"
-          icon={<PenLine className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-          stepNumber={3}
+          icon={<PenLine className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <StepNames
             company={draft.company}
@@ -721,10 +721,10 @@ export function CompanySetupForm({
             canSuggest={groundedActivities.length > 0}
           />
           {aiChecked && aiIssues.length > 0 && (
-            <p className="mt-4 text-xs text-amber-700">
-              Our automatic check flagged possible issues above. You can adjust the names, or
-              continue anyway. The final decision rests with the authority.
-            </p>
+            <WarningNote className="mt-4">
+              Our automatic check found possible problems with the names above. You can change the
+              names, or continue anyway. The authority makes the final decision.
+            </WarningNote>
           )}
           <StepNavButtons
             enabled={namesDeterministicOk}
@@ -739,8 +739,7 @@ export function CompanySetupForm({
       {viewingStep === 4 && (
         <FormSection
           title="Share Capital"
-          icon={<Landmark className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-          stepNumber={4}
+          icon={<Landmark className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <StepShareCapital company={draft.company} onChange={updateCompany} />
           <StepNavButtons
@@ -754,8 +753,7 @@ export function CompanySetupForm({
       {viewingStep === 5 && (
         <FormSection
           title="Shareholder & Company Officer Details"
-          icon={<Users className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-          stepNumber={5}
+          icon={<Users className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <StepPeopleDocuments
             token={token}
@@ -769,18 +767,13 @@ export function CompanySetupForm({
             onExtractionApplied={flushSaveSoon}
           />
           {!(peopleOk && documentsOk) && peopleMissing.length > 0 && (
-            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <p className="text-xs font-semibold text-amber-900 mb-1">
-                Still needed before you can continue:
-              </p>
-              <ul className="list-disc pl-4 space-y-0.5">
+            <WarningNote className="mt-4" title="Still needed before you can continue:">
+              <ul className="list-disc pl-4 space-y-1">
                 {peopleMissing.map((item, i) => (
-                  <li key={i} className="text-xs text-amber-800">
-                    {item}
-                  </li>
+                  <li key={i}>{item}</li>
                 ))}
               </ul>
-            </div>
+            </WarningNote>
           )}
           <StepNavButtons
             enabled={peopleOk && documentsOk}
@@ -793,8 +786,7 @@ export function CompanySetupForm({
       {viewingStep === 6 && (
         <FormSection
           title="Visa & Facility"
-          icon={<ClipboardList className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-          stepNumber={6}
+          icon={<ClipboardList className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <StepVisaFacility
             company={draft.company}
@@ -806,18 +798,13 @@ export function CompanySetupForm({
             uploadFile={uploadFile}
           />
           {visaMissing.length > 0 && (
-            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <p className="text-xs font-semibold text-amber-900 mb-1">
-                Still needed before you can continue:
-              </p>
-              <ul className="list-disc pl-4 space-y-0.5">
+            <WarningNote className="mt-4" title="Still needed before you can continue:">
+              <ul className="list-disc pl-4 space-y-1">
                 {visaMissing.map((item, i) => (
-                  <li key={i} className="text-xs text-amber-800">
-                    {item}
-                  </li>
+                  <li key={i}>{item}</li>
                 ))}
               </ul>
-            </div>
+            </WarningNote>
           )}
           <StepNavButtons
             enabled={visaFacilityOk}
@@ -830,58 +817,50 @@ export function CompanySetupForm({
       {viewingStep === 7 && (
         <FormSection
           title="Review & Submit"
-          icon={<FileText className="w-5 h-5" style={{ color: TME_COLORS.primary }} />}
-          stepNumber={7}
+          icon={<FileText className="w-[18px] h-[18px] text-tme-blue" aria-hidden />}
         >
           <ReviewSummary draft={draft} documents={documents} />
 
-          <label
-            className="mt-6 flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
-            style={{ borderColor: TME_COLORS.border }}
-          >
+          <label className="mt-6 flex items-start gap-3 rounded-[10px] border-2 border-gray-200 p-4 cursor-pointer hover:border-tme-blue/40">
             <input
               type="checkbox"
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
-              className="mt-0.5 w-4 h-4 shrink-0"
-              style={{ accentColor: TME_COLORS.primary }}
+              className="mt-0.5 w-5 h-5 shrink-0 accent-tme-blue sm:w-4 sm:h-4"
             />
-            <span className="text-sm text-gray-700">
+            <span className="text-base text-gray-800 sm:text-sm">
               I confirm the details are true and complete.
             </span>
           </label>
 
           {submitError && (
             <div
-              className="mt-4 text-sm rounded-lg p-3"
-              style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: TME_COLORS.error }}
+              role="alert"
+              className="mt-4 flex items-start gap-2 rounded-[10px] border border-red-200 bg-red-50 p-3.5 text-sm font-medium text-tme-red"
             >
-              {submitError}
+              <AlertCircle className="w-[18px] h-[18px] shrink-0 mt-px" aria-hidden />
+              <span>{submitError}</span>
             </div>
           )}
 
-          <div className="flex justify-between mt-6">
-            <button
-              type="button"
-              onClick={() => goToStep(6)}
-              className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 border-2 hover:bg-gray-50"
-              style={{ color: TME_COLORS.primary, borderColor: TME_COLORS.primary }}
-            >
+          <FormFooter className="mt-6">
+            <Button tone="plain" onClick={() => goToStep(6)}>
+              <ChevronLeft className="w-[18px] h-[18px]" aria-hidden />
               Back
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              tone="primary"
               onClick={() => void handleSubmit()}
-              disabled={!confirmed || submitting}
-              className="px-8 py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: TME_COLORS.primary }}
+              disabled={!confirmed}
+              busy={submitting}
             >
-              {submitting ? 'Submitting…' : 'Submit'}
-            </button>
-          </div>
+              {submitting ? 'Sending…' : 'Send details to TME'}
+            </Button>
+          </FormFooter>
         </FormSection>
       )}
-    </div>
+      </PageBody>
+    </>
   );
 }
 
@@ -890,9 +869,9 @@ export function CompanySetupForm({
 function SummaryRow({ label, value }: { label: string; value: React.ReactNode }) {
   if (value === undefined || value === null || value === '') return null;
   return (
-    <div className="flex gap-2 text-sm">
-      <span className="text-gray-500 w-44 flex-shrink-0">{label}</span>
-      <span className="text-gray-800">{value}</span>
+    <div className="flex flex-col gap-0.5 text-sm sm:flex-row sm:gap-2">
+      <span className="text-gray-600 sm:w-44 flex-shrink-0">{label}</span>
+      <span className="text-gray-900 break-words min-w-0">{value}</span>
     </div>
   );
 }
@@ -914,7 +893,7 @@ function ReviewSummary({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-sm font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+        <p className="text-[15px] font-semibold mb-2 text-tme-blue sm:text-sm">
           Company
         </p>
         <div className="space-y-1.5">
@@ -986,8 +965,8 @@ function ReviewSummary({
               }`
           );
         return (
-          <div key={index} className="border-t border-gray-100 pt-4">
-            <p className="text-sm font-semibold mb-2" style={{ color: TME_COLORS.primary }}>
+          <div key={index} className="border-t border-gray-200 pt-4">
+            <p className="text-[15px] font-semibold mb-2 text-tme-blue sm:text-sm">
               {person.fullName || `Person ${index + 1}`}
             </p>
             <div className="space-y-1.5">

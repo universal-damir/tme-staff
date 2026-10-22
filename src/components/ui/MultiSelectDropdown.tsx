@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { TME_COLORS } from '@/lib/constants';
+import { FieldError, FieldHelp } from './FormBits';
 import { ChevronDown, Search, X, Plus, Check } from 'lucide-react';
+import { Button } from './Button';
 
 interface SelectOption {
   value: string;
@@ -148,57 +149,70 @@ export function MultiSelectDropdown({
   return (
     <div className={`w-full ${className}`}>
       {label && (
-        <label
-          className="block text-sm font-medium mb-1"
-          style={{ color: TME_COLORS.primary }}
-        >
+        <span className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
+          {required && (
+            <span className="text-tme-red ml-1" aria-hidden>
+              *
+            </span>
+          )}
+        </span>
       )}
 
       <div className="relative" ref={dropdownRef}>
         {/* Trigger Button */}
-        <button
-          type="button"
-          onClick={() => !disabled && setIsOpen(!isOpen)}
-          disabled={disabled}
-          className={`w-full px-3 py-2 rounded-lg border-2 transition-all duration-200 min-h-[42px] bg-white text-left flex items-center justify-between ${
-            error ? 'border-red-500' : isOpen ? 'border-[#243F7B]' : 'border-gray-200'
-          } ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'cursor-pointer hover:border-gray-300'}`}
-          style={{ fontFamily: 'Inter, sans-serif' }}
-        >
-          <span className={value.length > 0 ? 'text-gray-900 text-sm' : 'text-gray-400'}>
-            {displayText}
-          </span>
-          <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => !disabled && setIsOpen(!isOpen)}
+            disabled={disabled}
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+            aria-label={label ? `${label}: ${displayText}` : undefined}
+            className={`w-full pl-3.5 pr-24 py-2 rounded-[10px] border-2 transition-colors duration-200 min-h-[46px] bg-white text-left text-base flex items-center focus:outline-none sm:min-h-10 sm:py-1.5 sm:pl-3 sm:rounded-lg sm:border sm:text-sm ${
+              error ? 'border-tme-red' : isOpen ? 'border-tme-blue' : 'border-gray-200 sm:border-gray-300 focus:border-tme-blue sm:focus:border-tme-blue'
+            } ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'cursor-pointer hover:border-tme-blue sm:hover:border-tme-blue'}`}
+          >
+            <span className={value.length > 0 ? 'text-gray-900' : 'text-gray-500'}>{displayText}</span>
+          </button>
+          <div className="absolute right-1 top-0 h-[46px] sm:h-10 flex items-center gap-0.5 pointer-events-none">
             {value.length > 0 && !disabled && (
-              <X
-                className="w-4 h-4 text-gray-400 hover:text-gray-600"
+              <button
+                type="button"
                 onClick={handleClearAll}
-              />
+                aria-label="Clear all"
+                className="pointer-events-auto size-11 sm:size-8 inline-flex items-center justify-center rounded-full text-gray-600 hover:text-tme-red hover:bg-red-50 tme-btn-focus"
+              >
+                <X className="w-4 h-4" aria-hidden />
+              </button>
             )}
             <ChevronDown
-              className={`w-5 h-5 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+              aria-hidden
+              className={`w-5 h-5 mr-2 text-tme-blue transition-transform ${isOpen ? 'rotate-180' : ''}`}
             />
           </div>
-        </button>
+        </div>
 
         {/* Selected Tags (show below input when there are selections) */}
         {value.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {selectedLabels.map((label, index) => (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {selectedLabels.map((tagLabel, index) => (
               <span
                 key={value[index]}
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md"
-                style={{ backgroundColor: '#EBF4FF', color: TME_COLORS.primary }}
+                className={`inline-flex items-center min-h-9 pl-3 text-sm font-medium rounded-full sm:min-h-7 sm:pl-2.5 sm:text-[13px] bg-blue-50 border border-blue-100 text-tme-blue ${
+                  disabled ? 'pr-3' : 'pr-0'
+                }`}
               >
-                {label}
+                {tagLabel}
                 {!disabled && (
-                  <X
-                    className="w-3 h-3 cursor-pointer hover:opacity-70"
+                  <button
+                    type="button"
                     onClick={(e) => handleRemove(value[index], e)}
-                  />
+                    aria-label={`Remove ${tagLabel}`}
+                    className="size-11 -my-1 sm:size-7 sm:my-0 inline-flex items-center justify-center rounded-full hover:text-tme-red tme-btn-focus"
+                  >
+                    <X className="w-4 h-4" aria-hidden />
+                  </button>
                 )}
               </span>
             ))}
@@ -207,27 +221,26 @@ export function MultiSelectDropdown({
 
         {/* Dropdown Menu */}
         {isOpen && (
-          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg" style={{ maxWidth: 'calc(100vw - 2rem)' }}>
+          <div className="absolute z-50 w-full mt-1 bg-white border-2 border-tme-blue rounded-[10px] shadow-lg overflow-hidden" style={{ maxWidth: 'calc(100vw - 2rem)' }}>
             {/* Search Input */}
             {searchable && (
               <div className="p-2 border-b border-gray-100">
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" aria-hidden />
                   <input
                     ref={inputRef}
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Search..."
-                    className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-[#243F7B]"
-                    style={{ fontFamily: 'Inter, sans-serif' }}
+                    className="w-full h-11 pl-9 pr-3 border-2 border-gray-200 rounded-[10px] text-base focus:outline-none focus:border-tme-blue sm:h-9 sm:border sm:border-gray-300 sm:rounded-lg md:text-sm sm:focus:border-tme-blue"
                   />
                 </div>
               </div>
             )}
 
             {/* Options List */}
-            <div className="overflow-y-auto max-h-48">
+            <div className="overflow-y-auto max-h-60 overscroll-contain" role="listbox" aria-multiselectable="true">
               {filteredOptions.length > 0 ? (
                 filteredOptions.map((option) => {
                   const isSelected = value.includes(option.value);
@@ -235,23 +248,22 @@ export function MultiSelectDropdown({
                     <button
                       key={option.value}
                       type="button"
+                      role="option"
+                      aria-selected={isSelected}
                       onClick={() => handleToggle(option.value)}
-                      className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center justify-between ${
+                      className={`w-full min-h-11 px-3.5 py-2.5 text-left text-[15px] sm:min-h-9 sm:px-3 sm:py-2 sm:text-sm hover:bg-blue-50 transition-colors flex items-center justify-between gap-2 ${
                         isSelected ? 'bg-blue-50' : ''
                       }`}
-                      style={{ fontFamily: 'Inter, sans-serif' }}
                     >
-                      <span className={isSelected ? 'text-[#243F7B] font-medium' : 'text-gray-700'}>
+                      <span className={isSelected ? 'text-tme-blue font-semibold sm:font-medium' : 'text-gray-900'}>
                         {option.label}
                       </span>
-                      {isSelected && (
-                        <Check className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
-                      )}
+                      {isSelected && <Check className="w-4 h-4 flex-shrink-0 text-tme-blue" aria-hidden />}
                     </button>
                   );
                 })
               ) : (
-                <div className="px-3 py-2 text-sm text-gray-500">No options found</div>
+                <div className="px-3.5 py-3 text-[15px] sm:text-sm text-gray-600">No options found</div>
               )}
             </div>
 
@@ -264,8 +276,7 @@ export function MultiSelectDropdown({
                     value={customValue}
                     onChange={(e) => setCustomValue(e.target.value)}
                     placeholder={customPlaceholder}
-                    className="flex-1 px-3 py-1.5 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-[#243F7B]"
-                    style={{ fontFamily: 'Inter, sans-serif' }}
+                    className="flex-1 min-w-0 h-11 px-3 border-2 border-gray-200 rounded-[10px] text-base focus:outline-none focus:border-tme-blue sm:h-9 sm:border sm:border-gray-300 sm:rounded-lg md:text-sm sm:focus:border-tme-blue"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -273,16 +284,10 @@ export function MultiSelectDropdown({
                       }
                     }}
                   />
-                  <button
-                    type="button"
-                    onClick={handleAddCustom}
-                    disabled={!customValue.trim()}
-                    className="px-3 py-1.5 text-sm font-medium text-white rounded-md disabled:opacity-50 flex items-center gap-1"
-                    style={{ backgroundColor: TME_COLORS.primary }}
-                  >
-                    <Plus className="w-4 h-4" />
+                  <Button tone="secondary" onClick={handleAddCustom} disabled={!customValue.trim()}>
+                    <Plus className="w-4 h-4" aria-hidden />
                     Add
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -290,8 +295,7 @@ export function MultiSelectDropdown({
         )}
       </div>
 
-      {error && <p className="mt-1 text-sm text-red-500">{error}</p>}
-      {helperText && !error && <p className="mt-1 text-sm text-gray-500">{helperText}</p>}
+      {error ? <FieldError>{error}</FieldError> : <FieldHelp>{helperText}</FieldHelp>}
     </div>
   );
 }

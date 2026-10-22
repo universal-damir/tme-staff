@@ -22,8 +22,8 @@ export function hasGermanLine(text: EkycText | EkycOption): boolean {
 }
 
 /**
- * English, and in a bilingual form the German under it, smaller and muted
- * (never below 12px, so it stays readable under a small hint).
+ * English, and in a bilingual form the German under it, a little smaller in
+ * gray-600 (never below 14px, so a client can read it on a phone).
  * Paragraph breaks (blank lines) in the text become separate paragraphs.
  */
 export function Bi({
@@ -52,7 +52,7 @@ export function Bi({
     return (
       <span className={`inline-flex flex-col leading-tight ${className}`}>
         <span>{text.en}</span>
-        <span lang="de" className={`text-[0.8em] font-normal opacity-75 ${deClassName}`}>
+        <span lang="de" className={`text-[0.85em] font-normal opacity-80 ${deClassName}`}>
           {de}
         </span>
       </span>
@@ -69,7 +69,7 @@ export function Bi({
           </p>
         ))}
         {deParts.length > 0 && (
-          <div lang="de" className={`mt-1 text-[length:max(0.9em,12px)] leading-snug text-gray-500 ${deClassName}`}>
+          <div lang="de" className={`mt-1 text-[length:max(0.9em,14px)] leading-snug text-gray-600 sm:text-[13px] ${deClassName}`}>
             {deParts.map((p, i) => (
               <p key={`de-${i}`} className="mb-2 last:mb-0 whitespace-pre-line">
                 {p}
@@ -84,7 +84,7 @@ export function Bi({
     <span className={className}>
       <span className="block">{text.en}</span>
       {de && (
-        <span lang="de" className={`block text-[length:max(0.85em,12px)] font-normal leading-snug text-gray-500 ${deClassName}`}>
+        <span lang="de" className={`block text-[length:max(0.9em,14px)] font-normal leading-snug text-gray-600 sm:text-[13px] ${deClassName}`}>
           {de}
         </span>
       )}
@@ -93,29 +93,31 @@ export function Bi({
 }
 
 /**
- * The text levels of the form, in ONE place so they cannot drift apart:
- *   1. question / title (English): navy, semibold
- *   2. German question / title: smaller, regular, slate-500, right under
- *   3. help (English): 13px slate-600, set apart by an info icon
- *   4. German help: 12px italic slate-400, right under the English help
+ * The text levels of the form, in ONE place so they cannot drift apart
+ * (TME look 22.10.2026: nothing a client must read below 14px or lighter than gray-600):
+ *   1. question / title (English): 15px navy, semibold (desktop: 14px medium)
+ *   2. German question / title: 14px, regular, gray-600, right under (desktop: 13px)
+ *   Desktop (sm: and up, 22.10 calm sizes): help and every German line 13px gray-600.
+ *   3. help (English): 14px gray-600, set apart by an info icon
+ *   4. German help: 14px gray-600, a little more space above, right under the English help
  * The English-only form uses the same sizes, without lines 2 and 4.
  */
 export const EKYC_TYPE = {
-  labelEn: 'block text-[15px] font-semibold leading-snug text-[#243F7B]',
-  labelDe: 'mt-0.5 block text-[13px] font-normal leading-snug text-slate-500',
+  labelEn: 'block text-[15px] font-semibold leading-snug text-tme-blue sm:text-sm sm:font-medium',
+  labelDe: 'mt-0.5 block text-sm font-normal leading-snug text-gray-600 sm:text-[13px]',
   /** Smaller label: Check your answers rows, row headings inside a group. */
-  labelSmEn: 'block text-sm font-semibold leading-snug text-[#243F7B]',
-  labelSmDe: 'mt-0.5 block text-xs font-normal leading-snug text-slate-500',
-  helpEn: 'block text-[13px] leading-relaxed text-slate-600',
-  helpDe: 'mt-0.5 block text-xs italic leading-relaxed text-slate-400',
+  labelSmEn: 'block text-sm font-semibold leading-snug text-tme-blue sm:font-medium',
+  labelSmDe: 'mt-0.5 block text-sm font-normal leading-snug text-gray-600 sm:text-[13px]',
+  helpEn: 'block text-sm leading-relaxed text-gray-600 sm:text-[13px]',
+  helpDe: 'mt-1 block text-sm leading-relaxed text-gray-600 sm:text-[13px]',
   /** Step / page title: the size comes from the heading (h1 / h3), the German line is fixed. */
-  titleDe: 'mt-1 block text-[15px] font-normal leading-snug text-slate-500',
-  titleSmDe: 'mt-0.5 block text-[13px] font-normal leading-snug text-slate-500',
-  introEn: 'block text-sm leading-relaxed text-slate-600',
-  introDe: 'mt-0.5 block text-[13px] italic leading-relaxed text-slate-400',
-  /** A notice box: the colour comes from the box (warn / info), the German line is lighter. */
+  titleDe: 'mt-1 block text-base font-normal leading-snug text-gray-600 sm:text-sm',
+  titleSmDe: 'mt-0.5 block text-sm font-normal leading-snug text-gray-600 sm:text-[13px]',
+  introEn: 'block text-[15px] leading-relaxed text-gray-600 sm:text-sm',
+  introDe: 'mt-1 block text-sm leading-relaxed text-gray-600 sm:text-[13px]',
+  /** A notice box: the colour comes from the box (warn / info), the German line is regular weight. */
   noticeEn: 'block font-medium',
-  noticeDe: 'mt-0.5 block text-[13px] font-normal italic opacity-80',
+  noticeDe: 'mt-0.5 block text-sm font-normal opacity-90 sm:text-[13px]',
 } as const;
 
 function splitParagraphs(text: string): string[] {
@@ -205,7 +207,7 @@ export function BiHelp({
   if (!text) return null;
   return (
     <div id={id} data-ekyc-help="" className={`flex gap-1.5 ${className}`}>
-      {icon && <Info aria-hidden="true" className="mt-[3px] h-3.5 w-3.5 shrink-0 text-slate-400" />}
+      {icon && <Info aria-hidden="true" className="mt-[3px] h-4 w-4 shrink-0 text-gray-500" />}
       <BiPair
         text={text}
         enClassName={EKYC_TYPE.helpEn}

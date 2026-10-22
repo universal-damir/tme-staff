@@ -8,13 +8,13 @@
 // and the page loads. Someone not on the list is told to ask TME to add them.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Loader2, Mail, ShieldCheck, UserX } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
+import { AlertTriangle, ArrowLeft, Mail, ShieldCheck, UserX } from 'lucide-react';
+import { Button, Card, ClientPageHeader, PageBody } from '@/components/ui';
 import { reportClientFailure } from '@/lib/client-error-log';
 import { FAILURE_MESSAGES, failureMessage, requestJson, type RequestFailure } from '@/lib/request-outcome';
 import { VAT_FILES_CODE_LENGTH, VAT_FILES_PROOF_DAYS, type VatFilesCodeAddress } from '@/types/vat-files';
 
-const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[#243F7B]/50';
+const MAX_W = 'max-w-[640px]';
 const RESEND_SECONDS = 60;
 
 /** Damir's wording (11.10.2026) for someone who is not on the list. */
@@ -138,189 +138,163 @@ export default function CodeGate({
     onConfirmed();
   };
 
+  const errorBox = error && (
+    <div
+      className="mt-4 flex items-start gap-2 rounded-[10px] border border-red-200 bg-red-50 px-3.5 py-3 text-sm font-medium leading-snug text-tme-red sm:py-2.5 sm:text-[13px]"
+      role="alert"
+    >
+      <AlertTriangle className="w-[18px] h-[18px] shrink-0 mt-px sm:w-4 sm:h-4" aria-hidden />
+      <span>{error}</span>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen flex items-start sm:items-center justify-center px-4 py-6 sm:py-10 bg-[#F6F7F9]">
-      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white shadow-[0_1px_3px_rgba(16,24,40,0.05)] p-5 sm:p-7">
-        <div className="text-[11px] font-semibold tracking-[0.08em] uppercase" style={{ color: TME_COLORS.secondary }}>
-          TME Services
-        </div>
-        <h1 className="text-lg sm:text-xl font-semibold tracking-tight leading-tight" style={{ color: TME_COLORS.primary }}>
-          {title || 'VAT filing documents'}
-        </h1>
-
-        <div className="mt-5 flex items-start gap-3">
-          <span
-            className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center"
-            style={{ backgroundColor: 'rgba(36,63,123,0.08)', color: TME_COLORS.primary }}
-            aria-hidden
-          >
-            <ShieldCheck className="w-[18px] h-[18px]" />
-          </span>
-          <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-gray-900">
+    <div className="min-h-screen bg-tme-page">
+      <ClientPageHeader eyebrow="VAT files" title={title || 'VAT filing documents'} maxWidth={MAX_W} />
+      <PageBody maxWidth={MAX_W}>
+        <Card
+          title={
+            <span className="inline-flex items-center gap-2">
+              <ShieldCheck className="w-[18px] h-[18px] text-tme-blue sm:w-4 sm:h-4" aria-hidden />
               {step === 'pick' ? 'Who are you?' : 'Type the code from the email'}
-            </h2>
-            <p className="text-[13px] text-gray-600 leading-snug mt-0.5">
-              {step === 'pick'
-                ? 'Choose your email address. We will send you a 6-digit code to open the page.'
-                : `We sent a ${VAT_FILES_CODE_LENGTH}-digit code to ${picked?.masked ?? 'your email'}. It works for 10 minutes.`}
-            </p>
-          </div>
-        </div>
-
-        {step === 'code' && devCode && (
-          <div
-            className="mt-4 text-[13px] rounded-lg px-3 py-2.5 border"
-            style={{ backgroundColor: '#FEF9C3', borderColor: '#FDE047', color: '#713F12' }}
-          >
-            Dev only, no email sent: the code is <span className="font-semibold tabular-nums tracking-widest">{devCode}</span>
-          </div>
-        )}
-
-        {error && (
-          <div
-            className="mt-4 text-[13px] rounded-lg px-3 py-2.5 flex items-start gap-2"
-            style={{ backgroundColor: 'rgba(239,68,68,0.07)', color: TME_COLORS.error }}
-            role="alert"
-          >
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
-            {error}
-          </div>
-        )}
-
-        {step === 'pick' ? (
-          <>
-            <fieldset className="mt-4">
-              <legend className="sr-only">Your email address</legend>
-              <div className="space-y-2">
-                {addresses.map((a) => {
-                  const on = a.id === choice;
-                  return (
-                    <label
-                      key={a.id}
-                      className={`flex items-center gap-3 rounded-lg border px-3 h-11 cursor-pointer transition-colors ${
-                        on ? 'bg-[#243F7B]/[0.04]' : 'hover:bg-gray-50'
-                      } has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#243F7B]/50`}
-                      style={{ borderColor: on ? TME_COLORS.primary : '#E5E7EB' }}
-                    >
-                      <input
-                        type="radio"
-                        name="vat-files-address"
-                        value={a.id}
-                        checked={on}
-                        onChange={() => {
-                          setChoice(a.id);
-                          setError(null);
-                          setNotListed(false);
-                        }}
-                        className="sr-only"
-                      />
-                      <span
-                        className="w-4 h-4 shrink-0 rounded-full border-2 flex items-center justify-center"
-                        style={{ borderColor: on ? TME_COLORS.primary : '#D1D5DB' }}
-                        aria-hidden
-                      >
-                        {on && <span className="w-2 h-2 rounded-full" style={{ backgroundColor: TME_COLORS.primary }} />}
-                      </span>
-                      <Mail className="w-4 h-4 shrink-0 text-gray-400" aria-hidden />
-                      <span className="text-[14px] text-gray-900 truncate tabular-nums">{a.masked}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </fieldset>
-
-            <button
-              type="button"
-              onClick={sendCode}
-              disabled={!picked || busy}
-              className={`mt-4 w-full h-10 rounded-lg text-sm font-semibold text-white inline-flex items-center justify-center gap-2 shadow-[0_1px_2px_rgba(16,24,40,0.12)] transition-all hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100 ${FOCUS}`}
-              style={{ backgroundColor: TME_COLORS.primary }}
+            </span>
+          }
+          seed="vat-code-gate"
+          description={
+            step === 'pick'
+              ? 'Choose your email address. We will send you a 6-digit code to open the page.'
+              : `We sent a ${VAT_FILES_CODE_LENGTH}-digit code to ${picked?.masked ?? 'your email'}. It works for 10 minutes.`
+          }
+        >
+          {step === 'code' && devCode && (
+            <div
+              className="text-sm rounded-[10px] px-3.5 py-3 border sm:text-[13px] sm:rounded-lg sm:py-2.5"
+              style={{ backgroundColor: '#FEF9C3', borderColor: '#FDE047', color: '#713F12' }}
             >
-              {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden />}
-              Send code
-            </button>
-
-            <div className="mt-4 pt-4 border-t border-gray-100">
-              {notListed ? (
-                <div className="flex items-start gap-2.5 text-[13px] text-gray-700 leading-snug" role="status">
-                  <UserX className="w-4 h-4 shrink-0 mt-0.5 text-gray-400" aria-hidden />
-                  <p>{NOT_ON_LIST_TEXT}</p>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNotListed(true);
-                    setChoice(null);
-                    setError(null);
-                  }}
-                  className={`text-[13px] font-medium rounded ${FOCUS}`}
-                  style={{ color: TME_COLORS.primary }}
-                >
-                  My email address is not on the list
-                </button>
-              )}
+              Dev only, no email sent: the code is <span className="font-semibold tabular-nums tracking-widest">{devCode}</span>
             </div>
-          </>
-        ) : (
-          <form onSubmit={checkCode} className="mt-4">
-            <label htmlFor="vat-files-code" className="sr-only">
-              Code from the email
-            </label>
-            <input
-              id="vat-files-code"
-              ref={codeRef}
-              value={code}
-              onChange={(e) => {
-                setCode(e.target.value.replace(/[^\d]/g, '').slice(0, VAT_FILES_CODE_LENGTH));
-                setError(null);
-              }}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              placeholder={'0'.repeat(VAT_FILES_CODE_LENGTH)}
-              maxLength={VAT_FILES_CODE_LENGTH}
-              className="w-full h-12 rounded-lg border border-gray-300 text-center text-2xl font-semibold tracking-[0.5em] tabular-nums text-gray-900 placeholder:text-gray-300 focus:outline-none focus:border-[#243F7B] focus:ring-2 focus:ring-[#243F7B]/20"
-            />
-            <button
-              type="submit"
-              disabled={busy || code.length !== VAT_FILES_CODE_LENGTH}
-              className={`mt-3 w-full h-10 rounded-lg text-sm font-semibold text-white inline-flex items-center justify-center gap-2 shadow-[0_1px_2px_rgba(16,24,40,0.12)] transition-all hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100 ${FOCUS}`}
-              style={{ backgroundColor: TME_COLORS.primary }}
-            >
-              {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden />}
-              Open the page
-            </button>
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[13px]">
-              <button
-                type="button"
-                onClick={() => {
-                  setStep('pick');
+          )}
+
+          {step === 'pick' ? (
+            <>
+              <fieldset>
+                <legend className="sr-only">Your email address</legend>
+                <div className="space-y-2">
+                  {addresses.map((a) => {
+                    const on = a.id === choice;
+                    return (
+                      <label
+                        key={a.id}
+                        className={`flex items-center gap-3 rounded-[10px] border-2 px-3.5 min-h-[46px] py-2 cursor-pointer transition-colors sm:gap-2.5 sm:rounded-lg sm:border sm:px-3 sm:min-h-10 ${
+                          on ? 'border-tme-blue bg-tme-blue/[0.04]' : 'border-gray-200 sm:border-gray-300 hover:bg-gray-50'
+                        } has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-tme-wash`}
+                      >
+                        <input
+                          type="radio"
+                          name="vat-files-address"
+                          value={a.id}
+                          checked={on}
+                          onChange={() => {
+                            setChoice(a.id);
+                            setError(null);
+                            setNotListed(false);
+                          }}
+                          className="sr-only"
+                        />
+                        <span
+                          className={`w-[18px] h-[18px] shrink-0 rounded-full border-2 sm:w-4 sm:h-4 flex items-center justify-center ${on ? 'border-tme-blue' : 'border-gray-300'}`}
+                          aria-hidden
+                        >
+                          {on && <span className="w-2 h-2 rounded-full bg-tme-blue" />}
+                        </span>
+                        <Mail className="w-[18px] h-[18px] shrink-0 text-gray-500 sm:w-4 sm:h-4" aria-hidden />
+                        <span className="text-base text-gray-900 break-all tabular-nums sm:text-sm">{a.masked}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+
+              {errorBox}
+
+              <Button tone="primary" onClick={sendCode} disabled={!picked} busy={busy} className="mt-4 w-full">
+                Send me the code
+              </Button>
+
+              <div className="mt-5 pt-4 border-t border-gray-100">
+                {notListed ? (
+                  <div className="flex items-start gap-2.5 text-[15px] text-gray-700 leading-snug sm:text-sm" role="status">
+                    <UserX className="w-[18px] h-[18px] shrink-0 mt-0.5 text-gray-600" aria-hidden />
+                    <p>{NOT_ON_LIST_TEXT}</p>
+                  </div>
+                ) : (
+                  <Button
+                    tone="ghost"
+                    className="-ml-3"
+                    onClick={() => {
+                      setNotListed(true);
+                      setChoice(null);
+                      setError(null);
+                    }}
+                  >
+                    My email address is not on the list
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            <form onSubmit={checkCode}>
+              <label htmlFor="vat-files-code" className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium">
+                Code from the email
+              </label>
+              <input
+                id="vat-files-code"
+                ref={codeRef}
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value.replace(/[^\d]/g, '').slice(0, VAT_FILES_CODE_LENGTH));
                   setError(null);
                 }}
-                className={`inline-flex items-center gap-1 text-gray-600 hover:text-gray-900 rounded ${FOCUS}`}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder={'0'.repeat(VAT_FILES_CODE_LENGTH)}
+                maxLength={VAT_FILES_CODE_LENGTH}
+                className="w-full h-14 rounded-[10px] border-2 border-gray-200 bg-white text-center text-2xl font-semibold tracking-[0.5em] tabular-nums text-gray-900 placeholder:text-gray-300 transition-colors focus:outline-none focus:border-tme-blue sm:h-12 sm:rounded-lg sm:border sm:border-gray-300 sm:text-xl sm:focus:ring-2 sm:focus:ring-tme-blue/15"
+              />
+              {errorBox}
+              <Button
+                type="submit"
+                tone="primary"
+                disabled={code.length !== VAT_FILES_CODE_LENGTH}
+                busy={busy}
+                className="mt-4 w-full"
               >
-                <ArrowLeft className="w-3.5 h-3.5" aria-hidden />
-                Use another address
-              </button>
-              <button
-                type="button"
-                onClick={sendCode}
-                disabled={busy || cooldown > 0}
-                className={`font-medium rounded disabled:text-gray-400 disabled:cursor-not-allowed ${FOCUS}`}
-                style={cooldown > 0 || busy ? undefined : { color: TME_COLORS.primary }}
-              >
-                {cooldown > 0 ? `Send a new code in ${cooldown} s` : 'Send a new code'}
-              </button>
-            </div>
-            {demo && <p className="mt-3 text-xs text-gray-400">Demo page: the code is {DEMO_CODE}.</p>}
-          </form>
-        )}
+                Open the page
+              </Button>
+              <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Button
+                  tone="plain"
+                  onClick={() => {
+                    setStep('pick');
+                    setError(null);
+                  }}
+                >
+                  <ArrowLeft className="w-4 h-4" aria-hidden />
+                  Use another address
+                </Button>
+                <Button tone="ghost" onClick={sendCode} disabled={busy || cooldown > 0}>
+                  {cooldown > 0 ? `Send a new code in ${cooldown} s` : 'Send a new code'}
+                </Button>
+              </div>
+              {demo && <p className="mt-3 text-sm text-gray-600 sm:text-[13px]">Demo page: the code is {DEMO_CODE}.</p>}
+            </form>
+          )}
 
-        <p className="mt-5 text-xs text-gray-500 leading-snug">
-          After the code, this page stays open in this browser for {VAT_FILES_PROOF_DAYS} days.
-        </p>
-      </div>
+          <p className="mt-5 text-sm text-gray-600 leading-snug sm:text-[13px]">
+            After the code, this page stays open in this browser for {VAT_FILES_PROOF_DAYS} days.
+          </p>
+        </Card>
+      </PageBody>
     </div>
   );
 }

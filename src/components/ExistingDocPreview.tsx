@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { FileText, Loader2, Maximize2 } from 'lucide-react';
-import { TME_COLORS } from '@/lib/constants';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 import { ImageLightbox } from '@/components/ImageLightbox';
 
@@ -73,8 +72,8 @@ export default function ExistingDocPreview({
 
   return (
     <div>
-      <label className="block text-xs font-medium mb-1" style={{ color: TME_COLORS.primary }}>{label}</label>
-      <div className="relative border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+      <label className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">{label}</label>
+      <div className="relative border-2 border-gray-200 rounded-[10px] overflow-hidden bg-gray-50">
         {canEnlarge ? (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -91,22 +90,22 @@ export default function ExistingDocPreview({
               type="button"
               onClick={() => setLightboxOpen(true)}
               aria-label={`Enlarge ${label}`}
-              className="absolute top-2 right-2 rounded-full bg-white/90 p-1.5 shadow-sm hover:bg-white transition-colors"
+              className="absolute top-1.5 right-1.5 size-11 sm:size-9 inline-flex items-center justify-center rounded-full bg-white/90 border border-gray-200 shadow-sm hover:bg-white transition-colors text-tme-blue tme-btn-focus"
             >
-              <Maximize2 className="w-4 h-4" style={{ color: TME_COLORS.primary }} />
+              <Maximize2 className="w-5 h-5" aria-hidden />
             </button>
           </>
         ) : (
           <div className="w-full h-64 flex flex-col items-center justify-center bg-white px-3 text-center">
             {pdfThumbLoading ? (
               <>
-                <Loader2 className="w-8 h-8 mb-3 animate-spin" style={{ color: TME_COLORS.primary }} />
-                <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Loading preview…</p>
+                <Loader2 className="w-8 h-8 mb-3 animate-spin text-tme-blue" aria-hidden />
+                <p className="text-sm font-medium text-tme-blue">Loading preview…</p>
               </>
             ) : (
               <>
-                <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
-                <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>
+                <FileText className="w-14 h-14 mb-3 text-tme-blue" aria-hidden />
+                <p className="text-[15px] font-semibold text-tme-blue sm:text-sm">
                   {isPdf ? 'PDF on file' : 'Preview unavailable'}
                 </p>
                 {url && (
@@ -114,8 +113,7 @@ export default function ExistingDocPreview({
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-2 text-xs underline"
-                    style={{ color: TME_COLORS.primary }}
+                    className="mt-1 min-h-11 inline-flex items-center px-3 rounded-[10px] text-[15px] font-semibold sm:min-h-9 sm:rounded-lg sm:text-sm sm:font-medium text-tme-blue underline underline-offset-2 hover:bg-blue-50 transition-colors tme-btn-focus"
                   >
                     Open {label}
                   </a>

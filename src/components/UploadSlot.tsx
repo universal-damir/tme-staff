@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { TME_COLORS } from '@/lib/constants';
 import { Upload, CheckCircle, AlertCircle, Loader2, FileText, RefreshCw, X } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
@@ -255,7 +254,7 @@ export function UploadSlot({
     if (error) return 'border-red-300';
     if (needsReview) return 'border-amber-300';
     if (validated) return 'border-green-300';
-    if (isDragging) return 'border-[#243F7B]';
+    if (isDragging) return 'border-tme-blue';
     return 'border-gray-200';
   };
 
@@ -270,12 +269,9 @@ export function UploadSlot({
   return (
     <div className="flex flex-col h-full">
       {label && (
-        <label
-          className="block text-sm font-medium mb-2"
-          style={{ color: TME_COLORS.primary }}
-        >
+        <label className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {required && <span className="text-tme-red ml-1" aria-hidden>*</span>}
         </label>
       )}
 
@@ -289,7 +285,7 @@ export function UploadSlot({
         }
       >
       <div
-        className={`relative flex-1 border-2 border-dashed rounded-lg transition-all duration-200 ${getBorderColor()} ${getBgColor()}`}
+        className={`relative flex-1 border-2 border-dashed rounded-[10px] transition-all duration-200 ${getBorderColor()} ${getBgColor()}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -323,18 +319,17 @@ export function UploadSlot({
                 <div className="w-full h-64 flex flex-col items-center justify-center rounded-lg bg-white">
                   {pdfThumbLoading ? (
                     <>
-                      <Loader2 className="w-8 h-8 mb-3 animate-spin" style={{ color: TME_COLORS.primary }} />
-                      <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>Loading preview…</p>
+                      <Loader2 className="w-8 h-8 mb-3 animate-spin text-tme-blue" />
+                      <p className="text-sm font-medium text-tme-blue">Loading preview…</p>
                     </>
                   ) : (
                     <>
-                      <FileText className="w-14 h-14 mb-3" style={{ color: TME_COLORS.primary }} />
-                      <p className="text-sm font-medium" style={{ color: TME_COLORS.primary }}>PDF uploaded</p>
+                      <FileText className="w-14 h-14 mb-3 text-tme-blue" />
+                      <p className="text-[15px] font-semibold text-tme-blue sm:text-sm">PDF uploaded</p>
                       <button
                         type="button"
                         onClick={openPdf}
-                        className="mt-2 text-xs underline"
-                        style={{ color: TME_COLORS.primary }}
+                        className="mt-1 min-h-11 px-3 rounded-[10px] text-[15px] font-semibold text-tme-blue sm:min-h-9 sm:rounded-lg sm:text-sm sm:font-medium underline underline-offset-2 hover:bg-blue-50 transition-colors tme-btn-focus"
                       >
                         Open PDF
                       </button>
@@ -365,37 +360,37 @@ export function UploadSlot({
                 />
                 {!imgLoaded && (
                   <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-gray-50">
-                    <Loader2 className="w-7 h-7 animate-spin" style={{ color: TME_COLORS.primary }} />
+                    <Loader2 className="w-7 h-7 animate-spin text-tme-blue" />
                   </div>
                 )}
               </div>
             )}
 
             {/* Status Badge */}
-            <div className="absolute top-4 right-4">
+            <div className="absolute top-3 right-3">
               {providedByStaff ? (
-                <div className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                  <CheckCircle className="w-3 h-3" />
+                <div className="bg-blue-100 text-tme-blue h-7 px-2.5 rounded-full text-[13px] font-semibold shadow-sm sm:h-6 sm:px-2 sm:text-xs sm:font-medium flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" />
                   Provided by TME
                 </div>
               ) : validating ? (
-                <div className="bg-blue-100 text-blue-600 px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" />
+                <div className="bg-blue-100 text-tme-blue h-7 px-2.5 rounded-full text-[13px] font-semibold shadow-sm sm:h-6 sm:px-2 sm:text-xs sm:font-medium flex items-center gap-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   Validating...
                 </div>
               ) : needsReview ? (
-                <div className="bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
+                <div className="bg-amber-100 text-amber-800 h-7 px-2.5 rounded-full text-[13px] font-semibold shadow-sm sm:h-6 sm:px-2 sm:text-xs sm:font-medium flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" aria-hidden />
                   Pending review
                 </div>
               ) : validated ? (
-                <div className="bg-green-100 text-green-600 px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                  <CheckCircle className="w-3 h-3" />
+                <div className="bg-green-100 text-green-800 h-7 px-2.5 rounded-full text-[13px] font-semibold shadow-sm sm:h-6 sm:px-2 sm:text-xs sm:font-medium flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" aria-hidden />
                   Valid
                 </div>
               ) : error ? (
-                <div className="bg-red-100 text-red-600 px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
+                <div className="bg-red-100 text-tme-red h-7 px-2.5 rounded-full text-[13px] font-semibold shadow-sm sm:h-6 sm:px-2 sm:text-xs sm:font-medium flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" aria-hidden />
                   Invalid
                 </div>
               ) : null}
@@ -409,45 +404,45 @@ export function UploadSlot({
                 still in flight (and so the "Validating..." badge isn't
                 competing with an actionable button). */}
             {!validating && (!providedByStaff || staffDocReplaceable) && (
-              <div className="absolute top-4 left-4 flex items-center gap-2">
+              <div className="absolute top-3 left-3 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => inputRef.current?.click()}
-                  className="bg-white rounded-full p-1.5 shadow-md hover:bg-gray-100 transition-colors flex items-center gap-1 px-2"
-                  title={
+                  className="min-h-11 px-3.5 sm:min-h-9 sm:px-3 bg-white rounded-full border border-gray-200 shadow-md hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-sm sm:text-[13px] font-semibold text-tme-blue tme-btn-focus"
+                  aria-label={
                     providedByStaff
-                      ? 'Our file is not correct: upload the right one'
+                      ? 'Our file is not correct: replace it with the right one'
                       : 'Replace with another file'
                   }
                 >
-                  <RefreshCw className="w-3.5 h-3.5 text-gray-600" />
-                  <span className="text-xs font-medium text-gray-700">Replace</span>
+                  <RefreshCw className="w-4 h-4" aria-hidden />
+                  <span>Replace</span>
                 </button>
                 {removable && !providedByStaff && (
                   <button
                     type="button"
                     onClick={onRemove}
-                    className="bg-white rounded-full p-1.5 shadow-md hover:bg-red-50 transition-colors flex items-center gap-1 px-2"
-                    title="Remove this file"
+                    className="min-h-11 px-3.5 sm:min-h-9 sm:px-3 bg-white rounded-full border border-gray-200 shadow-md hover:bg-red-50 transition-colors flex items-center gap-1.5 text-sm sm:text-[13px] font-semibold text-tme-red tme-btn-focus"
+                    aria-label="Remove this file"
                   >
-                    <X className="w-3.5 h-3.5 text-red-500" />
-                    <span className="text-xs font-medium text-red-500">Remove</span>
+                    <X className="w-4 h-4" aria-hidden />
+                    <span>Remove</span>
                   </button>
                 )}
               </div>
             )}
           </div>
         ) : providedByStaff ? (
-          <div className="w-full h-40 flex flex-col items-center justify-center gap-2 p-4 rounded-lg">
-            <FileText className="w-8 h-8" style={{ color: TME_COLORS.primary }} />
-            <span className="text-xs text-gray-600 text-center">
+          <div className="w-full min-h-40 flex flex-col items-center justify-center gap-2 p-4 rounded-[10px]">
+            <FileText className="w-8 h-8 text-tme-blue" aria-hidden />
+            <span className="text-sm sm:text-[13px] text-gray-600 text-center">
               Provided by TME. Please confirm it is correct.
             </span>
             {staffDocReplaceable && (
               <button
                 type="button"
                 onClick={() => inputRef.current?.click()}
-                className="mt-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors"
+                className="mt-1 min-h-11 px-4 sm:min-h-9 sm:px-3 rounded-[var(--btn-radius)] text-sm sm:text-[13px] font-semibold bg-white border border-gray-200 text-tme-blue hover:bg-blue-50 transition-colors tme-btn-focus"
               >
                 Not correct? Upload the right one
               </button>
@@ -457,11 +452,11 @@ export function UploadSlot({
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="w-full h-40 flex flex-col items-center justify-center gap-2 p-4 cursor-pointer hover:bg-gray-100 transition-colors rounded-lg"
+            className="w-full min-h-40 flex flex-col items-center justify-center gap-2 p-4 cursor-pointer hover:bg-blue-50 transition-colors rounded-[10px] tme-btn-focus"
           >
-            <Upload className="w-8 h-8 text-gray-400" />
-            <span className="text-xs text-gray-500 text-center">{description}</span>
-            <span className="text-[11px] text-gray-400 text-center">
+            <Upload className="w-8 h-8 text-tme-blue" aria-hidden />
+            <span className="text-[15px] font-medium text-gray-700 text-center sm:text-sm">{description}</span>
+            <span className="text-sm sm:text-[13px] text-gray-600 text-center">
               {isMobile ? 'Scanned PDF only · camera disabled' : 'PDF or JPEG'}
             </span>
           </button>
@@ -471,8 +466,8 @@ export function UploadSlot({
       <div className={messagesBeside ? 'min-w-0' : 'contents'}>
       {/* Error Message */}
       {error && (
-        <p className="mt-2 text-xs text-red-500 flex items-center gap-1">
-          <AlertCircle className="w-3 h-3" />
+        <p role="alert" className="mt-2 text-sm font-medium leading-snug text-tme-red sm:mt-1.5 sm:text-[13px] flex items-start gap-1.5">
+          <AlertCircle className="w-[18px] h-[18px] shrink-0 mt-px" aria-hidden />
           {error}
         </p>
       )}
@@ -483,8 +478,8 @@ export function UploadSlot({
           same thing twice. The error line is different: the badge says
           "Invalid", the line says WHY, so it always shows. */}
       {providedByStaff ? (
-        <p className="mt-2 text-xs text-blue-700 flex items-center gap-1">
-          <CheckCircle className="w-3 h-3" />
+        <p className="mt-2 text-sm leading-snug text-tme-blue sm:mt-1.5 sm:text-[13px] flex items-start gap-1.5">
+          <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
           Provided by TME. Please confirm it is correct
           {staffDocReplaceable ? ', or replace it with the right file.' : '.'}
         </p>
@@ -492,14 +487,14 @@ export function UploadSlot({
         !preview && (
           <>
             {needsReview && !error && !validating && (
-              <p className="mt-2 text-xs text-amber-700 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
+              <p className="mt-2 text-sm leading-snug text-amber-800 sm:mt-1.5 sm:text-[13px] flex items-start gap-1.5">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
                 TME will verify this manually
               </p>
             )}
             {validated && !needsReview && !error && !validating && (
-              <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
-                <CheckCircle className="w-3 h-3" />
+              <p className="mt-2 text-sm font-medium leading-snug text-green-800 sm:mt-1.5 sm:text-[13px] flex items-start gap-1.5">
+                <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
                 Page verified
               </p>
             )}
@@ -510,8 +505,8 @@ export function UploadSlot({
       {warnings && warnings.length > 0 && !validating && (
         <div className="mt-2 space-y-1">
           {warnings.map((warning, i) => (
-            <p key={i} className="text-xs text-amber-700 flex items-start gap-1">
-              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+            <p key={i} className="text-sm leading-snug text-amber-800 sm:text-[13px] flex items-start gap-1.5">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden />
               {warning}
             </p>
           ))}

@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { TME_COLORS } from '@/lib/constants';
 import { topEdgeLooksClipped } from '@/lib/utils';
 import { getDocumentUrl, isUploadFailure, type UploadResult } from '@/lib/supabase';
 import { callAiCheck } from '@/lib/ai-check-client';
@@ -10,6 +9,8 @@ import { MAX_FILE_BYTES } from '@/lib/file-validation';
 import { FAILURE_MESSAGES } from '@/lib/request-outcome';
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { ImageLightbox } from '@/components/ImageLightbox';
+import { Button } from '@/components/ui/Button';
+import { FieldError } from '@/components/ui/FormBits';
 import { renderPdfFirstPage } from '@/lib/pdf-thumbnail';
 import { singlePagePdfError } from '@/lib/single-page-pdf';
 
@@ -316,21 +317,18 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
 
   return (
     <div className="w-full">
-      <label
-        className="block text-sm font-medium mb-2"
-        style={{ color: TME_COLORS.primary }}
-      >
-        ID Photo
-        <span className="text-red-500 ml-1">*</span>
+      <label className="block text-[15px] font-semibold leading-snug mb-1.5 text-tme-blue sm:text-sm sm:font-medium sm:mb-1">
+        ID photo
+        <span className="text-tme-red ml-1" aria-hidden>*</span>
       </label>
 
       {existingImageSrc && (
-        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <div className="mb-3 rounded-[10px] border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-start gap-4">
             <button
               type="button"
               onClick={() => setExistingLightboxOpen(true)}
-              className="relative w-20 h-24 rounded-md overflow-hidden bg-white border border-amber-200 flex-shrink-0 cursor-zoom-in"
+              className="relative w-20 h-24 rounded-md overflow-hidden bg-white border border-amber-200 flex-shrink-0 cursor-zoom-in tme-btn-focus"
               aria-label="View current photo on file"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -340,8 +338,8 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
                 className="absolute inset-0 w-full h-full object-cover"
               />
             </button>
-            <div className="text-sm">
-              <p className="font-medium mb-1" style={{ color: TME_COLORS.primary }}>
+            <div className="text-[15px] leading-snug sm:text-sm">
+              <p className="font-semibold mb-1 text-tme-blue">
                 This is your current photo on file
               </p>
               <p className="text-gray-700">
@@ -355,18 +353,22 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
 
       {!preview && !value ? (
         // Upload area
-        <div
-          className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors hover:border-gray-400"
-          style={{ borderColor: error ? '#ef4444' : '#e5e7eb' }}
-          onClick={() => inputRef.current?.click()}
-        >
-          <div
-            className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center border-2 border-dashed border-gray-300"
+        <>
+          <button
+            type="button"
+            className={`w-full border-2 border-dashed rounded-[10px] p-6 sm:p-8 text-center cursor-pointer transition-colors hover:bg-blue-50 tme-btn-focus ${
+              error ? 'border-tme-red' : 'border-gray-200 hover:border-tme-blue'
+            }`}
+            onClick={() => inputRef.current?.click()}
           >
-            <Upload className="w-8 h-8 text-gray-400" />
-          </div>
-          <p className="text-gray-600 mb-2">Upload your studio passport photo</p>
-          <p className="text-sm text-gray-400">JPEG (.jpg / .jpeg), PNG, or PDF, up to 10 MB. Studio-quality only — self-taken phone photos will be rejected.</p>
+            <span className="w-16 h-16 sm:w-12 sm:h-12 rounded-full mx-auto mb-4 sm:mb-3 flex items-center justify-center bg-blue-50">
+              <Upload className="w-8 h-8 sm:w-6 sm:h-6 text-tme-blue" aria-hidden />
+            </span>
+            <span className="block text-base font-semibold text-tme-blue mb-2 sm:text-sm sm:mb-1">Upload your studio passport photo</span>
+            <span className="block text-sm leading-snug text-gray-600 sm:text-[13px]">
+              JPEG (.jpg / .jpeg), PNG, or PDF, up to 10 MB. Studio-quality only — self-taken phone photos will be rejected.
+            </span>
+          </button>
           <input
             ref={inputRef}
             type="file"
@@ -374,28 +376,27 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
             onChange={handleFileSelect}
             className="hidden"
           />
-        </div>
+        </>
       ) : (
         // Preview area: photo on top, status/errors below — keeps long AI
         // feedback readable instead of squeezing it next to the thumbnail.
         <div
-          className="relative border-2 rounded-lg p-4"
-          style={{ borderColor: isValidated ? '#22c55e' : '#e5e7eb' }}
+          className={`relative border-2 rounded-[10px] p-4 bg-white ${isValidated ? 'border-green-500' : 'border-gray-200'}`}
         >
           <button
             type="button"
             onClick={handleRemove}
-            className="absolute top-2 right-2 p-1 hover:bg-gray-100 rounded z-10"
+            className="absolute top-1.5 right-1.5 size-11 sm:size-9 inline-flex items-center justify-center rounded-full text-gray-600 hover:bg-red-50 hover:text-tme-red transition-colors z-10 tme-btn-focus"
             aria-label="Remove photo"
           >
-            <X className="w-4 h-4 text-gray-500" />
+            <X className="w-5 h-5" aria-hidden />
           </button>
 
           <button
             type="button"
             onClick={() => imageSrc && setLightboxOpen(true)}
             disabled={!imageSrc}
-            className="relative w-48 h-64 rounded-lg overflow-hidden bg-gray-100 mx-auto block cursor-zoom-in disabled:cursor-default"
+            className="relative w-full max-w-48 aspect-[3/4] rounded-lg overflow-hidden bg-gray-100 mx-auto block cursor-zoom-in disabled:cursor-default tme-btn-focus"
             aria-label="View full-size photo"
           >
             {imageSrc ? (
@@ -419,69 +420,65 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
-                <Upload className="w-8 h-8 text-gray-300" />
+                <Upload className="w-8 h-8 text-gray-500" aria-hidden />
               </div>
             )}
             {(isUploading || isValidating || (!!imageSrc && !imgLoaded)) && (
               <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin" style={{ color: TME_COLORS.primary }} />
+                <Loader2 className="w-8 h-8 animate-spin text-tme-blue" aria-hidden />
               </div>
             )}
           </button>
 
-          <div className="mt-3">
+          <div className="mt-3 text-[15px] leading-snug sm:text-sm">
             {isValidating && (
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+              <div className="flex items-center gap-2 text-gray-600">
+                <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" aria-hidden />
                 Validating photo…
               </div>
             )}
 
             {isValidated && !isValidating && !value?.needsReview && (
-              <div className="flex items-center gap-2 text-sm text-green-600">
-                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              <div className="flex items-center gap-2 font-medium text-green-800">
+                <CheckCircle className="w-4 h-4 flex-shrink-0" aria-hidden />
                 Photo validated
               </div>
             )}
 
             {isValidated && !isValidating && value?.needsReview && (
-              <div className="flex items-center gap-2 text-sm text-amber-600">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <div className="flex items-start gap-2 text-amber-800">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
                 Submitted for manual review — a TME team member will verify this photo
               </div>
             )}
 
             {!isValidated && !isValidating && !isUploading && value && validationErrors.length === 0 && (
-              <div className="flex flex-wrap items-center gap-2 text-sm text-amber-600">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span>Photo needs re-upload for validation</span>
-                <button
-                  type="button"
-                  onClick={() => inputRef.current?.click()}
-                  className="text-sm underline"
-                  style={{ color: TME_COLORS.primary }}
-                >
-                  Re-upload
-                </button>
+              <div className="space-y-2">
+                <div className="flex items-start gap-2 text-amber-800">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
+                  <span>Photo needs re-upload for validation</span>
+                </div>
+                <Button tone="secondary" fullWidthOnMobile onClick={() => inputRef.current?.click()}>
+                  <Upload className="w-4 h-4" aria-hidden />
+                  Re-upload photo
+                </Button>
               </div>
             )}
 
             {validationErrors.length > 0 && (
               <div className="space-y-2">
-                {validationErrors.map((err, i) => (
-                  <div key={i} className="flex items-start gap-2 text-sm text-red-500">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                    <span>{err}</span>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => inputRef.current?.click()}
-                  className="text-sm underline"
-                  style={{ color: TME_COLORS.primary }}
-                >
+                <div role="alert" className="space-y-2">
+                  {validationErrors.map((err, i) => (
+                    <div key={i} className="flex items-start gap-2 text-sm font-medium text-tme-red">
+                      <AlertCircle className="w-[18px] h-[18px] flex-shrink-0 mt-px" aria-hidden />
+                      <span>{err}</span>
+                    </div>
+                  ))}
+                </div>
+                <Button tone="secondary" fullWidthOnMobile onClick={() => inputRef.current?.click()}>
+                  <Upload className="w-4 h-4" aria-hidden />
                   Upload a new photo
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -498,40 +495,27 @@ export function PhotoUpload({ submissionId, value, onUpload, onValidated, onRemo
 
       {/* Photo requirements */}
       {!hideGuidance && (
-        <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs font-medium text-gray-600 mb-2">Photo Requirements:</p>
-          <ul className="text-xs text-gray-500 space-y-1">
-            <li className="flex items-center gap-1">
-              <Upload className="w-3 h-3" />
-              White background
-            </li>
-            <li className="flex items-center gap-1">
-              <Upload className="w-3 h-3" />
-              Head AND shoulders visible — space above your head, no tight cropping
-            </li>
-            <li className="flex items-center gap-1">
-              <Upload className="w-3 h-3" />
-              Face 70-80% of photo
-            </li>
-            <li className="flex items-center gap-1">
-              <Upload className="w-3 h-3" />
-              Recent photo (within 6 months) — not a photo of a printed photo
-            </li>
-            <li className="flex items-center gap-1">
-              <Upload className="w-3 h-3" />
-              No glasses, neutral expression
-            </li>
-            <li className="flex items-center gap-1">
-              <Upload className="w-3 h-3" />
-              Clear, no shadows or blur
-            </li>
+        <div className="mt-3 p-4 bg-gray-50 border border-gray-200 rounded-[10px]">
+          <p className="text-[15px] font-semibold text-tme-blue mb-2 sm:text-sm">Photo requirements</p>
+          <ul className="text-sm leading-snug text-gray-700 space-y-1.5 sm:text-[13px] sm:space-y-1">
+            {[
+              'White background',
+              'Head AND shoulders visible — space above your head, no tight cropping',
+              'Face 70-80% of photo',
+              'Recent photo (within 6 months) — not a photo of a printed photo',
+              'No glasses, neutral expression',
+              'Clear, no shadows or blur',
+            ].map((req) => (
+              <li key={req} className="flex items-start gap-2">
+                <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-tme-blue" aria-hidden />
+                {req}
+              </li>
+            ))}
           </ul>
         </div>
       )}
 
-      {(error || uploadError) && (
-        <p className="mt-1 text-sm text-red-500">{error || uploadError}</p>
-      )}
+      <FieldError>{error || uploadError}</FieldError>
 
       {imageSrc && (
         <ImageLightbox

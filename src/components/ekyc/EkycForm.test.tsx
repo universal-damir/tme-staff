@@ -437,7 +437,7 @@ describe('EkycForm', () => {
     }
     expect(cell('issuingAuthority').querySelector('[data-ekyc-tag-slot]')).toBeNull();
     // Main activities: one box per activity.
-    expect(document.getElementById('ekyc-licenses-0-mainActivities')?.tagName).toBe('INPUT');
+    expect(document.getElementById('ekyc-licenses-0-mainActivities')?.tagName).toBe('TEXTAREA');
     expect(screen.getByRole('button', { name: 'Add activity' })).toBeTruthy();
   });
 
