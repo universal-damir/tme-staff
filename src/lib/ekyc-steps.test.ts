@@ -108,6 +108,18 @@ describe('eKYC steps', () => {
     expect(EKYC_GROUP_ROWS.licenses[0]).toEqual(['licenseNumber', 'issueDate', 'expiryDate']);
   });
 
+  it('UBO rule errors (AML team 23.10.2026) land on the UBO step, on the row field', () => {
+    const d = emptyCorporateKyc();
+    d.ubos = [
+      { fullLegalName: 'Max Muster', nationality: 'Germany', countryOfResidence: 'Germany', percent: 20, natureOfControl: 'shareholding', natureOfControlOther: '' },
+      { fullLegalName: 'Erika Muster', nationality: 'Germany', countryOfResidence: 'Germany', percent: 0, natureOfControl: 'manager', natureOfControlOther: '' },
+      { fullLegalName: 'Hans Muster', nationality: 'Germany', countryOfResidence: 'Germany', percent: 30, natureOfControl: 'shareholding', natureOfControlOther: '' },
+    ];
+    const uboStep = CORPORATE_STEPS.findIndex((s) => s.items.includes('ubos'));
+    const ids = ekycErrorsForStep(CORPORATE_STEPS, uboStep, validateEkycData('corporate', d, {})).map((e) => e.fieldId);
+    expect(ids).toEqual(['ubos.0.percent', 'ubos.1.natureOfControl']);
+  });
+
   it('sorts errors in the order the client meets them', () => {
     const e = (fieldId: string) => ({ fieldId, message: { en: 'x', de: 'x' } });
     const sorted = ekycSortErrors(CORPORATE_STEPS, [

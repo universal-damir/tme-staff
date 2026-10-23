@@ -348,6 +348,8 @@ export const EKYC_NATURE_OF_CONTROL_OPTIONS: readonly EkycOption[] = [
   { value: 'shareholding', en: 'Shareholding (Direct / Indirect)', de: 'Beteiligung (direkt / indirekt)', deReviewed: false },
   { value: 'voting_rights', en: 'Voting Rights', de: 'Stimmrechte', deReviewed: false },
   { value: 'appoint_directors', en: 'Right to Appoint Directors', de: 'Recht zur Bestellung von Direktoren', deReviewed: false },
+  // AML team 23.10.2026 (Cabinet Decision 109/2023 Art. 5): when no one holds 25% or more, the manager.
+  { value: 'manager', en: 'Manager', de: 'Geschäftsführer', deReviewed: false },
   { value: 'other', en: 'Other (specify)', de: 'Sonstiges (bitte angeben)', deReviewed: false },
 ];
 
@@ -649,12 +651,16 @@ export interface EkycShareholder {
   percent: number | null;
 }
 
-export type EkycNatureOfControl = 'shareholding' | 'voting_rights' | 'appoint_directors' | 'other';
+export type EkycNatureOfControl = 'shareholding' | 'voting_rights' | 'appoint_directors' | 'manager' | 'other';
 
 export interface EkycUbo {
   fullLegalName: string;
   nationality: string;
   countryOfResidence: string;
+  /**
+   * Shareholding in percent, 0 to 100. 'shareholding' needs 25 or more; the
+   * other natures may be 0 (validateUboControl).
+   */
   percent: number | null;
   natureOfControl: EkycNatureOfControl | '';
   /** Only when natureOfControl is 'other'. */
@@ -1262,7 +1268,7 @@ export type EkycFieldKind =
   | 'select' // one of `options`
   | 'multiselect' // several of `options` (string[])
   | 'yesno' // EkycYesNo
-  | 'percent' // number above 0 and up to 100
+  | 'percent' // number above 0 and up to 100 (0 to 100 with percentAllowsZero)
   | 'money' // canonical 'AED 50,000' (amount + currency dropdown, see parseEkycMoney)
   | 'signature'; // PNG data URL
 
@@ -1299,6 +1305,8 @@ export interface EkycFieldDef<D, R = D> {
   latinName?: boolean;
   /** Only with latinName: the Latin rule applies only when this returns true. Default: always. */
   latinNameWhen?: (data: D, row: R) => boolean;
+  /** Only with kind 'percent': 0 is a valid answer (UBO rows, AML team 23.10.2026). Default: above 0. */
+  percentAllowsZero?: boolean;
 }
 
 /** A repeating block of rows (licenses, shareholders, UBOs). */
@@ -1571,39 +1579,40 @@ export const CORPORATE_UBO_FIELDS: readonly EkycFieldDef<CorporateKycData, EkycU
     },
     kind: 'text',
     required: true,
-    prefillable: true,
+    prefillable: false,
     latinName: true,
   },
-  { id: 'nationality', label: { en: 'Nationality', de: 'Staatsangehörigkeit' }, kind: 'country', required: true, prefillable: true },
+  { id: 'nationality', label: { en: 'Nationality', de: 'Staatsangehörigkeit' }, kind: 'country', required: true, prefillable: false },
   {
     id: 'countryOfResidence',
     label: { en: 'Country of Residence', de: 'Wohnsitzland' },
     kind: 'country',
     required: true,
-    prefillable: true,
+    prefillable: false,
   },
   {
     id: 'percent',
     label: { en: 'Shareholding %', de: 'Beteiligung in %' },
     hint: plainHint(
-      'The share this person owns, directly or through other companies.',
-      'Der Anteil dieser Person, direkt oder über andere Firmen.'
+      'The share this person owns, directly or through other companies. Type 0 if this person owns no shares.',
+      'Der Anteil dieser Person, direkt oder über andere Firmen. Geben Sie 0 ein, wenn diese Person keine Anteile besitzt.'
     ),
     kind: 'percent',
     required: true,
-    prefillable: true,
+    prefillable: false,
+    percentAllowsZero: true,
   },
   {
     id: 'natureOfControl',
     label: { en: 'Nature of Control', de: 'Art der Kontrolle' },
     hint: plainHint(
-      'How this person controls the company. Most often by owning shares.',
-      'Wie diese Person das Unternehmen kontrolliert. Meist über den Besitz von Anteilen.'
+      'How this person controls the company. Shareholding needs 25% or more. Other options only if no one owns 25% or more.',
+      'Wie diese Person das Unternehmen kontrolliert. Beteiligung erst ab 25 %. Andere Optionen nur, wenn niemand 25 % oder mehr besitzt.'
     ),
     kind: 'select',
     options: EKYC_NATURE_OF_CONTROL_OPTIONS,
     required: true,
-    prefillable: true,
+    prefillable: false,
   },
   {
     id: 'natureOfControlOther',
@@ -1615,7 +1624,7 @@ export const CORPORATE_UBO_FIELDS: readonly EkycFieldDef<CorporateKycData, EkycU
     kind: 'text',
     required: true,
     visibleWhen: (_d, row) => row.natureOfControl === 'other',
-    prefillable: true,
+    prefillable: false,
   },
 ];
 
@@ -2027,14 +2036,15 @@ export const CORPORATE_GROUPS: readonly EkycGroupDef<CorporateKycData, any>[] = 
     id: 'ubos',
     label: { en: 'UBO details', de: 'Angaben zu den wirtschaftlich Berechtigten (UBO)' },
     hint: plainHint(
-      'A UBO is always a person, never a company: anyone who owns or controls 25% or more, directly or through other companies, or controls the company in another way.',
-      'Ein UBO ist immer ein Mensch, nie eine Firma: jede Person, die direkt oder über andere Firmen 25 % oder mehr besitzt oder kontrolliert oder das Unternehmen auf andere Weise kontrolliert.'
+      'A UBO is always a person, never a company: anyone who owns 25% or more of the shares, directly or through other companies. If no one owns 25% or more, list the person who controls the company in another way, or else the manager.',
+      'Ein UBO ist immer ein Mensch, nie eine Firma: jede Person, die direkt oder über andere Firmen 25 % oder mehr der Anteile besitzt. Besitzt niemand 25 % oder mehr, geben Sie die Person an, die das Unternehmen auf andere Weise kontrolliert, oder sonst den Geschäftsführer.'
     ),
     min: 1,
     addLabel: { en: 'Add another UBO', de: 'Weiteren wirtschaftlich Berechtigten (UBO) hinzufügen', deReviewed: false },
     rowLabel: { en: 'UBO', de: 'Wirtschaftlich Berechtigter (UBO)', deReviewed: false },
     fields: CORPORATE_UBO_FIELDS,
-    prefillable: true,
+    // Never pre-filled, not even on a renewal (AML team 23.10.2026): the client fills the UBOs fresh.
+    prefillable: false,
   } satisfies EkycGroupDef<CorporateKycData, EkycUbo>,
 ];
 
@@ -2495,6 +2505,17 @@ const MSG = {
   url: { en: 'Please enter a valid website address.', de: 'Bitte geben Sie eine gültige Website-Adresse ein.', deReviewed: false },
   date: { en: 'Please enter a valid date.', de: 'Bitte geben Sie ein gültiges Datum ein.', deReviewed: false },
   percent: { en: 'Please enter a percentage above 0 and up to 100.', de: 'Bitte geben Sie einen Prozentsatz größer als 0 und höchstens 100 ein.', deReviewed: false },
+  percentFromZero: { en: 'Please enter a percentage from 0 to 100.', de: 'Bitte geben Sie einen Prozentsatz von 0 bis 100 ein.', deReviewed: false },
+  uboShareholdingMin: {
+    en: 'A shareholder UBO must hold 25% or more. If no one holds 25% or more, choose how this person controls the company instead.',
+    de: 'Ein UBO über Beteiligung muss 25 % oder mehr halten. Hält niemand 25 % oder mehr, wählen Sie stattdessen, wie diese Person das Unternehmen kontrolliert.',
+    deReviewed: false,
+  },
+  uboOnlyWithoutShareholder: {
+    en: 'Only list this person if no one holds 25% or more of the shares.',
+    de: 'Geben Sie diese Person nur an, wenn niemand 25 % oder mehr der Anteile hält.',
+    deReviewed: false,
+  },
   signature: { en: 'Please sign the form.', de: 'Bitte unterschreiben Sie das Formular.', deReviewed: false },
   document: { en: 'Please upload this document.', de: 'Bitte laden Sie dieses Dokument hoch.', deReviewed: false },
   money: {
@@ -2700,6 +2721,7 @@ function checkField<D, R>(field: EkycFieldDef<D, R>, value: unknown, data: D, ro
       return isEkycIsoDate(value) ? null : MSG.date;
     case 'percent': {
       const n = typeof value === 'number' ? value : Number(value);
+      if (field.percentAllowsZero) return Number.isFinite(n) && n >= 0 && n <= 100 ? null : MSG.percentFromZero;
       return Number.isFinite(n) && n > 0 && n <= 100 ? null : MSG.percent;
     }
     case 'yesno':
@@ -2754,9 +2776,54 @@ function validateBySchema<D>(schema: EkycFormSchema<D>, data: D): EkycValidation
   return errors;
 }
 
+/** Share a UBO by shareholding must reach (Cabinet Decision 109/2023 Art. 5). */
+export const EKYC_UBO_SHAREHOLDING_MIN = 25;
+
+/**
+ * UBO rule across the rows (AML team, Renji 23.10.2026): "If there is no
+ * person with 25% and above shares, then only we go for options with
+ * managers / voting rights / appoint directors and other."
+ * - A row with nature 'shareholding' needs 25% or more (error on its percent).
+ * - Rows with any other nature are allowed only when NO row is
+ *   'shareholding' with 25% or more (error on their nature of control).
+ * A field that already has a schema error (empty, out of range) gets no
+ * second one here.
+ */
+export function validateUboControl(
+  ubos: readonly EkycUbo[] | null | undefined,
+  existing: readonly EkycValidationError[] = []
+): EkycValidationError[] {
+  const rows = Array.isArray(ubos) ? ubos : [];
+  const taken = new Set(existing.map((e) => e.fieldId));
+  const errors: EkycValidationError[] = [];
+  const pct = (row: EkycUbo): number | null => {
+    const n = typeof row?.percent === 'number' ? row.percent : Number.NaN;
+    return Number.isFinite(n) ? n : null;
+  };
+  const hasMajorShareholder = rows.some(
+    (row) => row?.natureOfControl === 'shareholding' && (pct(row) ?? -1) >= EKYC_UBO_SHAREHOLDING_MIN
+  );
+  rows.forEach((row, index) => {
+    const nature = row?.natureOfControl;
+    if (!nature) return;
+    if (nature === 'shareholding') {
+      const path = ekycRowPath('ubos', index, 'percent');
+      const n = pct(row);
+      if (n !== null && n < EKYC_UBO_SHAREHOLDING_MIN && !taken.has(path)) {
+        errors.push({ fieldId: path, message: MSG.uboShareholdingMin });
+      }
+      return;
+    }
+    const path = ekycRowPath('ubos', index, 'natureOfControl');
+    if (hasMajorShareholder && !taken.has(path)) errors.push({ fieldId: path, message: MSG.uboOnlyWithoutShareholder });
+  });
+  return errors;
+}
+
 /** All problems that block submitting a corporate form. Empty = OK. */
 export function validateCorporateKyc(data: CorporateKycData): EkycValidationError[] {
-  return validateBySchema(CORPORATE_KYC_SCHEMA, data);
+  const errors = validateBySchema(CORPORATE_KYC_SCHEMA, data);
+  return [...errors, ...validateUboControl(data?.ubos, errors)];
 }
 
 /**

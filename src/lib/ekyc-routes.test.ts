@@ -363,6 +363,31 @@ describe('POST /api/kyc/[token]/submit', () => {
     expect(ids).not.toContain('companyName');
     expect(ids).not.toContain('website'); // 18 to 20 are optional
   });
+
+  it('rejects the UBO rule (AML team 23.10.2026): shareholding under 25%, a manager next to a 25% shareholder', async () => {
+    seed({ type: 'corporate' });
+    const ubo = (natureOfControl: string, percent: number, fullLegalName: string) => ({
+      fullLegalName,
+      nationality: 'Germany',
+      countryOfResidence: 'United Arab Emirates',
+      percent,
+      natureOfControl,
+      natureOfControlOther: '',
+    });
+    const post = async (ubos: unknown[]) => {
+      const res = await postJson(SUBMIT, 'submit', { formData: { companyName: 'Test FZCO', ubos } });
+      expect(res.status).toBe(400);
+      return (await res.json()).errors as { fieldId: string; message: { en: string } }[];
+    };
+    const low = await post([ubo('shareholding', 24, 'Max Muster')]);
+    expect(low.find((e) => e.fieldId === 'ubos.0.percent')?.message.en).toMatch(/must hold 25% or more/);
+    const both = await post([ubo('shareholding', 30, 'Max Muster'), ubo('manager', 0, 'Erika Muster')]);
+    expect(both.find((e) => e.fieldId === 'ubos.1.natureOfControl')?.message.en).toBe(
+      'Only list this person if no one holds 25% or more of the shares.'
+    );
+    const fine = await post([ubo('manager', 0, 'Erika Muster')]);
+    expect(fine.some((e) => e.fieldId.startsWith('ubos.'))).toBe(false);
+  });
 });
 
 describe('POST /api/kyc/[token]/upload', () => {
